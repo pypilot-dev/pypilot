@@ -19,6 +19,7 @@ pub mod pip;
 pub mod pixi;
 pub mod pixi_compat;
 pub mod pixi_manage;
+pub mod pixi_migrate;
 pub mod platform;
 pub mod probe;
 pub mod project;
