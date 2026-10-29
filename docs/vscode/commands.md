@@ -25,12 +25,14 @@ Every command that changes the environment shows a progress notification and upd
 
 Project-specific commands are hidden from the palette where they cannot apply. They still run from the walkthrough, keybindings and the report panel.
 
-| Command | Shown only when |
-|---|---|
-| Fix CUDA / PyTorch Build | a manifest (`pyproject.toml`, `requirements*.txt`, `pixi.toml`, `environment.yml`) names `torch` or `tensorflow` |
-| Migrate Conda environment.yml to pyproject.toml | an `environment.yml` (or `.yaml`) exists |
-| Install pixi | pixi is not on `PATH` or in `~/.pixi/bin` |
-| Initialize pixi project | a folder is not a pixi project yet |
+| Command | Shown only when | Context key |
+|---|---|---|
+| Fix CUDA / PyTorch Build | a manifest (`pyproject.toml`, `requirements*.txt`, `pixi.toml`, `environment.yml`) names `torch` or `tensorflow` | `pypilot.hasTorch` |
+| Migrate Conda environment.yml to pyproject.toml | an `environment.yml` (or `.yaml`) exists | `pypilot.hasCondaEnv` |
+| Install pixi | pixi is not on `PATH` or in `~/.pixi/bin` | `!pypilot.pixiInstalled` |
+| Initialize pixi project | a folder is not a pixi project yet | `pypilot.hasNonPixiProject` |
+
+The context keys can be used in your own keybindings' `when` clauses too.
 
 ## Tasks
 

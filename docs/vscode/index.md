@@ -76,4 +76,8 @@ The next release stops tracking "latest":
 - Behind a proxy, VS Code's `http.proxy` (or the system proxy) is used; with `http.proxySupport` set to `off`, `HTTPS_PROXY` / `NO_PROXY` are honoured.
 - The **PyPilot** output channel logs which engine is used and which checksum each download matched.
 
+## If the language server stops
+
+VS Code restarts a crashed language server a few times, then gives up. If PyPilot stopped answering (no squiggles, commands that do nothing), for example because its process was killed or you replaced the binary, run **Developer: Reload Window**. The **PyPilot** output channel shows what happened, and <Badge type="tip" text="next" /> `pypilot logs --tail` shows what the engine last ran. See [Troubleshooting](/guide/troubleshooting#the-editor-stopped-responding).
+
 Next: [Commands & tasks](./commands) · [Settings](./settings)

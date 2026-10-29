@@ -1,5 +1,7 @@
 # VS Code settings
 
+Every setting can be set per workspace folder (scope `resource`) except two: `pypilot.helperPath` is a **machine** setting (user settings only, so a cloned repository cannot point VS Code at a binary of its choosing) and `pypilot.engineUpdates` is an **application** setting.
+
 | Setting | Default | Values | Description |
 |---|---|---|---|
 | `pypilot.packageManager` | `"auto"` | `auto`, `uv`, `uv-pip`, `pip`, `pixi` <Badge type="tip" text="next" /> | How environments are built and packages installed. `auto` uses uv when it is installed (and offers to install it), else pip. pixi projects always use pixi. Engine key: [`package_manager`](/reference/configuration#package-manager). |
@@ -15,6 +17,10 @@
 ### pypilot.pixiEnvironment
 
 Names are lowercase letters, digits and dashes; anything else is ignored with a log line. Changing it selects the new environment's interpreter and re-checks the open buffers against its packages.
+
+### pypilot.diagnosticsScope
+
+The engine key is [`diagnostics_scope`](/reference/configuration#diagnostics-scope); what the background scan skips and its limits are listed there. A `pypilot.toml` in the project that sets `diagnostics_scope` wins over this setting.
 
 ## How settings reach the engine <Badge type="tip" text="next" />
 
