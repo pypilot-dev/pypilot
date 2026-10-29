@@ -1,4 +1,4 @@
-PyPilot setup --dry-run — C:\src\demo (uv mode, Python 3.12)
+PyPilot setup --dry-run: C:\src\demo (uv mode, Python 3.12)
   Python 3.12 chosen: dependencies support 3.12; mediapipe caps the upper bound (supports 3.9–3.12).
   • ensure uv: uv 0.13.5 (on PATH)
 ── Plan (nothing was changed) ───────────────────────────

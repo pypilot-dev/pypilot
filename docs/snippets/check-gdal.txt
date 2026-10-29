@@ -1,4 +1,4 @@
-PyPilot check — GDAL (v3.13.3)
+PyPilot check: GDAL (v3.13.3)
 ── Package Details ──────────────────────────────────────
   supported Python  : 3.8–3.15
   requires-python   : >=3.8.0

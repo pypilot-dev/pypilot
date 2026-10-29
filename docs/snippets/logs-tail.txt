@@ -1,7 +1,7 @@
-2026-10-29 13:40:49Z  cli doctor           ok      0.1s  C:\src\demo  [Auto]  21 steps
-2026-10-29 13:40:49Z  cli setup            ok      0.1s  C:\src\demo  [Auto -> UvFull]  23 steps
-2026-10-29 13:40:49Z  cli check            ok      0.1s  C:\src\demo  [Auto]  21 steps
-2026-10-29 13:40:50Z  cli check            FAIL    0.8s  C:\src\demo  [Auto]  21 steps, 17 failed
+2026-10-29 17:07:44Z  cli doctor           ok      0.1s  C:\src\demo  [Auto]  21 steps
+2026-10-29 17:07:44Z  cli setup            ok      0.1s  C:\src\demo  [Auto -> UvFull]  23 steps
+2026-10-29 17:07:45Z  cli check            ok      0.1s  C:\src\demo  [Auto]  21 steps
+2026-10-29 17:07:45Z  cli check            FAIL    1.4s  C:\src\demo  [Auto]  21 steps, 17 failed
     x py -3.12 -c import sys;print('%d.%d	%s'%(sys.version_info[0],sys.version_info[1],sys.executable))  (exit 103, 0.0s)
       or open the Microsoft Store to the requested version.
     x py -3.13 -c import sys;print('%d.%d	%s'%(sys.version_info[0],sys.version_info[1],sys.executable))  (exit 103, 0.0s)
@@ -9,4 +9,4 @@
     x py -3.15 -c import sys;print('%d.%d	%s'%(sys.version_info[0],sys.version_info[1],sys.executable))  (exit 103, 0.0s)
       or open the Microsoft Store to the requested version.
     error: `nosuchpkg-zzqq` is not on PyPI; check the spelling
-2026-10-29 13:40:50Z  cli install          ok      0.0s  C:\src\demo  [Auto -> UvFull]  2 steps
+2026-10-29 17:07:46Z  cli install          ok      0.0s  C:\src\demo  [Auto -> UvFull]  2 steps
