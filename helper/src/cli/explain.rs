@@ -156,7 +156,7 @@ pub fn render_package(e: &PackageExplanation) -> String {
 
     line(format!(
         "{} {} ({})",
-        "PyPilot explain —".bold().cyan(),
+        "PyPilot explain:".bold().cyan(),
         e.name.bold(),
         format!("v{}", e.version).cyan()
     ));
@@ -201,9 +201,9 @@ pub fn render_package(e: &PackageExplanation) -> String {
         let wheels = format!("{:<11}", range(&p.wheel_pythons));
         let supported = format!("{:<11}", range(&p.supported));
         let tags = if p.tags.is_empty() && !p.supported.is_empty() {
-            "— (no wheel: sdist build)".yellow().to_string()
+            "(no wheel: sdist build)".yellow().to_string()
         } else if p.tags.is_empty() {
-            "—".dimmed().to_string()
+            "none".dimmed().to_string()
         } else {
             p.tags.join(" ")
         };
@@ -294,7 +294,7 @@ pub fn render_project(workspace: &Path, e: &ProjectExplanation) -> String {
 
     line(format!(
         "{} {}",
-        "PyPilot explain —".bold().cyan(),
+        "PyPilot explain:".bold().cyan(),
         workspace.display()
     ));
     line(format!("  {:<16}: {}", "platform", e.platform));
@@ -333,7 +333,7 @@ pub fn render_project(workspace: &Path, e: &ProjectExplanation) -> String {
             "  {:<width$}  {:<12} {:<16} {}",
             p.name.bold(),
             p.version,
-            p.requires_python.as_deref().unwrap_or("—"),
+            p.requires_python.as_deref().unwrap_or("not declared"),
             supported.trim_end()
         ));
     }

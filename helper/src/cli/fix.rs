@@ -413,7 +413,7 @@ async fn fix_python<S: MetadataSource>(
     output::progress(
         format,
         format!(
-            "{} — Rebuilding on Python {}. Dependencies support {}.",
+            "{}: rebuilding on Python {}. Dependencies support {}.",
             "PyPilot fix".bold().cyan(),
             format!("{target}").cyan().bold(),
             compat.intersection.to_range_string().green().bold()
@@ -456,7 +456,11 @@ async fn fix_python<S: MetadataSource>(
         } else {
             "✗".red().bold()
         };
-        println!("  {mark} {:<24} — {}", step.name.bold(), step.detail);
+        println!(
+            "  {mark} {:<25} {}",
+            format!("{}:", step.name).bold(),
+            step.detail
+        );
     }
 
     if summary.ok {
@@ -519,8 +523,8 @@ pub async fn install_one(
         anyhow::bail!("install did not finish");
     }
     println!(
-        "{} Installing {}...",
-        "PyPilot install —".bold().cyan(),
+        "{} installing {}...",
+        "PyPilot install:".bold().cyan(),
         package.bold()
     );
     println!(
@@ -536,7 +540,11 @@ pub async fn install_one(
         } else {
             "✗".red().bold()
         };
-        println!("  {mark} {:<24} — {}", step.name.bold(), step.detail);
+        println!(
+            "  {mark} {:<25} {}",
+            format!("{}:", step.name).bold(),
+            step.detail
+        );
     }
     if summary.ok {
         println!(

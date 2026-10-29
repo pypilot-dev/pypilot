@@ -127,7 +127,11 @@ fn print_summary(s: &MigrationSummary) {
             } else {
                 "✗".red().bold()
             };
-            println!("  {mark} {:<24} — {}", step.name.bold(), step.detail);
+            println!(
+                "  {mark} {:<25} {}",
+                format!("{}:", step.name).bold(),
+                step.detail
+            );
         }
     }
     if s.written || s.install.is_some() {

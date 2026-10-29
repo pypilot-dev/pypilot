@@ -55,7 +55,7 @@ pub async fn run<S: MetadataSource>(
     }
 
     println!(
-        "{} — {}",
+        "{}: {}",
         "PyPilot doctor".bold().cyan(),
         workspace.display()
     );

@@ -65,10 +65,10 @@ pub async fn run<S: MetadataSource>(
         if summary.ok {
             return Ok(());
         }
-        anyhow::bail!("setup did not complete — see the steps above");
+        anyhow::bail!("setup did not complete, see the steps above");
     }
     println!(
-        "{} — {} ({})",
+        "{}: {} ({})",
         "PyPilot setup".bold().cyan(),
         workspace.display(),
         if crate::core::pixi::detect(workspace).is_some() {
@@ -97,8 +97,8 @@ pub async fn run<S: MetadataSource>(
             "✗".red().bold()
         };
         println!(
-            "  {mark} {:<24} — {}",
-            step.name.bold(),
+            "  {mark} {:<25} {}",
+            format!("{}:", step.name).bold(),
             truncate(&step.detail, 300)
         );
     }
@@ -121,7 +121,7 @@ pub async fn run<S: MetadataSource>(
         Ok(())
     } else {
         print_pixi_build_advice(workspace, &summary);
-        anyhow::bail!("setup did not complete — see the steps above");
+        anyhow::bail!("setup did not complete, see the steps above");
     }
 }
 
