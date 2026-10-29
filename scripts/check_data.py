@@ -16,6 +16,11 @@ Checks:
   extensions  xformers / bitsandbytes / flash-attn / mamba-ssm / causal-conv1d:
               wheel platforms and torch pin of the newest release vs
               cuda_extensions.json
+  conda-forge every package in conda_forge_packages.json still exists on
+              conda-forge and is built for the platforms the table says (via
+              prefix.dev); a table older than CONDA_FORGE_MAX_AGE_DAYS is
+              stale (regenerate with scripts/gen_conda_forge.py); newer
+              conda-forge versions are reported as info
   python      a released CPython newer than the engine's MAX_MINOR (it would
               call every package unsupported there); plus the newest CPython
               the newest torch ships wheels for (informational)
@@ -42,7 +47,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "helper" / "data"
-FILES = ["nvidia.json", "frameworks.json", "import_map.json", "cuda_extensions.json"]
+FILES = ["nvidia.json", "frameworks.json", "import_map.json", "cuda_extensions.json",
+         "conda_forge_packages.json"]
 
 PYPI = "https://pypi.org/pypi/{}/json"
 PYPI_VERSION = "https://pypi.org/pypi/{}/{}/json"
@@ -50,6 +56,11 @@ TORCH_INDEX_ROOT = "https://download.pytorch.org/whl/"
 TORCH_INDEX_PKG = "https://download.pytorch.org/whl/{}/torch/"
 NVIDIA_NOTES = "https://docs.nvidia.com/cuda/cuda-toolkit-release-notes/index.html"
 CPYTHON_RELEASES = "https://endoflife.date/api/python.json"
+PREFIX_GRAPHQL = "https://prefix.dev/api/graphql"
+CONDA_PLATFORMS = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64", "win-64"]
+# Per-Python build lists go stale slowly (new CPythons, dropped old ones), and
+# checking them costs a query per package, so they are refreshed by age.
+CONDA_FORGE_MAX_AGE_DAYS = 90
 PYVERSION_RS = ROOT / "helper" / "src" / "pypi" / "pyversion.rs"
 OLDEST_CUDA_TAG = 118  # Older indexes are frozen; not worth tracking.
 
@@ -392,6 +403,92 @@ def check_extensions(ext_table: Dict) -> List[Dict]:
     return out
 
 
+def conda_forge_latest(names: List[str]) -> Dict[str, Optional[Dict]]:
+    """conda name -> {version, platforms}, or None when conda-forge lacks it."""
+    out: Dict[str, Optional[Dict]] = {}
+    for i in range(0, len(names), 20):
+        chunk = names[i:i + 20]
+        fields = " ".join(
+            f'p{j}: package(channelName: "conda-forge", name: {json.dumps(n)}) '
+            f"{{ latestVersion {{ version platforms }} }}"
+            for j, n in enumerate(chunk))
+        body = json.dumps({"query": "{ " + fields + " }"}).encode()
+        req = urllib.request.Request(PREFIX_GRAPHQL, data=body, headers={
+            "User-Agent": USER_AGENT, "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            raise NetworkError(f"{PREFIX_GRAPHQL}: {exc}") from exc
+        if data.get("errors"):
+            raise NetworkError(f"{PREFIX_GRAPHQL}: {data['errors']}")
+        for j, n in enumerate(chunk):
+            pkg = data["data"].get(f"p{j}")
+            out[n] = pkg["latestVersion"] if pkg else None
+    return out
+
+
+def tabled_platforms(row: Dict) -> List[str]:
+    return sorted(b["platform"] for b in row["builds"])
+
+
+def current_platforms(row: Dict, info: Dict) -> List[str]:
+    if tabled_platforms(row) == ["noarch"] and "noarch" in info["platforms"]:
+        return ["noarch"]
+    return sorted(p for p in info["platforms"] if p in CONDA_PLATFORMS)
+
+
+def platforms_match(row: Dict, info: Dict) -> bool:
+    return current_platforms(row, info) == tabled_platforms(row)
+
+
+def check_conda_forge(table: Dict) -> List[Dict]:
+    import datetime
+    out = []
+    generated = datetime.date.fromisoformat(table["generated"])
+    age = (datetime.date.today() - generated).days
+    regen = "regenerate with `python scripts/gen_conda_forge.py`"
+    if age > CONDA_FORGE_MAX_AGE_DAYS:
+        out.append(result("conda-forge", STALE,
+                          f"conda_forge_packages.json was generated {age} days ago "
+                          f"(limit {CONDA_FORGE_MAX_AGE_DAYS}); {regen}", age_days=age))
+    rows = table["packages"]
+    latest = conda_forge_latest(sorted({r["conda"] for r in rows}))
+    # The batched API answer has been seen to under-report platforms under
+    # load, so a row that looks changed is asked about again on its own.
+    def recheck(name: str) -> Optional[Dict]:
+        return conda_forge_latest([name]).get(name)
+
+    gone, moved, newer = [], [], []
+    for r in rows:
+        info = latest.get(r["conda"])
+        if info is None or not platforms_match(r, info):
+            info = recheck(r["conda"])
+        if info is None:
+            gone.append(r["pypi"])
+            continue
+        if not platforms_match(r, info):
+            moved.append(f"{r['pypi']}: {tabled_platforms(r)} -> {current_platforms(r, info)}")
+        if vkey(info["version"]) > vkey(r["version"]):
+            newer.append(f"{r['pypi']} {r['version']} -> {info['version']}")
+    if gone:
+        out.append(result("conda-forge", STALE,
+                          f"no longer on conda-forge: {', '.join(gone)}; {regen}", missing=gone))
+    if moved:
+        out.append(result("conda-forge", STALE,
+                          f"{len(moved)} package(s) changed platforms; {regen}", problems=moved))
+    if not gone and not moved:
+        out.append(result("conda-forge", OK,
+                          f"{len(rows)} packages exist with the tabled platforms "
+                          f"(table {age} days old)"))
+    if newer:
+        out.append(result("conda-forge", INFO,
+                          f"{len(newer)} package(s) have newer conda-forge releases "
+                          f"(versions are informational; refreshed on regeneration)",
+                          problems=newer))
+    return out
+
+
 def check_cpython() -> List[Dict]:
     m = re.search(r"pub const MAX_MINOR: u8 = (\d+);", PYVERSION_RS.read_text(encoding="utf-8"))
     if not m:
@@ -457,6 +554,7 @@ def run_checks() -> List[Dict]:
     fw = tables.get("frameworks.json")
     nvidia = tables.get("nvidia.json")
     ext = tables.get("cuda_extensions.json")
+    conda = tables.get("conda_forge_packages.json")
 
     def guarded(name: str, fn, *args) -> None:
         try:
@@ -480,6 +578,8 @@ def run_checks() -> List[Dict]:
         guarded("companions", check_companions, fw)
     if ext is not None:
         guarded("extensions", check_extensions, ext)
+    if conda is not None:
+        guarded("conda-forge", check_conda_forge, conda)
     guarded("python", check_cpython)
     if torch_pypi is not None:
         guarded("python", check_python, torch_pypi)

@@ -415,10 +415,11 @@ def gql_str(s: str) -> str:
 
 def latest_many(names: List[str]) -> Dict[str, Optional[Dict]]:
     """name -> {version, platforms} (None when conda-forge has no such package).
-    Batched with aliases, 40 names per request."""
+    Batched with aliases, 20 names per request (larger batches have been seen
+    to under-report platforms)."""
     out: Dict[str, Optional[Dict]] = {}
-    for i in range(0, len(names), 40):
-        chunk = names[i:i + 40]
+    for i in range(0, len(names), 20):
+        chunk = names[i:i + 20]
         fields = " ".join(
             f'p{j}: package(channelName: "conda-forge", name: {gql_str(n)}) '
             f"{{ name latestVersion {{ version platforms }} }}"
