@@ -32,7 +32,18 @@ pub async fn run<S: MetadataSource>(
                 None => None,
             };
             let report = DoctorReport::new(workspace, settings.package_manager, &a, pixi.as_ref());
-            output::print_json("doctor", report.ok(), &report)?;
+            // The text report's `data tables` line, as `data_tables`.
+            #[derive(serde::Serialize)]
+            struct WithData<'a> {
+                #[serde(flatten)]
+                report: &'a DoctorReport<'a>,
+                data_tables: String,
+            }
+            let doc = WithData {
+                report: &report,
+                data_tables: crate::matrix::status::doctor_line(settings.data_refresh_days),
+            };
+            output::print_json("doctor", report.ok(), &doc)?;
             crate::core::rescan::notify(workspace, crate::core::rescan::Kind::Doctor);
             return Ok(());
         }
