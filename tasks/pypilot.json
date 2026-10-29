@@ -55,6 +55,15 @@
     "reveal": "always"
   },
   {
+    "label": "pypilot: explain python range (what blocks each version)",
+    "command": "pypilot",
+    "args": ["explain"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
     "label": "pypilot: fix python version",
     "command": "pypilot",
     "args": ["fix", "python"],

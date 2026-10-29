@@ -6,6 +6,7 @@
 
 mod check;
 mod doctor;
+mod explain;
 mod fix;
 mod migrate_conda;
 mod setup;
@@ -49,6 +50,12 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
             let result = fix::install_one(&workspace, &settings, &package).await;
             crate::core::rescan::notify(&workspace, crate::core::rescan::Kind::Setup);
             result
+        }
+
+        "explain" => {
+            let package = positional(args);
+            let json = args.iter().any(|a| a == "--json");
+            explain::run(&workspace, &source, package.as_deref(), json).await
         }
 
         "update-data" => update_data::run().await,
