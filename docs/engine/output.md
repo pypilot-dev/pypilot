@@ -1,6 +1,6 @@
-# Machine-readable output <Badge type="tip" text="next" />
+# Machine-readable output <Badge type="tip" text="1.3" />
 
-On `main`, every CLI mode except `lsp` and `completions` takes `--json`, and `doctor` and `check` take `--markdown` (alias `--md`). `--format=json` and `--format=markdown` work too; given both, JSON wins. All of it ships in the next engine release; release 1.2.2 prints text only.
+Since engine 1.3.0, every CLI mode except `lsp` and `completions` takes `--json`, and `doctor` and `check` take `--markdown` (alias `--md`). `--format=json` and `--format=markdown` work too; given both, JSON wins. Engine 1.2.2 and older print text only.
 
 ```bash
 pypilot doctor --json > report.json
@@ -17,7 +17,7 @@ The human-readable text of the other modes is for people and may change between 
 Every document starts with the same three keys, then the command's own fields:
 
 ```json
-{ "pypilot": "1.2.2", "command": "check", "ok": true }
+{ "pypilot": "1.3.0", "command": "check", "ok": true }
 ```
 
 | Key | Meaning |
@@ -58,7 +58,7 @@ Every document starts with the same three keys, then the command's own fields:
 With `--dry-run`, `setup`, `install`, `fix python`, `fix cuda` and `doctor --fix` print a plan instead of their usual document:
 
 ```json
-{ "pypilot": "1.2.2", "command": "setup", "ok": true, "dry_run": true,
+{ "pypilot": "1.3.0", "command": "setup", "ok": true, "dry_run": true,
   "plan": { "mode": "uv_full", "python": "3.12", "why": "…",
             "steps": [{ "name", "command": [argv], "writes": [paths], "why" }],
             "notes": [{ "name", "ok", "detail" }], "blocked": null } }
@@ -99,9 +99,9 @@ With `--dry-run`, `setup`, `install`, `fix python`, `fix cuda` and `doctor --fix
     ]
   },
   "ok": true,
-  "pypilot": "1.2.2",
+  "pypilot": "1.3.0",
   "target": "x86_64-pc-windows-msvc",
-  "version": "1.2.2"
+  "version": "1.3.0"
 }
 ```
 
@@ -121,7 +121,7 @@ pypilot doctor --json > pypilot.json
 python -c "import json,sys; sys.exit(0 if json.load(open('pypilot.json'))['ok'] else 1)"
 ```
 
-`doctor` itself always exits `0` when it ran, so the check reads `ok`. Note that `pypilot-cli` 1.2.2 pins engine 1.2.2, which has no `--json` yet; this needs the next release of both. With the next `pypilot-cli`, `PYPILOT_ENGINE_VERSION=vX.Y.Z` can also select a newer engine release (see [environment variables](/python/#environment-variables)).
+`doctor` itself always exits `0` when it ran, so the check reads `ok`. This needs `pypilot-cli` 1.3.0 or newer, which runs engine 1.3.0; `pypilot-cli` 1.2.2 pins engine 1.2.2, which has no `--json`. `PYPILOT_ENGINE_VERSION=vX.Y.Z` can also select a newer engine release (see [environment variables](/python/#environment-variables)).
 
 From Python, `pypilot.run([...], capture_output=True).json()` parses the document for you; see the [Python API](/python/api).
 

@@ -10,7 +10,7 @@ Every finding PyPilot can raise, as `doctor` prints it and as the editor shows i
 | Python X.Y is not supported by this project | Error | **Fix environment** / `pypilot fix python` |
 | Dependencies conflict on Python version | Error | Manual: no single Python works. `pypilot explain` shows what blocks each version |
 | Could not resolve `name` | Warning | Manual: a typo or a private package. PyPI answered that it has no such project, or no release matches the pin |
-| Could not reach PyPI for some dependencies | Info | <Badge type="tip" text="next" /> Re-run online. The lookup never got an answer (offline, a proxy, a PyPI outage), so those packages are listed as *not checked* and constrain nothing; the supported range can look wider than it is |
+| Could not reach PyPI for some dependencies | Info | <Badge type="tip" text="1.3" /> Re-run online. The lookup never got an answer (offline, a proxy, a PyPI outage), so those packages are listed as *not checked* and constrain nothing; the supported range can look wider than it is |
 | Will compile from source | Warning | Manual: no wheel here, the sdist will be built |
 | … cannot be installed on *platform* | Error | Manual: the release has no files for this platform |
 | uv could not resolve dependencies for Python X.Y | Warning | Manual: `uv --dry-run` found a conflict metadata cannot see (a yanked release, a transitive pin) |
@@ -41,16 +41,16 @@ See [GPU & CUDA](/guide/gpu-cuda).
 |---|---|
 | Pixi environment not installed yet | Warning |
 | The pixi environment has no Python | Warning |
-| This pixi project has no pixi.lock yet <Badge type="tip" text="next" /> | Info |
-| pixi.lock is out of date with *manifest* <Badge type="tip" text="next" /> | Warning |
-| pixi.lock is out of date and *manifest* no longer solves <Badge type="tip" text="next" /> | Error |
-| pixi environment `name` does not exist <Badge type="tip" text="next" /> | Warning |
-| pixi environments run different Python versions <Badge type="tip" text="next" /> | Info |
-| pixi environment `name` runs Python X.Y, which its PyPI dependencies do not support <Badge type="tip" text="next" /> | Error |
+| This pixi project has no pixi.lock yet <Badge type="tip" text="1.3" /> | Info |
+| pixi.lock is out of date with *manifest* <Badge type="tip" text="1.3" /> | Warning |
+| pixi.lock is out of date and *manifest* no longer solves <Badge type="tip" text="1.3" /> | Error |
+| pixi environment `name` does not exist <Badge type="tip" text="1.3" /> | Warning |
+| pixi environments run different Python versions <Badge type="tip" text="1.3" /> | Info |
+| pixi environment `name` runs Python X.Y, which its PyPI dependencies do not support <Badge type="tip" text="1.3" /> | Error |
 
 See [PyPilot in pixi projects](/pixi/projects).
 
-## The pixi advisory <Badge type="tip" text="next" />
+## The pixi advisory <Badge type="tip" text="1.3" />
 
 | Finding | Severity |
 |---|---|
@@ -62,7 +62,7 @@ Each carries `pypilot migrate-to-pixi` as its fix. See [the advisory](/pixi/advi
 
 ## Import diagnostics (editor)
 
-Shown on the import line, with `source: "pypilot"`, in open files or <Badge type="tip" text="next" /> in every file with [`diagnostics_scope = "workspace"`](./configuration#diagnostics-scope):
+Shown on the import line, with `source: "pypilot"`, in open files or <Badge type="tip" text="1.3" /> in every file with [`diagnostics_scope = "workspace"`](./configuration#diagnostics-scope):
 
 | Message | Severity | Quick fix |
 |---|---|---|
@@ -70,7 +70,7 @@ Shown on the import line, with `source: "pypilot"`, in open files or <Badge type
 | `` `pkg` is not installed, and this project has no virtual environment yet. `` | Warning | Create the environment on Python X.Y, then install |
 | `` `pkg` has no wheels for Python X.Y. It supports A–B. `` | Error | Recreate the environment on a supported Python, reinstall, then install |
 | `` The installed `pkg` V has no `attr`. It provides: … `` | Error | None: which version to pin is your call |
-| `` PyPI has no project named `pkg`. … `` | Warning | None on purpose: installing a name PyPI does not know is how a typo becomes a supply-chain incident. <Badge type="tip" text="next" /> Only a real 404 from PyPI raises it; when PyPI cannot be reached, the import gets no diagnostic |
+| `` PyPI has no project named `pkg`. … `` | Warning | None on purpose: installing a name PyPI does not know is how a typo becomes a supply-chain incident. <Badge type="tip" text="1.3" /> Only a real 404 from PyPI raises it; when PyPI cannot be reached, the import gets no diagnostic |
 | `` `pkg`: … `` (no files for this platform) | Error | None |
 | CUDA extension problems (see above) | Error / Warning | None: a plain install is what would fail |
 

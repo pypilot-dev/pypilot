@@ -27,7 +27,7 @@ uv tool install pypilot-cli
 pipx install pypilot-cli
 ```
 
-The package installs a `pypilot` command. On first run it downloads the engine release it was built for into your cache directory. Supports Python 3.8 and later. More in [Python package](/python/).
+The package installs a `pypilot` command. On Windows x64, Linux x64 (glibc 2.34+) and macOS the wheel already contains the engine release it pins (since 1.3.0); elsewhere it downloads that release into your cache directory on first run and verifies it. Supports Python 3.8 and later. More in [Python package](/python/).
 
 ## cargo (from source)
 

@@ -17,7 +17,7 @@ Per key, later layers win:
 
 1. Built-in defaults
 2. Global `config.toml`
-3. The editor's settings (VS Code `pypilot.*`, sent over LSP) <Badge type="tip" text="next" />
+3. The editor's settings (VS Code `pypilot.*`, sent over LSP) <Badge type="tip" text="1.3" />
 4. The project's `pypilot.toml`
 
 The project file wins because it is shared with everyone working on the project. An editor value equal to the built-in default counts as *unset* (VS Code sends every setting, defaults included, and they must not mask your global file). A key absent from a layer never clears a value from an earlier one.
@@ -28,7 +28,7 @@ Command-line flags (`--path`, `--pixi-env`) apply to one run and override all of
 
 | Editor | How its settings reach the engine |
 |---|---|
-| VS Code | `pypilot.*` settings, sent over LSP (layer 3) <Badge type="tip" text="next" />. VS Code 1.2.1 sends none, so only the TOML files apply |
+| VS Code | `pypilot.*` settings, sent over LSP (layer 3) <Badge type="tip" text="1.3" />. VS Code 1.2.1 and older send none, so only the TOML files apply |
 | Zed | The extension itself sends no PyPilot settings: use `.zed/pypilot.toml`, `pypilot.toml` or the global file |
 | Neovim, Helix, Emacs | Whatever the client config sends as initialization options or workspace configuration; see [Other editors](./editors) |
 
@@ -56,7 +56,7 @@ How PyPilot builds environments and installs packages.
 | `uv` | A uv project: `pyproject.toml` + `uv.lock`, `uv init` / `uv add` / `uv sync`. Can install the Python it needs. |
 | `uv-pip` | uv's pip interface on `requirements.txt`: `uv venv` + `uv pip install` + freeze. |
 | `pip` | `python -m venv` + pip, then `pip freeze > requirements.txt`. Never downloads interpreters: it names the Python to install instead. |
-| `pixi` <Badge type="tip" text="next" /> | Manage the project with pixi. On a project without a pixi manifest, setup first writes `pixi.toml` from the dependencies (as `pypilot migrate-to-pixi --write`), then runs `pixi install`. |
+| `pixi` <Badge type="tip" text="1.3" /> | Manage the project with pixi. On a project without a pixi manifest, setup first writes `pixi.toml` from the dependencies (as `pypilot migrate-to-pixi --write`), then runs `pixi install`. |
 
 A pixi project (a `pixi.toml`, or `[tool.pixi.workspace]` in `pyproject.toml`) is always managed with pixi, whatever this says. VS Code: `pypilot.packageManager`.
 
@@ -78,11 +78,11 @@ VS Code: `pypilot.notifications`.
 
 How often, in days, the bundled data tables are refreshed from the repository (default `7`). `0` keeps PyPilot fully offline for tables; `pypilot update-data` still refreshes on demand. The same TTL caches the PyPI-to-conda mapping used by the pixi migration. VS Code: `pypilot.dataRefreshDays`.
 
-### pixi_environment <Badge type="tip" text="next" />
+### pixi_environment <Badge type="tip" text="1.3" />
 
 Which pixi environment is the project's environment (`default` unless set): the one diagnostics, the installed-package scan and GPU checks look at, and that setup installs. Names are lowercase letters, digits and dashes; blank means unset. Ignored outside pixi projects. Override per run with `--pixi-env <name>`. VS Code: `pypilot.pixiEnvironment`.
 
-### diagnostics_scope <Badge type="tip" text="next" /> {#diagnostics-scope}
+### diagnostics_scope <Badge type="tip" text="1.3" /> {#diagnostics-scope}
 
 Which files get import diagnostics in the editor.
 
@@ -97,7 +97,7 @@ The scan skips hidden directories (`.venv`, `.pixi`, `.git`, …), `venv`, `env`
 
 Written by **Never for this project** into `.zed/pypilot.toml`. While `true`, the workspace notification is not shown for this project. Delete the line to undo.
 
-## Editor settings over LSP <Badge type="tip" text="next" /> {#editor-settings-over-lsp}
+## Editor settings over LSP <Badge type="tip" text="1.3" /> {#editor-settings-over-lsp}
 
 Editors may send the same settings as JSON, in `initializationOptions` and in `workspace/didChangeConfiguration`. Keys are camelCase, either at the top level or under `pypilot`:
 
@@ -108,7 +108,7 @@ Editors may send the same settings as JSON, in `initializationOptions` and in `w
 | `autoCheckOnOpen` | `auto_check_on_open` |
 | `dataRefreshDays` | `data_refresh_days` |
 | `pixiEnvironment` | `pixi_environment` |
-| `diagnosticsScope` <Badge type="tip" text="next" /> | `diagnostics_scope` (editor values: `openFiles`, `workspace`) |
+| `diagnosticsScope` <Badge type="tip" text="1.3" /> | `diagnostics_scope` (editor values: `openFiles`, `workspace`) |
 
 Values that do not parse are ignored with a log line. Keys the engine does not know (`autoSelectVenv` and other client-only settings) are ignored. The engine never asks for settings with `workspace/configuration`; the editor must push them. See [LSP protocol](./lsp#configuration).
 

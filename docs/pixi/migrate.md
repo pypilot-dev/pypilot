@@ -1,4 +1,4 @@
-# Migrating to pixi <Badge type="tip" text="next" />
+# Migrating to pixi <Badge type="tip" text="1.3" />
 
 Two commands, one for each starting point:
 

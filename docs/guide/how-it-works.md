@@ -6,8 +6,8 @@
 
 - The **engine** (`pypilot`, Rust) does everything: probing the machine, parsing dependency files, fetching PyPI metadata, the version arithmetic, GPU matching, running uv/pip/pixi, and the language server.
 - The **Zed extension** is a WebAssembly shim. It uses a `pypilot` on `PATH` if it is new enough, otherwise downloads the release asset for your platform from GitHub, and registers it with Zed as a language server for Python.
-- The **VS Code extension** resolves the engine the same way (PATH, then its own managed copy, then a download), starts it with `pypilot lsp`, and adds VS Code surfaces on top.
-- **pypilot-cli** on PyPI downloads the engine release it pins and forwards your command line to it.
+- The **VS Code extension** resolves the engine much the same way (`pypilot.helperPath`, then the newer of `PATH` and its own managed copy, then a verified download of the engine version it pins), starts it with `pypilot lsp`, and adds VS Code surfaces on top.
+- **pypilot-cli** on PyPI runs the engine release it pins (bundled in its platform wheels, otherwise downloaded and verified) and forwards your command line to it.
 
 ## The assessment
 
@@ -25,9 +25,9 @@ When you open a project (with `auto_check_on_open = true`, the default) or run `
 
 A wheel counts for a Python only if pip would install it into the interpreter uv or python.org gives you on this machine:
 
-- **Platform.** Linux x86-64 and arm64, macOS Intel and Apple Silicon, Windows x64 and arm64 each match their own tags, plus `any`. On Linux, <Badge type="tip" text="next" /> manylinux and musllinux are kept apart (a glibc system never counts a musllinux wheel); on Windows x64, <Badge type="tip" text="next" /> `win32` (32-bit) wheels do not count.
-- **Build.** <Badge type="tip" text="next" /> Free-threaded wheels (`cp314t`, `abi3t`) do not count for the default, GIL build.
-- **`requires_python`.** A minor counts when any of its patch releases is allowed, so `>=3.8.1` <Badge type="tip" text="next" /> still allows 3.8, and `!=3.9.0,!=3.9.1,>=3.9` still allows 3.9.
+- **Platform.** Linux x86-64 and arm64, macOS Intel and Apple Silicon, Windows x64 and arm64 each match their own tags, plus `any`. On Linux, <Badge type="tip" text="1.3" /> manylinux and musllinux are kept apart (a glibc system never counts a musllinux wheel); on Windows x64, <Badge type="tip" text="1.3" /> `win32` (32-bit) wheels do not count.
+- **Build.** <Badge type="tip" text="1.3" /> Free-threaded wheels (`cp314t`, `abi3t`) do not count for the default, GIL build.
+- **`requires_python`.** A minor counts when any of its patch releases is allowed, so `>=3.8.1` <Badge type="tip" text="1.3" /> still allows 3.8, and `!=3.9.0,!=3.9.1,>=3.9` still allows 3.9.
 
 The engine's tests run every platform on any machine, from recorded PyPI releases whose wheel sets differ by platform.
 

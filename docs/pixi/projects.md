@@ -36,21 +36,21 @@ When `pixi install` fails, PyPilot turns the error into the same plain explanati
 
 ## What doctor checks
 
-In release 1.2.2 doctor reports an environment that is not installed yet or has no Python. The checks below marked <Badge type="tip" text="next" /> ship in the next release.
+Engine 1.2.2 and older report an environment that is not installed yet or has no Python. The checks below marked <Badge type="tip" text="1.3" /> are new in engine 1.3.0.
 
 The **pixi** section lists the target platforms, the lock status, and every environment with its features, Python and dependencies (conda and PyPI separately).
 
-- <Badge type="tip" text="next" /> **Every environment.** An environment is its features plus the default feature (unless it says `no-default-feature = true`); PyPilot merges them the way pixi does, so `python = ">=3.11"` at the top and `python = "3.11.*"` in a feature give 3.11, and `3.12.*` with `3.11.*` cannot be solved. Each environment's PyPI dependencies are checked against its Python.
-- <Badge type="tip" text="next" /> **Different Pythons.** Environments on different Python versions get an Info finding, in case that was not a deliberate test matrix.
-- <Badge type="tip" text="next" /> **The lock.** `pixi lock --check --dry-run` (which writes nothing) tells whether `pixi.lock` still matches the manifest. A stale lock gets a warning with the changes re-locking would make; a manifest that no longer solves gets an error with pixi's reason. A missing lock gets an Info finding.
-- <Badge type="tip" text="next" /> **Every platform.** pixi solves the lock for every platform in `[workspace] platforms`, so a PyPI dependency with no wheel for one of them breaks `pixi lock` and `pixi install` on every machine, including yours. PyPilot catches that from PyPI metadata before pixi does.
+- <Badge type="tip" text="1.3" /> **Every environment.** An environment is its features plus the default feature (unless it says `no-default-feature = true`); PyPilot merges them the way pixi does, so `python = ">=3.11"` at the top and `python = "3.11.*"` in a feature give 3.11, and `3.12.*` with `3.11.*` cannot be solved. Each environment's PyPI dependencies are checked against its Python.
+- <Badge type="tip" text="1.3" /> **Different Pythons.** Environments on different Python versions get an Info finding, in case that was not a deliberate test matrix.
+- <Badge type="tip" text="1.3" /> **The lock.** `pixi lock --check --dry-run` (which writes nothing) tells whether `pixi.lock` still matches the manifest. A stale lock gets a warning with the changes re-locking would make; a manifest that no longer solves gets an error with pixi's reason. A missing lock gets an Info finding.
+- <Badge type="tip" text="1.3" /> **Every platform.** pixi solves the lock for every platform in `[workspace] platforms`, so a PyPI dependency with no wheel for one of them breaks `pixi lock` and `pixi install` on every machine, including yours. PyPilot catches that from PyPI metadata before pixi does.
 - **Not installed yet.** An environment that was never installed gets a warning pointing at `pixi install`.
 
 A project with a second environment pinned to 3.12, after editing the manifest:
 
 <<< @/snippets/doctor-pixi-multi.txt{text}
 
-## Choosing the environment <Badge type="tip" text="next" />
+## Choosing the environment <Badge type="tip" text="1.3" />
 
 ```toml
 # pypilot.toml

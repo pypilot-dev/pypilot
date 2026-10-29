@@ -1,4 +1,4 @@
-# The "pixi can help here" advisory <Badge type="tip" text="next" />
+# The "pixi can help here" advisory <Badge type="tip" text="1.3" />
 
 Outside pixi projects, PyPilot watches for walls that pip and uv cannot climb and conda-forge can. When it finds one it says so, explains why, and points at `pypilot migrate-to-pixi`. It only suggests; nothing changes until you run the migration.
 

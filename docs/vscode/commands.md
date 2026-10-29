@@ -12,16 +12,16 @@
 | PyPilot: Install Package… | `pypilot.install` | Asks for a package, installs it and records it in the manifest. |
 | PyPilot: Update Bundled Data Tables | `pypilot.updateData` | Refreshes the CUDA, framework and import tables now. |
 | PyPilot: Migrate Conda environment.yml to pyproject.toml | `pypilot.migrateConda` | Same as `pypilot migrate-conda`. |
-| PyPilot: Open Environment Report Panel | `pypilot.openReport` | Runs the health check and opens the report (in the webview panel <Badge type="tip" text="next" />). |
+| PyPilot: Open Environment Report Panel | `pypilot.openReport` | Runs the health check and opens the report (in the webview panel <Badge type="tip" text="1.3" />). |
 | PyPilot: Install uv Globally | `pypilot.installUv` | Installs uv so it is available outside this workspace too. |
-| PyPilot: Check for Helper Updates | `pypilot.updateHelper` | Compares the engine against the latest GitHub release (next release: offers the pinned version when it is newer than the engine in use; with `pypilot.engineUpdates: "latest"` also newer releases). |
+| PyPilot: Check for Helper Updates | `pypilot.updateHelper` | Offers the pinned engine version when it is newer than the engine in use; with `pypilot.engineUpdates: "latest"`, also newer releases. (1.2.1 and older compare against the latest GitHub release.) |
 | PyPilot: Use Project Environment (.venv / pixi) | `pypilot.useProjectVenv` | Makes the project environment the active interpreter. |
-| PyPilot: Install pixi <Badge type="tip" text="next" /> | `pypilot.installPixiCli` | Installs pixi with its official installer, through the engine; with an older engine it offers to run the installer in a terminal. |
-| PyPilot: Initialize pixi project <Badge type="tip" text="next" /> | `pypilot.initPixiProject` | Opens the engine's full `pixi.toml` preview beside the editor, then asks *write pixi.toml as shown in the preview?* (**Write pixi.toml** or **Write and run pixi install**). Nothing is written before you choose. |
+| PyPilot: Install pixi <Badge type="tip" text="1.3" /> | `pypilot.installPixiCli` | Installs pixi with its official installer, through the engine; with an older engine it offers to run the installer in a terminal. |
+| PyPilot: Initialize pixi project <Badge type="tip" text="1.3" /> | `pypilot.initPixiProject` | Opens the engine's full `pixi.toml` preview beside the editor, then asks *write pixi.toml as shown in the preview?* (**Write pixi.toml** or **Write and run pixi install**). Nothing is written before you choose. |
 
 Every command that changes the environment shows a progress notification and updates the status bar from the result; a failed setup is reported as a failure.
 
-### Hidden where they do not apply <Badge type="tip" text="next" />
+### Hidden where they do not apply <Badge type="tip" text="1.3" />
 
 Project-specific commands are hidden from the palette where they cannot apply. They still run from the walkthrough, keybindings and the report panel.
 

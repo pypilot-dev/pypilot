@@ -3,7 +3,7 @@
 `pypilot lsp` is a standard language server: JSON-RPC over stdio, LSP 3.17. Any LSP client can run it; Zed and VS Code do. This page is a guided summary.
 
 ::: info The reference
-<Badge type="tip" text="next" /> The authoritative protocol reference lives next to the code: [`helper/src/lsp/PROTOCOL.md`](https://github.com/pypilot-dev/pypilot/blob/main/helper/src/lsp/PROTOCOL.md). It is kept in step with `helper/src/lsp/` and `helper/src/settings.rs`. If this page and PROTOCOL.md disagree, PROTOCOL.md wins.
+<Badge type="tip" text="1.3" /> The authoritative protocol reference lives next to the code: [`helper/src/lsp/PROTOCOL.md`](https://github.com/pypilot-dev/pypilot/blob/main/helper/src/lsp/PROTOCOL.md). It is kept in step with `helper/src/lsp/` and `helper/src/settings.rs`. If this page and PROTOCOL.md disagree, PROTOCOL.md wins.
 :::
 
 ## Launching
@@ -27,9 +27,9 @@ No arguments and no environment variables. Use the `pypilot` that `pypilot-cli`,
 | `codeActionProvider` | `true` |
 | `executeCommandProvider.commands` | the ids in [Commands](#commands) |
 
-Handled notifications: `initialized`, `textDocument/didOpen`, `didChange`, `didSave`, `didClose`, `workspace/didChangeConfiguration` and <Badge type="tip" text="next" /> `workspace/didChangeWatchedFiles`.
+Handled notifications: `initialized`, `textDocument/didOpen`, `didChange`, `didSave`, `didClose`, `workspace/didChangeConfiguration` and <Badge type="tip" text="1.3" /> `workspace/didChangeWatchedFiles`.
 
-Requests the server sends: `window/showMessageRequest`, `window/showDocument`, and <Badge type="tip" text="next" /> `client/registerCapability` (only to watch `**/*.py` and `**/*.ipynb`, only with `diagnosticsScope = "workspace"`, and only when the client declares `workspace.didChangeWatchedFiles.dynamicRegistration`). Notifications it sends: `textDocument/publishDiagnostics`, `window/showMessage`, `window/logMessage`. It never sends `workspace/configuration`: settings must be pushed.
+Requests the server sends: `window/showMessageRequest`, `window/showDocument`, and <Badge type="tip" text="1.3" /> `client/registerCapability` (only to watch `**/*.py` and `**/*.ipynb`, only with `diagnosticsScope = "workspace"`, and only when the client declares `workspace.didChangeWatchedFiles.dynamicRegistration`). Notifications it sends: `textDocument/publishDiagnostics`, `window/showMessage`, `window/logMessage`. It never sends `workspace/configuration`: settings must be pushed.
 
 ## Documents
 
@@ -58,7 +58,7 @@ Only `file:` URIs ending in `.py` are analyzed, plus VS Code notebook cells (sch
 
 When an import resolves to a different distribution, the message says `` `opencv-python` (provides `cv2`) ``. A broken environment (its Python is gone) publishes no import diagnostics; the workspace notification reports it instead.
 
-<Badge type="tip" text="next" /> **Offline.** "PyPI has no project named …" needs a real 404 from PyPI. When PyPI cannot be reached (offline, a proxy, an outage), imports whose metadata is not cached get no diagnostic at all, rather than a false "check the spelling". Engine 1.2.2 reported every failed lookup as unknown to PyPI.
+<Badge type="tip" text="1.3" /> **Offline.** "PyPI has no project named …" needs a real 404 from PyPI. When PyPI cannot be reached (offline, a proxy, an outage), imports whose metadata is not cached get no diagnostic at all, rather than a false "check the spelling". Engine 1.2.2 reported every failed lookup as unknown to PyPI.
 
 Each diagnostic carries its fix in `data`, so code actions never re-analyze:
 
@@ -68,7 +68,7 @@ Each diagnostic carries its fix in `data`, so code actions never re-analyze:
 
 `action.kind` is `install`, `create` (with `python`), `recreate` (with `python`, `reinstall_count`) or `none`. `pixi` is present only when `true`. The user-facing list is on [What PyPilot reports](./checks#import-diagnostics-editor).
 
-### Workspace diagnostics <Badge type="tip" text="next" /> {#workspace-diagnostics}
+### Workspace diagnostics <Badge type="tip" text="1.3" /> {#workspace-diagnostics}
 
 With `diagnosticsScope = "workspace"` the server also scans the project's `.py` files and notebooks on disk, off the main task, and publishes the same diagnostics for every file that is **not open**:
 
@@ -103,8 +103,8 @@ Titles look like ``Install `numpy` ``, `Install 3 packages: a, b, c`, ``Create e
 | `pypilot.installPackage` | `[package, …]` | `{ ok }` | Installs one or more packages in one step; names are validated |
 | `pypilot.recreateWithPython` | `[python, package, …]` | `{ ok }` | Builds (or rebuilds) the environment on `python`, then installs every package |
 | `pypilot.installUvGlobally` (alias `pypilot.installUv`) | — | `{ ok }` | Installs uv; `true` if already present |
-| `pypilot.installPixi` <Badge type="tip" text="next" /> | — | `{ ok }` | Runs pixi's official installer |
-| `pypilot.migrateToPixi` <Badge type="tip" text="next" /> | `[{ write?: bool, install?: bool }]` | see below | Previews or writes `pixi.toml` |
+| `pypilot.installPixi` <Badge type="tip" text="1.3" /> | — | `{ ok }` | Runs pixi's official installer |
+| `pypilot.migrateToPixi` <Badge type="tip" text="1.3" /> | `[{ write?: bool, install?: bool }]` | see below | Previews or writes `pixi.toml` |
 
 `pypilot.migrateToPixi`:
 
@@ -144,7 +144,7 @@ Settings arrive in `initializationOptions` (flat, or nested under `pypilot`) and
 | `autoCheckOnOpen` | bool | `true` |
 | `dataRefreshDays` | integer | `7` |
 | `pixiEnvironment` | pixi environment name (`[a-z0-9-]+`) | `default` |
-| `diagnosticsScope` <Badge type="tip" text="next" /> | `openFiles`, `workspace` | `openFiles` |
+| `diagnosticsScope` <Badge type="tip" text="1.3" /> | `openFiles`, `workspace` | `openFiles` |
 
 They sit between the global config file and the project file; values equal to the default count as unset; bad values are ignored with a line on stderr. **Each message replaces the whole editor layer**, so send all keys the same way. A configuration change re-checks every open buffer and starts, re-runs or clears the workspace scan. Details: [Configuration](./configuration#editor-settings-over-lsp).
 

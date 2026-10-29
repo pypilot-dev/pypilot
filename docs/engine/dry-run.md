@@ -1,4 +1,4 @@
-# Dry runs <Badge type="tip" text="next" />
+# Dry runs <Badge type="tip" text="1.3" />
 
 Every command that changes your environment can show what it would do first. `--dry-run` prints the plan: each step in order, its exact command line, the files it would create or change, and why, under the solver's reason for the chosen Python. Nothing is executed, written or downloaded.
 
@@ -11,7 +11,7 @@ pypilot doctor --fix --dry-run      # the report, then the plan "Fix environment
 pypilot setup --dry-run --json      # the plan as JSON
 ```
 
-On `main` these ship in the next engine release; 1.2.2 has no `--dry-run`.
+`--dry-run` needs engine 1.3.0 or newer; 1.2.2 and older do not have it.
 
 ## What a plan shows
 

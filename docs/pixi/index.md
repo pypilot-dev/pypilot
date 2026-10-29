@@ -3,7 +3,7 @@
 [pixi](https://pixi.sh) is a package manager that installs from conda-forge and PyPI into a per-project environment, with a lock file. PyPilot supports pixi projects fully, and suggests pixi when a project hits a wall pip and uv cannot climb.
 
 ::: info What ships when
-Engine **1.2.0+** detects pixi projects and works through pixi (`pixi install`, `pixi add --pypi`, `pixi add python=…`, the `.pixi/envs/default` environment). The rest of this guide, marked <Badge type="tip" text="next" /> where it matters (the multi-environment and lock checks, the advisory, `migrate-to-pixi`, `migrate-conda --to pixi`, `install-pixi`, `pixi_environment`, `package_manager = "pixi"`), is on `main` and ships in the next release.
+Engine **1.2.0+** detects pixi projects and works through pixi (`pixi install`, `pixi add --pypi`, `pixi add python=…`, the `.pixi/envs/default` environment). The rest of this guide, marked <Badge type="tip" text="1.3" /> where it matters (the multi-environment and lock checks, the advisory, `migrate-to-pixi`, `migrate-conda --to pixi`, `install-pixi`, `pixi_environment`, `package_manager = "pixi"`), needs engine 1.3.0 or newer.
 :::
 
 ## Why pixi helps
@@ -31,11 +31,11 @@ A folder is a pixi project when it has a `pixi.toml`, or a `pyproject.toml` with
 
 <TerminalDemo src="doctor-pixi" cmd="pypilot doctor" title="~/src/px" />
 
-## When PyPilot suggests pixi <Badge type="tip" text="next" />
+## When PyPilot suggests pixi <Badge type="tip" text="1.3" />
 
 Outside pixi projects, PyPilot raises a **"pixi can help here"** finding when it sees a dependency with no installable wheel whose build needs native libraries that conda-forge provides, a failed build naming a missing header or library, CUDA sources without `nvcc`, or a repo that mixes Python with R, Rust or C++. See [the advisory](./advisory).
 
-## Moving a project to pixi <Badge type="tip" text="next" />
+## Moving a project to pixi <Badge type="tip" text="1.3" />
 
 `pypilot migrate-to-pixi` (from pip/uv) and `pypilot migrate-conda --to pixi` (from `environment.yml`) preview a `pixi.toml` and write it only when asked. Your existing files are never edited or deleted. Step by step: [Migrating to pixi](./migrate).
 

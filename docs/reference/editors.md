@@ -4,7 +4,7 @@ PyPilot's language server is editor-agnostic: any client that speaks LSP over st
 
 First put the engine on your `PATH`: `pip install pypilot-cli`, a release archive, or `cargo install --path helper --locked` (see [Getting started](/guide/getting-started)). Check with `pypilot --version`.
 
-The snippets below are the ones in [`helper/src/lsp/PROTOCOL.md`](https://github.com/pypilot-dev/pypilot/blob/main/helper/src/lsp/PROTOCOL.md) <Badge type="tip" text="next" />, the protocol reference kept next to the server code. They turn on [workspace diagnostics](/reference/configuration#diagnostics-scope) as an example of passing a setting; leave that out to check open files only (engine 1.2.2 ignores it anyway). The commands from [Engine CLI](/engine/) work in any terminal next to them.
+The snippets below are the ones in [`helper/src/lsp/PROTOCOL.md`](https://github.com/pypilot-dev/pypilot/blob/main/helper/src/lsp/PROTOCOL.md) <Badge type="tip" text="1.3" />, the protocol reference kept next to the server code. They turn on [workspace diagnostics](/reference/configuration#diagnostics-scope) as an example of passing a setting; leave that out to check open files only (engine 1.2.2 ignores it anyway). The commands from [Engine CLI](/engine/) work in any terminal next to them.
 
 ::: tip How settings reach PyPilot
 PyPilot never asks the editor for settings (`workspace/configuration`); the client must push them, in `initializationOptions` or `workspace/didChangeConfiguration`. Each message **replaces** the previous editor settings, so pick one way per editor, as below. `pypilot.toml` in the project always works and wins over the editor. See [precedence](./configuration#precedence).

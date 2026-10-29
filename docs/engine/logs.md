@@ -1,6 +1,6 @@
-# Logs, version & completions <Badge type="tip" text="next" />
+# Logs, version & completions <Badge type="tip" text="1.3" />
 
-Three small commands that help when something goes wrong, or when you just want tab completion. All three ship in the next engine release.
+Three small commands that help when something goes wrong, or when you just want tab completion. All three are new in engine 1.3.0.
 
 ## The local log
 
@@ -40,7 +40,7 @@ One line, pretty-printed:
 ```json
 {
   "ts": "2026-10-29T13:40:50.887Z",
-  "pypilot": "1.2.2",
+  "pypilot": "1.3.0",
   "source": "cli",
   "command": "install",
   "args": ["httpx", "--dry-run"],
@@ -76,7 +76,7 @@ Arguments, stderr and errors pass through a redactor before they are written: cr
 ## Version
 
 ```bash
-pypilot --version          # pypilot 1.2.2
+pypilot --version          # pypilot 1.3.0
 pypilot version            # also commit, target and data tables
 pypilot --version --json   # everything, as JSON
 ```

@@ -4,9 +4,9 @@
 
 The fastest route to a fix is a report that shows what PyPilot saw. Please include:
 
-1. **The engine version**: `pypilot --version`, or with an engine newer than 1.2.2, `pypilot version` (it adds the commit and the data-table state).
+1. **The engine version**: `pypilot --version`, or with engine 1.3.0 or newer, `pypilot version` (it adds the commit and the data-table state).
 2. **Your OS and editor** (Zed, VS Code, or the CLI alone).
-3. **The doctor report** from the project folder. With an engine newer than 1.2.2, attach the JSON: it holds the whole assessment (environment, interpreters, every dependency's range, findings, data tables) in one block, and nothing has to be retyped:
+3. **The doctor report** from the project folder. With engine 1.3.0 or newer, attach the JSON: it holds the whole assessment (environment, interpreters, every dependency's range, findings, data tables) in one block, and nothing has to be retyped:
 
    ```bash
    pypilot doctor --json > pypilot-doctor.json
@@ -14,8 +14,8 @@ The fastest route to a fix is a report that shows what PyPilot saw. Please inclu
    pypilot explain --json           # what blocks each Python
    ```
 
-   With engine 1.2.2, paste the output of `pypilot doctor`. See [Machine-readable output](/engine/output).
-4. **What PyPilot ran**, if a command failed (engine newer than 1.2.2): `pypilot logs --tail 3`. It lists each subprocess with its exit code and the end of its stderr. Credentials are masked, but paths and package names are in it; read it before posting. See [Logs](/engine/logs).
+   With engine 1.2.2 or older, paste the output of `pypilot doctor`. See [Machine-readable output](/engine/output).
+4. **What PyPilot ran**, if a command failed (engine 1.3.0 or newer): `pypilot logs --tail 3`. It lists each subprocess with its exit code and the end of its stderr. Credentials are masked, but paths and package names are in it; read it before posting. See [Logs](/engine/logs).
 5. **For GPU problems**: the GPU model and driver version from `nvidia-smi`.
 6. **A minimal `requirements.txt` or `pyproject.toml`** that reproduces it.
 
@@ -63,15 +63,15 @@ No squiggles any more, buttons that do nothing, or a message that the server cra
 - **VS Code**: run **Developer: Reload Window**. The **PyPilot** output channel shows what happened.
 - **Zed**: run `editor: restart language server`, or reopen the folder.
 
-If it keeps happening, `pypilot logs --tail` (engine newer than 1.2.2) shows the last actions the engine recorded; please attach it to an issue.
+If it keeps happening, `pypilot logs --tail` (engine 1.3.0 or newer) shows the last actions the engine recorded; please attach it to an issue.
 
 ### Working offline, or behind a proxy {#offline}
 
 PyPilot keeps working from its caches and the tables compiled into it; only packages it has never looked up cannot be judged.
 
-- `pypilot doctor` lists each package it could not look up as **not checked (PyPI unreachable)** and adds one note, *Could not reach PyPI for some dependencies*, with the reason. Those packages do not narrow the supported range, so re-run it online before trusting a recommendation. <Badge type="tip" text="next" /> Engine 1.2.2 reported each of them as *Could not resolve `name` … It may be a typo*.
-- In the editor, <Badge type="tip" text="next" /> those imports get no diagnostic. "PyPI has no project named …" only appears when PyPI really answered 404. Engine 1.2.2 showed it for every import it could not look up, offline included.
-- `pypilot update-data` prints `failed` per table and keeps the copies it has; <Badge type="tip" text="next" /> `update-data --check` exits `2`.
+- `pypilot doctor` lists each package it could not look up as **not checked (PyPI unreachable)** and adds one note, *Could not reach PyPI for some dependencies*, with the reason. Those packages do not narrow the supported range, so re-run it online before trusting a recommendation. <Badge type="tip" text="1.3" /> Engine 1.2.2 reported each of them as *Could not resolve `name` … It may be a typo*.
+- In the editor, <Badge type="tip" text="1.3" /> those imports get no diagnostic. "PyPI has no project named …" only appears when PyPI really answered 404. Engine 1.2.2 showed it for every import it could not look up, offline included.
+- `pypilot update-data` prints `failed` per table and keeps the copies it has; <Badge type="tip" text="1.3" /> `update-data --check` exits `2`.
 - The engine reads `HTTPS_PROXY` / `NO_PROXY` for its own requests. Downloads of the engine itself: see [VS Code](/vscode/#a-pinned-verified-engine) and [pypilot-cli](/python/#offline).
 
 To stay offline on purpose, see [offline use](./security#offline-use).
@@ -94,7 +94,7 @@ See the tip on the [Zed page](/zed/#commands-as-tasks).
 
 **Does it work offline?** Yes, with cached metadata. Set `data_refresh_days = 0` and keep a local engine; see [offline use](./security#offline-use) and [what you see offline](#offline).
 
-**Does it log anything?** <Badge type="tip" text="next" /> A local log of the commands it ran, in the cache directory; nothing is sent. `PYPILOT_NO_LOG=1` turns it off. See [Logs](/engine/logs).
+**Does it log anything?** <Badge type="tip" text="1.3" /> A local log of the commands it ran, in the cache directory; nothing is sent. `PYPILOT_NO_LOG=1` turns it off. See [Logs](/engine/logs).
 
 **Does it replace uv, pip or pixi?** No, it drives them.
 
