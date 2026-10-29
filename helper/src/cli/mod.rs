@@ -68,6 +68,10 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
             explain::run(&workspace, &source, package.as_deref(), json).await
         }
 
+        "update-data" if args.iter().any(|a| a == "--check") => {
+            let json = args.iter().any(|a| a == "--json");
+            update_data::check(&settings, json).await
+        }
         "update-data" => update_data::run().await,
         "migrate-conda" => match flag_value(args, "--to").as_deref() {
             None | Some("pyproject") => migrate_conda::run(&workspace).await,
@@ -93,6 +97,19 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
         other => anyhow::bail!("unknown CLI mode `{other}`"),
     }
 }
+
+/// A command finished and wants this exit code, having already printed its
+/// result (`update-data --check`'s 1 = stale, 2 = network error).
+#[derive(Debug)]
+pub struct Exit(pub u8);
+
+impl std::fmt::Display for Exit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "exit code {}", self.0)
+    }
+}
+
+impl std::error::Error for Exit {}
 
 /// First argument that is not a flag or a flag's value.
 fn positional(args: &[String]) -> Option<String> {

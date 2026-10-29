@@ -31,6 +31,7 @@ pub mod frameworks;
 pub mod nvidia;
 pub mod refresh;
 pub mod solve;
+pub mod status;
 
 use std::collections::HashMap;
 use std::path::Path;

@@ -59,6 +59,10 @@ fn main() -> ExitCode {
             ));
             match code {
                 Ok(()) => ExitCode::SUCCESS,
+                // The command printed its result and chose the exit code.
+                Err(e) if e.downcast_ref::<cli::Exit>().is_some() => {
+                    ExitCode::from(e.downcast_ref::<cli::Exit>().map_or(1, |x| x.0))
+                }
                 Err(e) => {
                     eprintln!("pypilot {mode}: {e:#}");
                     ExitCode::FAILURE
@@ -109,6 +113,8 @@ fn print_help() {
          \x20   fix python        Rebuild the environment on the right Python version\n\
          \x20   fix cuda          Re-pin torch/tensorflow to the build matching the driver\n\
          \x20   update-data       Force-refresh the bundled driver/framework/import tables\n\
+         \x20                     (--check: compare with main without writing; exit\n\
+         \x20                     0 current, 1 stale, 2 network error; --json)\n\
          \x20   migrate-conda     Translate environment.yml into a pyproject.toml\n\
          \x20                     (--to pixi: into a pixi.toml; a preview unless --write)\n\
          \x20   migrate-to-pixi   Preview a pixi.toml for this project's dependencies\n\
