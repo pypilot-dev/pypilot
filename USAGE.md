@@ -152,6 +152,70 @@ global Zed `tasks.json` first.
 The toast's "Fix environment" button and the task of the same name call the
 identical function, so they can't drift apart.
 
+## Machine-readable output: `--json` and `--markdown`
+
+Every CLI mode except `lsp` takes `--json` and then prints exactly one JSON
+document on stdout; progress lines go to stderr. Exit codes are the same as
+without it. `doctor` and `check` also take `--markdown`, which prints the
+Markdown report the editor shows under "Show details", ready to paste into an
+issue.
+
+```bash
+pypilot doctor --json > report.json
+pypilot check mediapipe==0.10.14 --json
+pypilot doctor --markdown | clip
+```
+
+### JSON output
+
+Every document starts with the same three keys, then the command's own:
+
+```json
+{ "pypilot": "1.2.2", "command": "check", "ok": true, ... }
+```
+
+| Key | Meaning |
+|---|---|
+| `pypilot` | engine version that wrote it |
+| `command` | `doctor`, `check`, `setup`, `install`, `fix python`, `fix cuda`, `update-data`, `migrate-conda`, `migrate-to-pixi`, `install-pixi` |
+| `ok` | the command's own verdict (see each command); a failed command also exits non-zero, except `doctor`, `check` and `update-data`, which only report |
+| `error` | only when the command failed before it had a report: `{ "pypilot", "command", "ok": false, "error": "..." }` |
+
+Field names are stable: new fields may be added, existing ones are never
+renamed, removed or retyped. Versions are strings (`"3.12"`); a set of
+Pythons is a list of them, oldest first (`["3.10", "3.11"]`). Paths are
+strings. A command's fields are always present, `null` when there is no
+value (the variant-specific keys of `lock` aside).
+
+Shared shapes:
+
+- **finding**: `{ "severity": "error"|"warning"|"info", "title", "detail", "fix": { "kind": ..., "python"? } }`.
+  `fix.kind` is one of `setup_environment`, `recreate_with_python` (with
+  `python`), `migrate_conda`, `migrate_to_pixi`, `manual`.
+- **package analysis**: `{ "name", "version", "supported": [pythons], "has_platform_wheels", "sdist_only", "has_foreign_wheels", "no_files_for_platform", "wheel_platforms": [...], "requires_python" }`.
+- **conflict**: `{ "low": analysis, "high": analysis, "explanation" }`; `low`
+  is the package with the lowest newest Python, `high` the one with the
+  highest oldest Python.
+- **summary** (what `setup`, `install` and `fix python` ran): `{ "package_manager", "resolved_mode": "uv_full"|"uv_pip_compat"|"pure_pip"|"pixi", "python", "venv_path", "why", "steps": [{ "name", "ok", "detail" }], "ok" }`.
+
+Per command:
+
+| Command | `ok` | Fields |
+|---|---|---|
+| `doctor` | no finding has severity `error` | `workspace`, `package_manager`, `environment` (`uv`: `{path, version, managed}`, `venv`: `{path, python, broken, kind: {type: "venv"} \| {type: "pixi", name}}`, `interpreters`: `[{command, path, version}]`), `project` (`sources`, `requires_python`, `pixi_python`, `dependencies`, `conda_dependencies`: `[{name, spec}]`, `has_conda_env`), `pixi` (`null`, or `{manifest, platforms, lock: {status: "missing"\|"up_to_date"\|"stale"\|"unsolvable"\|"unknown", changes?, reason?}, environments: [{name, features, selected, installed, python, python_spec, conda, pypi}]}`), `compatibility` (`null` without dependencies, else `{platform, supported, supported_range, recommended, packages: [analysis], unresolved: [{name, error}], conflicts: [conflict]}`), `target_python`, `findings` |
+| `check` | the package installs and runs here: not `no_files`, `conflict`, `unsupported`, nor a source build | `requirement`, `analysis`, `supported_range`, `platform`, `installed`, `environment_python`, `pixi_project`, `verdict` (`{kind: "supported"\|"unsupported"\|"no_environment"\|"no_files"\|"conflict", status: "ok"\|"error"\|"info", message}`), `conflict` (the project dependency it shares no Python with, or `null`), `why` (reasons it fails here), `alternative` (conda-forge build, or `null`) |
+| `setup` | `summary.ok` | `workspace`, `summary`, `pixi_advice` (a failed build's conda-forge hint, or `null`) |
+| `install` | `summary.ok` | `workspace`, `package`, `summary`, `pixi_advice` |
+| `fix python` | `summary.ok` | `workspace`, `target_python`, `summary` (`null` with a `message` when already on it), `pixi_advice` |
+| `fix cuda` | every framework re-pinned | `message` (why nothing was tried, or `null`), `frameworks`: `[{package, finding, spec, index_url, action: "pinned_in_pyproject"\|"installed"\|"skipped", ok, detail}]`, `error` |
+| `update-data` | every dataset refreshed | `datasets`: `[{name, ok, error}]` |
+| `migrate-conda` | written | `written`, `dependencies`, `environment_file`; with `--to pixi`, as `migrate-to-pixi` |
+| `migrate-to-pixi` | the requested `pixi install` succeeded (always for a preview) | `summary`: `{manifest_path, manifest, preview, written, sources, python, platforms, channels, deps: [{name, value, kind: "conda"\|"pypi", from, reason}], skipped: [{line, reason}], notes, install: summary \| null, next_command}` |
+| `install-pixi` | installed | `path`, `version`, `already_installed`, `refresh_path` |
+
+`explain --json` predates this and keeps its own top level:
+`{ "pypilot", "kind": "package"|"project", "explanation": {...} }`.
+
 ## Settings
 
 `.zed/pypilot.toml` or `pypilot.toml` in the project root, or the global

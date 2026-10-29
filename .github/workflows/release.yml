@@ -2,6 +2,19 @@ name: Release
 
 # Publishes the native helper binaries as GitHub release assets, named exactly as
 # the WASM shim expects: pypilot-<slug>.tar.gz (unix) / pypilot-windows-x64.zip.
+#
+# Release assets (names are a contract with the Zed shim, the VS Code and pip
+# wrappers and the ecosystem-bump workflow; do not rename):
+#   pypilot-linux-x64.tar.gz, pypilot-darwin-x64.tar.gz,
+#   pypilot-darwin-arm64.tar.gz, pypilot-windows-x64.zip
+#   SHA256SUMS               one "<sha256>  <asset-name>" line per archive,
+#                            sorted by name, LF (`sha256sum -c` format)
+#   pypilot-helper.cdx.json  CycloneDX 1.5 SBOM of the helper crate
+# Every archive, SHA256SUMS and the SBOM also get a GitHub build-provenance
+# attestation: `gh attestation verify <file> -R pypilot-dev/pypilot`.
+#
+# Assets are only uploaded once all four builds succeed, so a release never
+# has a SHA256SUMS that is missing a platform.
 on:
   push:
     tags: ["v*"]
@@ -12,12 +25,19 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
   build:
     name: build ${{ matrix.slug }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write # attestations: OIDC token for Sigstore
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -32,16 +52,26 @@ jobs:
           - { slug: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, ext: zip }
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A manual run builds the tag it publishes to, not whatever branch
+          # the dispatch was started from.
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Record toolchain
+        run: rustc -Vv && cargo -V
+
+      # No rust-cache here: a release is built from a clean target dir so
+      # nothing from an earlier (possibly different) build leaks in.
 
       - name: Build release binary
-        run: cargo build -p pypilot-helper --release --target ${{ matrix.target }}
+        # --locked: build exactly the dependency versions in Cargo.lock, the
+        # ones cargo-deny checked; fail rather than resolve new ones.
+        run: cargo build -p pypilot-helper --release --locked --target ${{ matrix.target }}
 
       - name: Package (unix)
         if: matrix.ext == 'tar.gz'
@@ -55,9 +85,97 @@ jobs:
         run: |
           Compress-Archive -Path "target/${{ matrix.target }}/release/pypilot.exe" -DestinationPath "pypilot-${{ matrix.slug }}.zip"
 
-      - name: Upload asset
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: pypilot-${{ matrix.slug }}.${{ matrix.ext }}
+
+      - name: Keep archive for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: archive-${{ matrix.slug }}
+          path: pypilot-${{ matrix.slug }}.${{ matrix.ext }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: checksums, SBOM and upload
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release / upload assets
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Collect archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: archive-*
+          path: dist
+          merge-multiple: true
+
+      - name: Write SHA256SUMS
+        working-directory: dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="pypilot-darwin-arm64.tar.gz pypilot-darwin-x64.tar.gz pypilot-linux-x64.tar.gz pypilot-windows-x64.zip"
+          actual="$(LC_ALL=C ls pypilot-*.tar.gz pypilot-*.zip | tr '\n' ' ' | sed 's/ $//')"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::archives are '$actual', expected '$expected'"
+            exit 1
+          fi
+          # Contract: "<64 lowercase hex><two spaces><asset-name>\n" per
+          # archive, sorted by name ($expected is already sorted), LF.
+          # Written with printf rather than sha256sum's own output so the
+          # separator never depends on its text/binary mode; -c below
+          # proves the file round-trips.
+          : > SHA256SUMS
+          for f in $expected; do
+            printf '%s  %s\n' "$(sha256sum -- "$f" | cut -d' ' -f1)" "$f" >> SHA256SUMS
+          done
+          sha256sum -c SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Install cargo-cyclonedx
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cyclonedx
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          # --target all: one SBOM covering the dependencies of every
+          # platform archive (e.g. windows-sys only exists on one of them).
+          cargo cyclonedx --manifest-path helper/Cargo.toml --format json \
+            --spec-version 1.5 --target all --override-filename pypilot-helper.cdx
+          mv helper/pypilot-helper.cdx.json dist/pypilot-helper.cdx.json
+          python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['metadata']['component']['name']=='pypilot-helper'; print(len(d['components']), 'components')" dist/pypilot-helper.cdx.json
+
+      - name: Attest SHA256SUMS and SBOM
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/SHA256SUMS
+            dist/pypilot-helper.cdx.json
+
+      - name: Upload assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: pypilot-${{ matrix.slug }}.${{ matrix.ext }}
+          tag_name: ${{ env.TAG }}
+          files: |
+            dist/pypilot-linux-x64.tar.gz
+            dist/pypilot-darwin-x64.tar.gz
+            dist/pypilot-darwin-arm64.tar.gz
+            dist/pypilot-windows-x64.zip
+            dist/SHA256SUMS
+            dist/pypilot-helper.cdx.json
           fail_on_unmatched_files: true

@@ -27,15 +27,16 @@ use crate::settings::{PackageManager, ResolvedMode, Settings};
 /// always: optional extras (see [`ensure_ipykernel`]) record their failure here
 /// so the user sees it, while leaving [`SetupSummary::ok`] alone because what
 /// the user actually asked for succeeded.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Step {
     pub name: String,
     pub ok: bool,
     pub detail: String,
 }
 
-/// Result of a bootstrap run.
-#[derive(Debug, Clone)]
+/// Result of a bootstrap run. Serialized as is by `--json` (and reused for
+/// any other report built from steps).
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct SetupSummary {
     pub package_manager: PackageManager,
     pub resolved_mode: ResolvedMode,

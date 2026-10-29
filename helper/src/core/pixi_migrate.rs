@@ -106,7 +106,8 @@ pub struct MigrateOptions {
 }
 
 /// Which table a dependency went to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DepKind {
     /// `[dependencies]`, from conda-forge.
     Conda,
@@ -115,7 +116,7 @@ pub enum DepKind {
 }
 
 /// One dependency as written to the manifest.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct MigratedDep {
     /// The key in the manifest (the conda name for conda packages).
     pub name: String,
@@ -129,14 +130,14 @@ pub struct MigratedDep {
 }
 
 /// A declaration that was not migrated, with the reason.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct SkippedDep {
     pub line: String,
     pub reason: String,
 }
 
 /// What a migration did, or would do on a dry run.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct MigrationSummary {
     pub manifest_path: PathBuf,
     /// The full manifest text.

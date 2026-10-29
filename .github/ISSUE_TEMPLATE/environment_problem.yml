@@ -1,0 +1,62 @@
+name: Environment problem
+description: PyPilot picked the wrong Python, CUDA or torch build, or could not set up an environment
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Most environment problems can only be diagnosed
+        from PyPilot's own view of your machine and project, so please run the
+        two commands below **in the project folder** and paste their output.
+        The doctor report lists paths and versions only; check it for anything
+        you would rather not share before posting.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran (or what the editor did), and what went wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`pypilot doctor --json` output"
+      description: Run `pypilot doctor --json` in the project folder and paste the whole output.
+      render: json
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: "`pypilot --version`"
+      placeholder: pypilot 1.2.2
+    validations:
+      required: true
+  - type: dropdown
+    id: frontend
+    attributes:
+      label: How you run PyPilot
+      options:
+        - Zed extension
+        - VS Code extension
+        - pip (pypilot-cli)
+        - CLI built from source / cargo install
+    validations:
+      required: true
+  - type: textarea
+    id: manifest
+    attributes:
+      label: Dependencies
+      description: The `requirements.txt`, `pyproject.toml`, `pixi.toml` or `environment.yml` involved, trimmed to a minimal reproduction if you can.
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: For CUDA problems, `nvidia-smi` output. Logs or screenshots also help.

@@ -9,6 +9,7 @@ mod doctor;
 mod explain;
 mod fix;
 mod migrate_conda;
+pub mod output;
 mod pixi;
 mod plan;
 mod setup;
@@ -19,8 +20,28 @@ use std::path::PathBuf;
 use crate::pypi::PyPiClient;
 use crate::settings::Settings;
 
-/// Dispatch a CLI mode.
+use output::OutputFormat;
+
+/// Dispatch a CLI mode. With `--json`, a failure that left no report on
+/// stdout still prints one, carrying the error (see [`output`]).
 pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
+    let result = dispatch_mode(mode, args).await;
+    if let Err(e) = &result {
+        if OutputFormat::from_args(args).is_json() {
+            // `fix python`, `fix cuda`: the name its report carries.
+            let command = match (mode, positional(args)) {
+                ("fix", what) => format!("fix {}", what.as_deref().unwrap_or("python")),
+                ("doctor", _) if args.iter().any(|a| a == "--fix") => "doctor --fix".to_string(),
+                _ => mode.to_string(),
+            };
+            output::print_error(&command, e);
+        }
+    }
+    result
+}
+
+async fn dispatch_mode(mode: &str, args: &[String]) -> crate::Result<()> {
+    let format = OutputFormat::from_args(args);
     // The same project the editor works on, so a task run from a worktree whose
     // Python code lives in one subfolder sets up that subfolder's `.venv`.
     let workspace = crate::core::project::project_root(&workspace_from_args(args));
@@ -31,34 +52,41 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
     }
     let settings = Settings::load(&workspace);
     let source = PyPiClient::new();
-    // `--dry-run` (and `--json` for its plan) on setup, fix, install and
-    // `doctor --fix`.
-    let opts = plan::RunOpts::from_args(args);
+    // setup, fix, install and `doctor --fix`: print the plan, change nothing.
+    let dry_run = plan::dry_run(args);
 
     match mode {
         // `--fix` runs what the editor's "Fix environment" runs: setup.
         "doctor" if args.iter().any(|a| a == "--fix") => {
-            if !opts.json {
-                doctor::run(&workspace, &settings, &source).await?;
+            if !format.is_json() {
+                doctor::run(&workspace, &settings, &source, format).await?;
                 println!();
             }
-            setup::run(&workspace, &settings, &source, "doctor --fix", opts).await
+            setup::run(
+                &workspace,
+                &settings,
+                &source,
+                format,
+                "doctor --fix",
+                dry_run,
+            )
+            .await
         }
-        "doctor" => doctor::run(&workspace, &settings, &source).await,
-        "setup" => setup::run(&workspace, &settings, &source, "setup", opts).await,
+        "doctor" => doctor::run(&workspace, &settings, &source, format).await,
+        "setup" => setup::run(&workspace, &settings, &source, format, "setup", dry_run).await,
 
         "check" => {
             let Some(package) = positional(args) else {
                 anyhow::bail!("usage: pypilot check <package> [--suggest-alternatives]");
             };
             let suggest = args.iter().any(|a| a == "--suggest-alternatives");
-            check::run(&workspace, &settings, &source, &package, suggest).await
+            check::run(&workspace, &settings, &source, &package, suggest, format).await
         }
 
         "fix" => {
             let what = positional(args).unwrap_or_else(|| "python".to_string());
-            let result = fix::run(&workspace, &settings, &source, &what, opts).await;
-            if !opts.dry_run {
+            let result = fix::run(&workspace, &settings, &source, &what, format, dry_run).await;
+            if !dry_run {
                 crate::core::rescan::notify(&workspace, crate::core::rescan::Kind::Setup);
             }
             result
@@ -68,8 +96,8 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
             let Some(package) = positional(args) else {
                 anyhow::bail!("usage: pypilot install <package>");
             };
-            let result = fix::install_one(&workspace, &settings, &package, opts).await;
-            if !opts.dry_run {
+            let result = fix::install_one(&workspace, &settings, &package, format, dry_run).await;
+            if !dry_run {
                 crate::core::rescan::notify(&workspace, crate::core::rescan::Kind::Setup);
             }
             result
@@ -77,19 +105,18 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
 
         "explain" => {
             let package = positional(args);
-            let json = args.iter().any(|a| a == "--json");
-            explain::run(&workspace, &source, package.as_deref(), json).await
+            explain::run(&workspace, &source, package.as_deref(), format.is_json()).await
         }
 
-        "update-data" => update_data::run().await,
+        "update-data" => update_data::run(format).await,
         "migrate-conda" => match flag_value(args, "--to").as_deref() {
-            None | Some("pyproject") => migrate_conda::run(&workspace).await,
+            None | Some("pyproject") => migrate_conda::run(&workspace, format).await,
             Some("pixi") => {
                 let opts = pixi::options(
                     args,
                     crate::core::pixi_migrate::MigrationSource::CondaEnvironment,
                 );
-                pixi::migrate(&workspace, &settings, opts).await
+                pixi::migrate(&workspace, &settings, opts, format).await
             }
             Some(other) => {
                 anyhow::bail!(
@@ -99,9 +126,9 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
         },
         "migrate-to-pixi" => {
             let opts = pixi::options(args, crate::core::pixi_migrate::MigrationSource::Auto);
-            pixi::migrate(&workspace, &settings, opts).await
+            pixi::migrate(&workspace, &settings, opts, format).await
         }
-        "install-pixi" => pixi::install_pixi().await,
+        "install-pixi" => pixi::install_pixi(format).await,
 
         other => anyhow::bail!("unknown CLI mode `{other}`"),
     }
@@ -111,7 +138,7 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
 fn positional(args: &[String]) -> Option<String> {
     let mut iter = args.iter();
     while let Some(a) = iter.next() {
-        if a == "--path" || a == "-p" || a == "--pixi-env" {
+        if a == "--path" || a == "-p" || a == "--pixi-env" || a == "--format" {
             iter.next();
             continue;
         }

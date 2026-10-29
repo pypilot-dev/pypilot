@@ -2,63 +2,47 @@
 //!
 //! The plan itself comes from the engine ([`crate::core::exec`]): the command
 //! runs its normal code path with every mutating action recorded instead of
-//! executed. This module only prints it, as text or, with `--json`, as
+//! executed. This module only prints it, as text or, with `--json`, as the
+//! shared document ([`super::output`]) with `"dry_run": true` and the plan:
 //! `{ "pypilot", "command", "ok", "dry_run": true, "plan": {...} }`.
-//!
-//! The JSON envelope is built here by [`envelope`] until the shared `--json`
-//! output helper lands; switching over means replacing that one function.
 
 use std::path::Path;
 
 use colored::Colorize;
 use serde::Serialize;
 
-use crate::core::exec::Plan;
+use super::output::{self, OutputFormat};
+use crate::core::exec::{self, Plan};
 
-/// How a mutating command was asked to run.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct RunOpts {
-    /// `--dry-run`: plan, change nothing.
-    pub dry_run: bool,
-    /// `--json`: machine-readable output.
-    pub json: bool,
+/// `--dry-run`: plan, change nothing.
+pub fn dry_run(args: &[String]) -> bool {
+    args.iter().any(|a| a == "--dry-run")
 }
 
-impl RunOpts {
-    pub fn from_args(args: &[String]) -> RunOpts {
-        RunOpts {
-            dry_run: args.iter().any(|a| a == "--dry-run"),
-            json: args.iter().any(|a| a == "--json"),
-        }
-    }
-}
-
+/// The `--json` body of a dry run.
 #[derive(Serialize)]
-struct Envelope<'a, T: Serialize> {
-    pypilot: &'static str,
-    command: &'a str,
-    ok: bool,
+struct DryRunReport<'a> {
     dry_run: bool,
-    plan: &'a T,
-}
-
-/// The shared JSON shape around a plan.
-fn envelope<'a, T: Serialize>(command: &'a str, ok: bool, plan: &'a T) -> Envelope<'a, T> {
-    Envelope {
-        pypilot: env!("CARGO_PKG_VERSION"),
-        command,
-        ok,
-        dry_run: true,
-        plan,
-    }
+    plan: &'a Plan,
 }
 
 /// Print `plan` for `command` (`setup`, `fix python`, ...) and fail when the
 /// real run would not finish, so the exit code matches what it would be.
-pub fn finish(command: &str, workspace: &Path, plan: &Plan, opts: RunOpts) -> crate::Result<()> {
-    if opts.json {
-        let text = serde_json::to_string_pretty(&envelope(command, plan.ok(), plan))?;
-        println!("{text}");
+pub fn finish(
+    command: &str,
+    workspace: &Path,
+    plan: &Plan,
+    format: OutputFormat,
+) -> crate::Result<()> {
+    if format.is_json() {
+        output::print_json(
+            command,
+            plan.ok(),
+            &DryRunReport {
+                dry_run: true,
+                plan,
+            },
+        )?;
     } else {
         print_text(command, workspace, plan);
     }
@@ -73,7 +57,7 @@ fn print_text(command: &str, workspace: &Path, plan: &Plan) {
         "{} — {} ({} mode, {})",
         format!("PyPilot {command} --dry-run").bold().cyan(),
         workspace.display(),
-        plan.mode.bold(),
+        exec::mode_name(plan.mode).bold(),
         match &plan.python {
             Some(py) => format!("Python {py}").cyan().bold().to_string(),
             None => "no Python chosen".to_string(),
@@ -131,28 +115,24 @@ fn relative(workspace: &Path, path: &Path) -> String {
 mod tests {
     use super::*;
     use crate::core::exec::PlannedStep;
+    use crate::pypi::PyVersion;
+    use crate::settings::ResolvedMode;
 
     fn v(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
     }
 
     #[test]
-    fn flags() {
-        assert_eq!(
-            RunOpts::from_args(&v(&["--dry-run", "--json"])),
-            RunOpts {
-                dry_run: true,
-                json: true
-            }
-        );
-        assert_eq!(RunOpts::from_args(&v(&["numpy"])), RunOpts::default());
+    fn flag() {
+        assert!(dry_run(&v(&["numpy", "--dry-run", "--json"])));
+        assert!(!dry_run(&v(&["numpy"])));
     }
 
     #[test]
     fn json_shape() {
         let plan = Plan {
-            mode: "uv".into(),
-            python: Some("3.12".into()),
+            mode: ResolvedMode::UvFull,
+            python: Some(PyVersion::py3(12)),
             why: "Python 3.12 chosen".into(),
             steps: vec![PlannedStep {
                 name: "uv venv".into(),
@@ -163,13 +143,33 @@ mod tests {
             notes: Vec::new(),
             blocked: None,
         };
-        let value = serde_json::to_value(envelope("setup", plan.ok(), &plan)).unwrap();
-        assert_eq!(value["command"], "setup");
-        assert_eq!(value["ok"], true);
-        assert_eq!(value["dry_run"], true);
-        assert_eq!(value["pypilot"], env!("CARGO_PKG_VERSION"));
-        assert_eq!(value["plan"]["python"], "3.12");
-        assert_eq!(value["plan"]["steps"][0]["command"][1], "venv");
-        assert_eq!(value["plan"]["steps"][0]["writes"][0], ".venv");
+        let report = DryRunReport {
+            dry_run: true,
+            plan: &plan,
+        };
+        let text = output::to_json("setup", plan.ok(), &report).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "pypilot": env!("CARGO_PKG_VERSION"),
+                "command": "setup",
+                "ok": true,
+                "dry_run": true,
+                "plan": {
+                    "mode": "uv_full",
+                    "python": "3.12",
+                    "why": "Python 3.12 chosen",
+                    "steps": [{
+                        "name": "uv venv",
+                        "command": ["uv", "venv"],
+                        "writes": [".venv"],
+                        "why": "env",
+                    }],
+                    "notes": [],
+                    "blocked": null,
+                },
+            })
+        );
     }
 }

@@ -99,8 +99,9 @@ fn print_help() {
          \x20   lsp               Run as an LSP server over stdio, used by the Zed extension\n\n\
          OPTIONS:\n\
          \x20   --path <dir>       Workspace directory to analyze (default: current dir)\n\
-         \x20   --json             explain: print the explanation as JSON;\n\
-         \x20                      with --dry-run: print the plan as JSON\n\
+         \x20   --json             Print the result as one JSON document (every mode but lsp;\n\
+         \x20                      progress goes to stderr; schema in USAGE.md)\n\
+         \x20   --markdown         doctor, check: print the Markdown report the editor shows\n\
          \x20   --dry-run          setup, fix, install, doctor --fix: print every command\n\
          \x20                      and file change they would make, and change nothing\n\
          \x20   --pixi-env <name>  pixi environment to use (default: the pixi_environment setting)\n\

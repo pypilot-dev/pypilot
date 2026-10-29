@@ -27,7 +27,7 @@ use crate::core::project::Requirement;
 use crate::pypi::version::VersionSpec;
 
 /// A pair of packages whose supported-Python sets don't overlap.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ConflictPair {
     pub low: PackageAnalysis,
     pub high: PackageAnalysis,
@@ -194,6 +194,48 @@ pub async fn analyze<S: MetadataSource>(
     }
 }
 
+/// Why `candidate` cannot join a project whose dependencies are `project`:
+/// the pair [`find_conflicts`] names once the candidate is added (the same
+/// sentence `doctor` and `setup` print for a conflicting project).
+///
+/// `None` when the candidate fits, when the project already shares no Python
+/// on its own (that is the project's conflict, which `doctor` reports), or
+/// when the candidate installs nowhere here (its own, more precise message).
+/// A project dependency with the candidate's name is replaced by it: `check
+/// numpy==1.26` judges the pin being considered, not the one declared.
+pub fn conflict_with(
+    candidate: &PackageAnalysis,
+    project: &[PackageAnalysis],
+) -> Option<ConflictPair> {
+    if candidate.no_files_for_platform {
+        return None;
+    }
+    let key = crate::core::project::normalize_name(&candidate.name);
+    let mut packages: Vec<PackageAnalysis> = project
+        .iter()
+        .filter(|p| {
+            !p.no_files_for_platform && crate::core::project::normalize_name(&p.name) != key
+        })
+        .cloned()
+        .collect();
+    let shared = packages
+        .iter()
+        .map(|p| p.supported.clone())
+        .reduce(|acc, s| acc.intersect(&s))?;
+    if shared.is_empty() || !shared.intersect(&candidate.supported).is_empty() {
+        return None;
+    }
+    packages.push(candidate.clone());
+    let pairs = find_conflicts(&packages);
+    let names_candidate =
+        |c: &ConflictPair| c.low.name == candidate.name || c.high.name == candidate.name;
+    pairs
+        .iter()
+        .find(|c| names_candidate(c))
+        .or(pairs.first())
+        .cloned()
+}
+
 /// Find explicit conflicting pairs when the global intersection is empty.
 ///
 /// Strategy: the tightest conflict is between the package with the *lowest max*
@@ -296,6 +338,62 @@ mod tests {
             urls: files,
             versions: vec!["1.0".into()],
         }
+    }
+
+    #[tokio::test]
+    async fn a_candidate_that_shares_no_python_with_the_project_names_the_pair() {
+        let mut src = FixtureSource::new();
+        // legacy: wheels only cp38-cp310; tidy: pure Python, any 3.x.
+        src.insert(
+            "legacy",
+            pkg(
+                "legacy",
+                Some(">=3.8"),
+                vec![
+                    wheel("legacy-1.0-cp38-cp38-manylinux_2_17_x86_64.whl"),
+                    wheel("legacy-1.0-cp310-cp310-manylinux_2_17_x86_64.whl"),
+                ],
+            ),
+        );
+        src.insert(
+            "tidy",
+            pkg("tidy", None, vec![wheel("tidy-1.0-py3-none-any.whl")]),
+        );
+        src.insert(
+            "shiny",
+            pkg(
+                "shiny",
+                Some(">=3.11"),
+                vec![wheel("shiny-1.0-cp311-cp311-manylinux_2_17_x86_64.whl")],
+            ),
+        );
+        let project = analyze(
+            &src,
+            linux(),
+            &[Requirement::any("legacy"), Requirement::any("tidy")],
+        )
+        .await;
+        let shiny = analyze(&src, linux(), &[Requirement::any("shiny")]).await;
+        let shiny = &shiny.per_package[0];
+
+        let pair = conflict_with(shiny, &project.per_package).expect("conflict");
+        assert_eq!(pair.low.name, "legacy");
+        assert_eq!(pair.high.name, "shiny");
+        assert!(pair
+            .explanation
+            .contains("legacy supports up to Python 3.10"));
+        assert!(pair
+            .explanation
+            .contains("shiny requires at least Python 3.11"));
+
+        // It fits next to tidy alone; and replacing legacy with itself is no
+        // conflict at all.
+        let tidy = &project.per_package[1];
+        assert_eq!(conflict_with(shiny, std::slice::from_ref(tidy)), None);
+        let legacy = &project.per_package[0];
+        assert_eq!(conflict_with(legacy, &project.per_package), None);
+        // No project dependencies: nothing to conflict with.
+        assert_eq!(conflict_with(shiny, &[]), None);
     }
 
     #[tokio::test]

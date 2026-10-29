@@ -99,10 +99,11 @@ pub struct PlanNote {
 /// What a dry run of setup, install or a rebuild would do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Plan {
-    /// `uv`, `uv-pip`, `pip` or `pixi`.
-    pub mode: String,
+    /// How the environment is managed, as in the step reports
+    /// (`uv_full`, `uv_pip_compat`, `pure_pip`, `pixi`).
+    pub mode: crate::settings::ResolvedMode,
     /// The Python the environment would run on, when the flow decides one.
-    pub python: Option<String>,
+    pub python: Option<crate::pypi::pyversion::PyVersion>,
     /// Why that Python (the solver's wording), or what the flow is for.
     pub why: String,
     pub steps: Vec<PlannedStep>,
@@ -148,8 +149,8 @@ impl Plan {
                 .or_else(|| Some("the run would not finish".to_string()))
         };
         Plan {
-            mode: mode_name(summary.resolved_mode).to_string(),
-            python: summary.python.map(|p| p.to_string()),
+            mode: summary.resolved_mode,
+            python: summary.python,
             why: summary.why.clone(),
             steps,
             notes,
@@ -164,7 +165,7 @@ impl Plan {
 }
 
 /// The name a [`ResolvedMode`](crate::settings::ResolvedMode) goes by in
-/// settings and output.
+/// text output.
 pub fn mode_name(mode: crate::settings::ResolvedMode) -> &'static str {
     use crate::settings::ResolvedMode;
     match mode {

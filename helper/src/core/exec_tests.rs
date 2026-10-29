@@ -118,7 +118,7 @@ async fn uv_project_mode_plans_init_python_venv_and_add() {
     assert_eq!(py, PyVersion::py3(12));
     let plan = Plan::from_summary(&summary, steps.clone());
     assert!(plan.ok(), "{plan:#?}");
-    assert_eq!(plan.mode, "uv");
+    assert_eq!(plan.mode, ResolvedMode::UvFull);
     assert!(
         plan.why.starts_with(&format!("Python {py} chosen")),
         "{}",
