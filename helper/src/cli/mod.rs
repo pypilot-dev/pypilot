@@ -14,6 +14,7 @@ mod migrate_conda;
 mod pixi;
 mod setup;
 mod update_data;
+pub mod version;
 
 use std::path::PathBuf;
 

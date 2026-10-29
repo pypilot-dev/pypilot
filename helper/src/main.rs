@@ -84,7 +84,8 @@ fn main() -> ExitCode {
             }
         },
         "--version" | "-V" | "version" => {
-            println!("pypilot {}", env!("CARGO_PKG_VERSION"));
+            // Bare `--version` stays one line; see `cli::version`.
+            cli::version::run(&mode, &rest);
             ExitCode::SUCCESS
         }
         "--help" | "-h" | "help" => {
@@ -124,6 +125,9 @@ fn print_help() {
          \x20   logs              Print the local log's path (--tail [N]: the last N\n\
          \x20                     entries, --json: raw JSON lines)\n\
          \x20   completions <sh>  Print a completion script (bash, zsh, fish, powershell)\n\
+         \x20   version           Engine version, commit, target and data tables\n\
+         \x20                     (--version alone prints only `pypilot X.Y.Z`;\n\
+         \x20                     --version --verbose or --json for the details)\n\
          \x20   lsp               Run as an LSP server over stdio, used by the Zed extension\n\n\
          OPTIONS:\n\
          \x20   --path <dir>       Workspace directory to analyze (default: current dir)\n\
