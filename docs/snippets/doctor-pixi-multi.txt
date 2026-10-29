@@ -1,0 +1,31 @@
+PyPilot doctor — C:\src\px2
+  package manager : Auto
+
+── Environment ──────────────────────────────────────────
+  uv              : present (v0.13.5, on PATH)
+  pixi env        : C:\src\px2\.pixi\envs\default (Python 3.15)
+  pixi project    : C:\src\px2\pixi.toml
+  interpreters    : 3.15 (python3), 3.14 (C:\Python314\python.exe)
+
+── Project ──────────────────────────────────────────────
+  files           : requirements.txt, pixi.toml
+  pixi python     : python >=3.12
+  dependencies    : conda: requests, rich · pypi: httpx>=0.28.1,<0.29
+
+── pixi ─────────────────────────────────────────────────
+  platforms       : win-64
+  pixi.lock       : out of date (42 changes)
+  environments    :
+    • default (selected)  Python 3.15  conda: requests, rich  pypi: httpx
+    • py312  Python 3.12 (not installed)  features: py312  conda: requests, rich  pypi: httpx
+
+── Compatibility ────────────────────────────────────────
+  supported Python: 3.8–3.15
+  recommended     : Python 3.15 (newest the dependencies support within pixi's `python >=3.12`)
+    • httpx                3.8–3.15
+
+── Findings ─────────────────────────────────────────────
+  [INFO ] pixi environments run different Python versions
+          `default` Python 3.15, `py312` Python 3.12. Code that works in one can fail in another; if that is not a deliberate test matrix, align the `python` pins in the features.
+  [WARN ] pixi.lock is out of date with pixi.toml
+          pixi.toml changed since pixi.lock was written, so the installed environments may not match it. Re-locking would change: py312: + (conda) _python_abi3_support 1.0 hd8ed1ab_3; py312: + (pypi) anyio 4.15.1; py312: + (conda) backports.zstd 1.8.0 py312h301c71d_1; py312: + (conda) brotli-python 1.2.1 py312ha763cb9_0; py312: + (conda) bzip2 1.0.8 h0ad9c76_10; and 37 more. Run `pixi lock` to update the lock, or `pixi install` to update it and the environment.

@@ -1,0 +1,370 @@
+/*
+ * PyPilot docs theme: true black, high-contrast type, one accent.
+ * The accent is the electric blue of the PyPilot logo (assets/logo.png).
+ * Dark only: the config forces dark, and these values are set on both
+ * :root and .dark so nothing flashes light before hydration.
+ */
+
+:root,
+.dark {
+  --pp-accent: #2aa9ff;
+  --pp-accent-2: #5cc2ff;
+  --pp-accent-3: #0a7cff;
+  --pp-accent-glow: rgba(42, 169, 255, 0.35);
+  --pp-accent-soft: rgba(42, 169, 255, 0.12);
+  --pp-line: #1a1d23;
+  --pp-line-strong: #272b33;
+
+  --vp-c-bg: #000000;
+  --vp-c-bg-alt: #050506;
+  --vp-c-bg-soft: #0b0c0f;
+  --vp-c-bg-elv: #0b0c0f;
+  --vp-c-bg-soft-up: #111318;
+
+  --vp-c-border: var(--pp-line-strong);
+  --vp-c-divider: var(--pp-line);
+  --vp-c-gutter: #000000;
+
+  --vp-c-text-1: #f4f6f8;
+  --vp-c-text-2: #a9b0bc;
+  --vp-c-text-3: #6c7380;
+
+  --vp-c-default-1: #2a2e36;
+  --vp-c-default-2: #20232a;
+  --vp-c-default-3: #181a20;
+  --vp-c-default-soft: rgba(255, 255, 255, 0.06);
+
+  --vp-c-brand-1: var(--pp-accent);
+  --vp-c-brand-2: var(--pp-accent-2);
+  --vp-c-brand-3: var(--pp-accent-3);
+  --vp-c-brand-soft: var(--pp-accent-soft);
+
+  --vp-c-tip-1: var(--pp-accent);
+  --vp-c-tip-2: var(--pp-accent-2);
+  --vp-c-tip-3: var(--pp-accent-3);
+  --vp-c-tip-soft: var(--pp-accent-soft);
+
+  --vp-font-family-base: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+
+  --vp-nav-bg-color: rgba(0, 0, 0, 0.72);
+  --vp-local-nav-bg-color: rgba(0, 0, 0, 0.72);
+  --vp-sidebar-bg-color: #000000;
+  --vp-code-block-bg: #07080a;
+  --vp-code-bg: rgba(255, 255, 255, 0.06);
+  --vp-code-color: #d6e9ff;
+
+  --vp-button-brand-bg: var(--pp-accent);
+  --vp-button-brand-text: #000000;
+  --vp-button-brand-hover-bg: var(--pp-accent-2);
+  --vp-button-brand-hover-text: #000000;
+  --vp-button-brand-active-bg: var(--pp-accent-3);
+  --vp-button-alt-bg: #111318;
+  --vp-button-alt-border: var(--pp-line-strong);
+  --vp-button-alt-hover-bg: #181b22;
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(110deg, #ffffff 10%, var(--pp-accent-2) 55%, var(--pp-accent-3) 95%);
+  --vp-home-hero-image-background-image: none;
+
+  --pp-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html {
+  color-scheme: dark;
+  background: #000;
+}
+
+body {
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(42, 169, 255, 0.35);
+  color: #fff;
+}
+
+/* ---------- Nav and sidebar ---------- */
+
+.VPNavBar.has-sidebar .content-body,
+.VPNavBar .content-body {
+  backdrop-filter: saturate(160%) blur(14px);
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+}
+
+.VPNavBar:not(.home) .divider-line,
+.VPNavBar.top .divider-line {
+  background-color: var(--pp-line);
+}
+
+.VPNavBarTitle .title {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.VPNavBarMenuLink {
+  transition: color 0.25s var(--pp-ease);
+}
+
+.VPSidebarItem .text {
+  transition: color 0.2s var(--pp-ease), transform 0.2s var(--pp-ease);
+}
+.VPSidebarItem.is-link:hover .text {
+  transform: translateX(2px);
+}
+
+/* ---------- Typography ---------- */
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3 {
+  letter-spacing: -0.02em;
+}
+.vp-doc h1 {
+  font-weight: 750;
+  background: linear-gradient(100deg, #ffffff 30%, #b9dcff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.vp-doc h2 {
+  border-top-color: var(--pp-line);
+}
+.vp-doc a {
+  text-underline-offset: 3px;
+  transition: color 0.2s var(--pp-ease);
+}
+.vp-doc table {
+  font-size: 14px;
+}
+.vp-doc tr {
+  background-color: transparent;
+}
+.vp-doc tr:nth-child(2n) {
+  background-color: #07080a;
+}
+.vp-doc th {
+  background-color: #0b0c0f;
+  color: var(--vp-c-text-1);
+}
+
+.vp-doc div[class*='language-'] {
+  border: 1px solid var(--pp-line);
+  transition: border-color 0.3s var(--pp-ease);
+}
+.vp-doc div[class*='language-']:hover {
+  border-color: var(--pp-line-strong);
+}
+
+.custom-block {
+  border-color: var(--pp-line-strong);
+}
+.custom-block.tip {
+  border-color: rgba(42, 169, 255, 0.35);
+}
+
+/* ---------- Buttons and cards: micro-interactions ---------- */
+
+.VPButton {
+  transition: transform 0.25s var(--pp-ease), box-shadow 0.25s var(--pp-ease),
+    background-color 0.25s var(--pp-ease), border-color 0.25s var(--pp-ease) !important;
+}
+.VPButton:hover {
+  transform: translateY(-1px);
+}
+.VPButton.brand:hover {
+  box-shadow: 0 8px 30px -6px var(--pp-accent-glow);
+}
+.VPButton:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.VPFeature {
+  position: relative;
+  background: linear-gradient(180deg, #0b0c0f 0%, #060708 100%) !important;
+  border: 1px solid var(--pp-line) !important;
+  transition: transform 0.35s var(--pp-ease), border-color 0.35s var(--pp-ease),
+    box-shadow 0.35s var(--pp-ease) !important;
+  overflow: hidden;
+}
+.VPFeature::before {
+  /* A spotlight that follows the edge on hover. */
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: radial-gradient(500px circle at 50% -20%, rgba(42, 169, 255, 0.16), transparent 45%);
+  opacity: 0;
+  transition: opacity 0.4s var(--pp-ease);
+  pointer-events: none;
+}
+.VPFeature:hover {
+  transform: translateY(-3px);
+  border-color: rgba(42, 169, 255, 0.45) !important;
+  box-shadow: 0 18px 50px -24px var(--pp-accent-glow);
+}
+.VPFeature:hover::before {
+  opacity: 1;
+}
+.VPFeature .icon {
+  background-color: rgba(42, 169, 255, 0.08) !important;
+  border: 1px solid rgba(42, 169, 255, 0.18);
+}
+
+/* ---------- Home ---------- */
+
+.VPHome {
+  background:
+    radial-gradient(900px 500px at 75% -10%, rgba(10, 124, 255, 0.16), transparent 60%),
+    radial-gradient(700px 400px at 0% 10%, rgba(42, 169, 255, 0.07), transparent 60%),
+    #000;
+}
+
+/* The dial has a legend at its foot; VitePress's stacked (mobile) layout
+   pulls the title up under the image, so give it room there. */
+@media (max-width: 959px) {
+  .VPHero .image {
+    margin-bottom: 8px !important;
+  }
+}
+
+.VPHero .name {
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+.VPHero .text {
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}
+.VPHero .tagline {
+  color: var(--vp-c-text-2);
+}
+
+.home-section {
+  max-width: 1152px;
+  margin: 0 auto;
+  padding: 72px 24px 0;
+}
+@media (min-width: 640px) {
+  .home-section {
+    padding: 88px 48px 0;
+  }
+}
+@media (min-width: 960px) {
+  .home-section {
+    padding: 96px 64px 0;
+  }
+}
+.home-section h2 {
+  font-size: 28px;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  margin: 0 0 8px;
+  border: 0;
+  padding: 0;
+}
+.home-section .lead {
+  color: var(--vp-c-text-2);
+  max-width: 680px;
+  margin: 0 0 28px;
+}
+.home-cta {
+  padding-bottom: 96px;
+  text-align: center;
+}
+.home-cta .actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+
+/* ---------- Reveal on scroll ---------- */
+
+.reveal-armed {
+  opacity: 0;
+  transform: translateY(18px) scale(0.985);
+  transition: opacity 0.7s var(--pp-ease), transform 0.7s var(--pp-ease);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+.reveal-armed.reveal-in {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---------- Page transitions (View Transitions API) ---------- */
+
+::view-transition-old(root) {
+  animation: pp-fade-out 0.18s var(--pp-ease) both;
+}
+::view-transition-new(root) {
+  animation: pp-fade-in 0.32s var(--pp-ease) both;
+}
+@keyframes pp-fade-out {
+  to {
+    opacity: 0;
+    filter: blur(2px);
+  }
+}
+@keyframes pp-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+    filter: blur(2px);
+  }
+}
+
+/* Keep the nav still while the page underneath changes. */
+.VPNav {
+  view-transition-name: pp-nav;
+}
+::view-transition-old(pp-nav),
+::view-transition-new(pp-nav) {
+  animation: none;
+}
+
+/* ---------- Misc ---------- */
+
+.vp-doc .pending {
+  border-left: 2px solid var(--pp-accent);
+  padding-left: 12px;
+}
+
+.VPLocalSearchBox .shell {
+  background: #07080a !important;
+  border: 1px solid var(--pp-line-strong);
+}
+
+/* ---------- Reduced motion: no animation anywhere ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .reveal-armed {
+    opacity: 1;
+    transform: none;
+  }
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}
+
+/* JetBrains Mono ligatures turn `==` and `--` into single glyphs; version
+   specifiers and CLI flags must read exactly as typed. */
+code,
+pre,
+kbd,
+.term {
+  font-variant-ligatures: none;
+  font-feature-settings: 'calt' 0, 'liga' 0;
+}

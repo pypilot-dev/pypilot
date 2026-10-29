@@ -1,0 +1,24 @@
+PyPilot doctor — C:\src\gpu
+  package manager : Auto
+
+── Environment ──────────────────────────────────────────
+  uv              : present (v0.13.5, on PATH)
+  virtualenv      : none
+  interpreters    : 3.15 (python3), 3.14 (C:\Python314\python.exe)
+
+── Project ──────────────────────────────────────────────
+  files           : pyproject.toml
+  requires-python : >=3.10
+  dependencies    : torch, transformers
+
+── Compatibility ────────────────────────────────────────
+  supported Python: 3.11–3.15
+  recommended     : Python 3.15
+    • torch                3.11–3.15
+    • transformers         3.11–3.15
+
+── Findings ─────────────────────────────────────────────
+  [WARN ] No environment set up yet
+          Dependencies support Python 3.11–3.15. Recommended: 3.15 (upper bound set by torch, which supports 3.11–3.15).
+  [INFO ] torch build matched to your driver: cu132
+          NVIDIA RTX A5000 Laptop GPU's driver (596.86) supports CUDA up to 13.2. NVIDIA RTX A5000 Laptop GPU (Ampere, sm_86) needs a build against CUDA 11.1 or newer. Recommended: pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cu132

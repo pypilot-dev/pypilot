@@ -1,0 +1,21 @@
+PyPilot doctor — C:\src\demo
+  package manager : Auto
+
+── Environment ──────────────────────────────────────────
+  uv              : present (v0.13.5, on PATH)
+  virtualenv      : none
+  interpreters    : 3.15 (python3), 3.14 (C:\Python314\python.exe)
+
+── Project ──────────────────────────────────────────────
+  files           : requirements.txt
+  dependencies    : mediapipe==0.10.14, numpy
+
+── Compatibility ────────────────────────────────────────
+  supported Python: 3.12
+  recommended     : Python 3.12
+    • mediapipe            3.9–3.12
+    • numpy                3.12–3.15
+
+── Findings ─────────────────────────────────────────────
+  [WARN ] No environment set up yet
+          Dependencies support Python 3.12. Recommended: 3.12 (upper bound set by mediapipe, which supports 3.9–3.12).

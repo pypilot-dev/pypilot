@@ -1,0 +1,7 @@
+PyPilot check — mediapipe (v0.10.14)
+── Package Details ──────────────────────────────────────
+  requirement       : mediapipe==0.10.14
+  supported Python  : 3.9–3.12
+  installed         : no
+── Verdict ──────────────────────────────────────────────
+  [INFO ] This project has no virtual environment yet. Python 3.12 would suit it.
