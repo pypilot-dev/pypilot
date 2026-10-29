@@ -59,9 +59,10 @@ package_manager    = "uv"
 notifications      = "problems-only"
 auto_check_on_open = true
 data_refresh_days  = 7
+diagnostics_scope  = "workspace"     # next: import diagnostics for every file, not just open ones
 ```
 
-All keys are in the [configuration reference](/reference/configuration).
+The Zed extension itself sends no PyPilot settings over LSP, so set them in this file or in the global `config.toml`. All keys are in the [configuration reference](/reference/configuration). <Badge type="tip" text="next" /> In Zed, `pypilot completions`, `pypilot logs --tail` and `pypilot setup --dry-run` work in the terminal next to the tasks; see [Logs, version & completions](/engine/logs) and [Dry runs](/engine/dry-run).
 
 ## Develop the extension
 

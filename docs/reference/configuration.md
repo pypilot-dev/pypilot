@@ -29,7 +29,7 @@ Command-line flags (`--path`, `--pixi-env`) apply to one run and override all of
 | Editor | How its settings reach the engine |
 |---|---|
 | VS Code | `pypilot.*` settings, sent over LSP (layer 3) <Badge type="tip" text="next" />. VS Code 1.2.1 sends none, so only the TOML files apply |
-| Zed | The extension sends no settings: use `.zed/pypilot.toml`, `pypilot.toml` or the global file |
+| Zed | The extension itself sends no PyPilot settings: use `.zed/pypilot.toml`, `pypilot.toml` or the global file |
 | Neovim, Helix, Emacs | Whatever the client config sends as initialization options or workspace configuration; see [Other editors](./editors) |
 
 ## Keys
