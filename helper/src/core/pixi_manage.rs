@@ -26,7 +26,17 @@ use crate::pypi::pyversion::PyVersion;
 /// What a step says when pixi is not installed. Nothing is changed then:
 /// falling back to uv or pip would build an environment pixi does not know.
 pub const MISSING_PIXI: &str =
-    "This is a pixi project; install pixi (https://pixi.sh) to let PyPilot manage it. Nothing was changed: PyPilot does not set up pixi projects with uv or pip.";
+    "This is a pixi project; install pixi (`pypilot install-pixi`, or see https://pixi.sh) to let PyPilot manage it. Nothing was changed: PyPilot does not set up pixi projects with uv or pip.";
+
+/// [`MISSING_PIXI`] for `package_manager = "pixi"` on a project that has no
+/// pixi manifest yet.
+pub const MISSING_PIXI_FOR_SETTING: &str =
+    "package_manager is \"pixi\", but pixi is not installed; install it (`pypilot install-pixi`, or see https://pixi.sh) and run setup again. Nothing was changed.";
+
+/// What a step says when `package_manager = "pixi"` but the project has no
+/// pixi manifest for pixi to change.
+pub const NO_MANIFEST: &str =
+    "package_manager is \"pixi\", but this project has no pixi manifest yet. Run setup (or `pypilot migrate-to-pixi --write`) to create pixi.toml from its dependencies first.";
 
 /// Step name shared by every pixi flow when pixi is missing.
 pub const LOCATE_STEP: &str = "locate pixi";
@@ -75,7 +85,7 @@ pub fn default_env_path(root: &Path) -> PathBuf {
 
 /// Install the project's default environment (`pixi install`).
 pub async fn install(pixi: Option<&Path>, root: &Path, summary: &mut SetupSummary) {
-    let Some(pixi) = located(pixi, summary) else {
+    let Some(pixi) = located(pixi, root, summary) else {
         return;
     };
     let result = run(pixi, &install_args(root), root).await;
@@ -97,7 +107,7 @@ pub async fn add_pypi(
     if packages.is_empty() {
         return;
     }
-    let Some(pixi) = located(pixi, summary) else {
+    let Some(pixi) = located(pixi, root, summary) else {
         return;
     };
     let step = format!("pixi add --pypi {}", packages.join(" "));
@@ -117,7 +127,7 @@ pub async fn set_python(
     version: PyVersion,
     summary: &mut SetupSummary,
 ) {
-    let Some(pixi) = located(pixi, summary) else {
+    let Some(pixi) = located(pixi, root, summary) else {
         return;
     };
     let spec = python_spec(version);
@@ -145,6 +155,10 @@ pub async fn add_ipykernel(pixi: Option<&Path>, root: &Path, summary: &mut Setup
         summary.steps.push(failed_step(step, MISSING_PIXI));
         return;
     };
+    if pixi::detect(root).is_none() {
+        summary.steps.push(failed_step(step, NO_MANIFEST));
+        return;
+    }
     let spec = installed::IPYKERNEL_REQUIREMENT.to_string();
     let detail = match run(pixi, &add_conda_args(root, &[spec]), root).await {
         Ok(_) => Step {
@@ -160,11 +174,24 @@ pub async fn add_ipykernel(pixi: Option<&Path>, root: &Path, summary: &mut Setup
     summary.steps.push(detail);
 }
 
-/// `pixi` when it was found, else a failed step with [`MISSING_PIXI`].
-fn located<'a>(pixi: Option<&'a Path>, summary: &mut SetupSummary) -> Option<&'a Path> {
+/// `pixi` when it was found and `root` has a pixi manifest for it to work
+/// on, else a failed step saying which is missing.
+fn located<'a>(
+    pixi: Option<&'a Path>,
+    root: &Path,
+    summary: &mut SetupSummary,
+) -> Option<&'a Path> {
     if pixi.is_none() {
         summary.ok = false;
         summary.steps.push(failed_step(LOCATE_STEP, MISSING_PIXI));
+        return None;
+    }
+    if pixi::detect(root).is_none() {
+        summary.ok = false;
+        summary
+            .steps
+            .push(failed_step("pixi manifest", NO_MANIFEST));
+        return None;
     }
     pixi
 }
@@ -278,6 +305,20 @@ mod tests {
         let mut s = summary(root);
         add_ipykernel(None, root, &mut s).await;
         assert!(s.ok && !s.steps[0].ok);
+
+        // A pixi binary but no manifest (package_manager = "pixi" before
+        // setup created one): say so instead of letting pixi fail.
+        let pixi = Path::new("pixi-that-is-never-run");
+        let mut s = summary(root);
+        install(Some(pixi), root, &mut s).await;
+        assert!(!s.ok);
+        assert_eq!(s.steps[0].detail, NO_MANIFEST);
+        let mut s = summary(root);
+        add_pypi(Some(pixi), root, &strings(&["numpy"]), &mut s).await;
+        assert_eq!(s.steps[0].detail, NO_MANIFEST);
+        let mut s = summary(root);
+        add_ipykernel(Some(pixi), root, &mut s).await;
+        assert!(s.ok && s.steps[0].detail == NO_MANIFEST);
 
         // Nothing asked, nothing to complain about.
         let mut s = summary(root);

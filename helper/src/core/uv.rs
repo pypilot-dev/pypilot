@@ -133,12 +133,12 @@ pub fn refresh_path_command() -> &'static str {
 
 /// Detect an available uv, without downloading.
 ///
-/// In `Pip` mode, returns `None`.
+/// In `Pip` and `Pixi` mode, returns `None`.
 /// In `Auto` mode, checks system PATH / standard locations only (never uses managed copy).
 /// In `Uv` or `UvPip` mode, checks system first, then falls back to the managed copy.
 pub async fn detect(settings: &Settings) -> Option<UvInfo> {
     match settings.package_manager {
-        PackageManager::Pip => None,
+        PackageManager::Pip | PackageManager::Pixi => None,
         PackageManager::Auto => is_system_installed().await,
         PackageManager::Uv | PackageManager::UvPip => {
             if let Some(info) = is_system_installed().await {
@@ -167,6 +167,9 @@ pub async fn detect(settings: &Settings) -> Option<UvInfo> {
 pub async fn ensure(settings: &Settings) -> crate::Result<UvInfo> {
     match settings.package_manager {
         PackageManager::Pip => bail!("uv is disabled in pip mode (package_manager = \"pip\")"),
+        PackageManager::Pixi => {
+            bail!("uv is disabled in pixi mode (package_manager = \"pixi\"); pixi manages the environment")
+        }
         PackageManager::Auto => {
             if let Some(info) = is_system_installed().await {
                 Ok(info)

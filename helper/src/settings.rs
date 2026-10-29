@@ -23,6 +23,9 @@ use serde::{Deserialize, Serialize};
 /// - `uv`: Full uv project mode (pyproject.toml + uv.lock).
 /// - `uv-pip`: uv-accelerated pip-compatible mode (requirements.txt only, using uv venv and uv pip install).
 /// - `pip`: Standard python -m venv + pip.
+/// - `pixi`: manage the project with pixi. A pixi project is pixi's whatever
+///   this says; on a project without a pixi manifest, setup first writes a
+///   `pixi.toml` from its dependencies ([`crate::core::pixi_migrate`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[derive(Default)]
@@ -33,6 +36,7 @@ pub enum PackageManager {
     #[serde(rename = "uv-pip")]
     UvPip,
     Pip,
+    Pixi,
 }
 
 /// Resolved operational mode for PyPilot operations.
@@ -47,7 +51,8 @@ pub enum ResolvedMode {
     /// A pixi project, managed with pixi alone (`pixi install`, `pixi add`).
     ///
     /// Chosen whenever the project has a pixi manifest, whatever
-    /// `package_manager` says: that setting picks how PyPilot builds an
+    /// `package_manager` says, and for `package_manager = "pixi"` on a project
+    /// without one (setup then creates it): that setting picks how PyPilot builds an
     /// environment it owns, and a pixi project's environment is pixi's. A
     /// `.venv`, `uv.lock` or `[tool.uv]` beside it would be a second,
     /// competing environment (see [`crate::core::pixi_manage`]).
@@ -173,6 +178,7 @@ pub async fn resolve_mode(settings: &Settings, workspace: &Path) -> ResolvedMode
         PackageManager::Uv => ResolvedMode::UvFull,
         PackageManager::UvPip => ResolvedMode::UvPipCompat,
         PackageManager::Pip => ResolvedMode::PurePip,
+        PackageManager::Pixi => ResolvedMode::Pixi,
         PackageManager::Auto => {
             if crate::core::uv::is_system_installed().await.is_some() {
                 ResolvedMode::UvFull
@@ -296,6 +302,32 @@ mod tests {
             assert_eq!(s.resolve_mode(&dir).await, ResolvedMode::Pixi, "{pm:?}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn explicit_pixi_means_pixi_mode_without_a_manifest() {
+        let s = Settings {
+            package_manager: PackageManager::Pixi,
+            ..Settings::default()
+        };
+        assert_eq!(s.resolve_mode(Path::new(".")).await, ResolvedMode::Pixi);
+    }
+
+    #[test]
+    fn package_manager_values_parse() {
+        for (text, pm) in [
+            ("auto", PackageManager::Auto),
+            ("uv", PackageManager::Uv),
+            ("uv-pip", PackageManager::UvPip),
+            ("pip", PackageManager::Pip),
+            ("pixi", PackageManager::Pixi),
+        ] {
+            let raw: RawSettings =
+                toml::from_str(&format!("package_manager = \"{text}\"")).unwrap();
+            assert_eq!(raw.package_manager, Some(pm), "{text}");
+            let json: PackageManager = serde_json::from_str(&format!("\"{text}\"")).unwrap();
+            assert_eq!(json, pm);
+        }
     }
 
     #[test]
