@@ -55,6 +55,18 @@ impl PyPiClient {
     }
 }
 
+#[cfg(test)]
+impl PyPiClient {
+    /// A client that never reaches PyPI (a closed local port, no disk cache):
+    /// every lookup fails at once, as when offline.
+    pub fn unreachable() -> PyPiClient {
+        PyPiClient {
+            base_url: "http://127.0.0.1:9".to_string(),
+            ..PyPiClient::with_cache(Cache::disabled())
+        }
+    }
+}
+
 impl Default for PyPiClient {
     fn default() -> Self {
         PyPiClient::new()

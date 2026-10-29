@@ -18,8 +18,10 @@
 //! [`crate::core::rescan`]); a watcher polls it and re-raises the notification,
 //! which is how a terminal command surfaces in the editor.
 
+mod analysis;
 mod diagnostics;
 mod pixi;
+mod workspace_scan;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -33,8 +35,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use crate::core::platform::Platform;
 use crate::core::{
-    env, guardian, imports, install, project, pyright, rescan, setup, solver, Assessment, FixKind,
-    Severity,
+    imports, install, project, pyright, rescan, setup, solver, Assessment, FixKind, Severity,
 };
 use crate::pypi::pyversion::PyVersion;
 use crate::pypi::PyPiClient;
@@ -102,6 +103,8 @@ struct Shared {
     /// what is selected, and a notebook selection never spans cells, so the
     /// whole-file and whole-notebook actions are built from this instead.
     published: Mutex<HashMap<Url, Vec<Diagnostic>>>,
+    /// The workspace-wide diagnostics (`diagnosticsScope = "workspace"`).
+    workspace: Mutex<workspace_scan::State>,
     source: PyPiClient,
 }
 
@@ -123,6 +126,13 @@ impl LanguageServer for Backend {
         if let Some(options) = &params.initialization_options {
             crate::settings::set_editor_settings(options);
         }
+        self.shared.workspace.lock().await.can_watch = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|w| w.did_change_watched_files.as_ref())
+            .and_then(|w| w.dynamic_registration)
+            .unwrap_or(false);
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -164,8 +174,11 @@ impl LanguageServer for Backend {
         // one of those slots for as long as the toast stays unanswered.
         let shared = self.shared.clone();
         tokio::spawn(async move {
-            scan_and_notify(&shared.client, &shared.source, &root, false).await;
+            if scan_and_notify(&shared.client, &shared.source, &root, false).await {
+                refresh_all_buffers(shared).await;
+            }
         });
+        tokio::spawn(workspace_scan::apply_scope(self.shared.clone()));
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -180,6 +193,7 @@ impl LanguageServer for Backend {
             .lock()
             .await
             .insert(uri.clone(), document);
+        workspace_scan::on_open(&self.shared, &uri).await;
         run_guardian(self.shared.clone(), uri).await;
     }
 
@@ -235,7 +249,9 @@ impl LanguageServer for Backend {
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         // VS Code sends `{ pypilot: { pixiEnvironment, packageManager, ... } }`
         // once after startup and on every change. A new pixi environment
-        // changes what is installed, so re-check the open buffers.
+        // changes what is installed, so re-check the open buffers (and, in
+        // workspace mode, the rest; a new `diagnosticsScope` starts or clears
+        // that scan).
         crate::settings::set_editor_settings(&params.settings);
         tokio::spawn(refresh_all_buffers(self.shared.clone()));
     }
@@ -248,8 +264,19 @@ impl LanguageServer for Backend {
         // Clear our squiggles so they do not outlive the buffer.
         self.shared
             .client
-            .publish_diagnostics(uri, vec![], None)
+            .publish_diagnostics(uri.clone(), vec![], None)
             .await;
+        // In workspace mode the file on disk speaks for it again.
+        workspace_scan::on_close(self.shared.clone(), &uri).await;
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        let paths = params
+            .changes
+            .into_iter()
+            .filter_map(|c| c.uri.to_file_path().ok())
+            .collect();
+        workspace_scan::schedule_paths(self.shared.clone(), paths).await;
     }
 
     async fn code_action(&self, params: CodeActionParams) -> RpcResult<Option<CodeActionResponse>> {
@@ -296,7 +323,11 @@ impl LanguageServer for Backend {
         // ignores the result; the VS Code extension reads it so that a failed
         // setup is not reported as a success.
         let ok = match params.command.as_str() {
-            CMD_FIX => Some(run_fix(client, &self.shared.source, &root).await),
+            CMD_FIX => {
+                let ok = run_fix(client, &self.shared.source, &root).await;
+                tokio::spawn(refresh_all_buffers(self.shared.clone()));
+                Some(ok)
+            }
             CMD_DETAILS => {
                 // An optional package argument adds a `pypilot check` section,
                 // which is how the VS Code "check package" command uses this.
@@ -384,43 +415,14 @@ async fn run_guardian(shared: Arc<Shared>, uri: Url) {
         return;
     }
 
-    // Everything here is local except the PyPI lookups, which are cached and
-    // only happen for imports that are neither stdlib, local, nor installed.
-    // The project's environment: its `.venv`, or its pixi prefix.
-    let env = env::project_env(&root);
-    // An environment whose Python is gone can't import anything, so
-    // per-import verdicts against it would be wrong either way. The
-    // workspace scan reports it once, with the rebuild fix; until then, stay
-    // quiet here.
-    let findings = if env.as_ref().is_some_and(|e| e.broken.is_some()) {
-        Vec::new()
-    } else {
-        let installed = env::importable(&root, env.as_ref());
-        let venv_python = env.as_ref().and_then(|e| e.python);
-        let venv = env.map(|e| e.path).unwrap_or_else(|| root.join(".venv"));
-
-        let mut findings = guardian::analyze_buffer_in(
-            &text,
-            &root,
-            path.as_deref().and_then(Path::parent),
-            Platform::current(),
-            venv_python,
-            &installed,
-            &shared.source,
-        )
-        .await;
-
-        // Packages that are installed still have to expose what the file uses.
-        // Purely local, so this costs a directory listing rather than a request.
-        findings.extend(guardian::check_attributes(&text, &venv, &installed));
-        findings
-    };
-
-    let pixi = crate::core::pixi::detect(&root).is_some();
-    let published: Vec<Diagnostic> = findings
-        .iter()
-        .map(|f| diagnostics::to_diagnostic_in(f, pixi))
-        .collect();
+    let snapshot = analysis::EnvSnapshot::read(&root);
+    let published = analysis::diagnose(
+        &snapshot,
+        &text,
+        path.as_deref().and_then(Path::parent),
+        &shared.source,
+    )
+    .await;
     {
         // Closed while the analysis ran: storing would leak the entry and
         // publishing would bring back squiggles did_close just cleared.
@@ -460,6 +462,7 @@ async fn refresh_all_buffers(shared: Arc<Shared>) {
     for uri in uris {
         run_guardian(shared.clone(), uri).await;
     }
+    workspace_scan::apply_scope(shared).await;
 }
 
 /// Validate the requested names, telling the user which one was refused.
@@ -721,7 +724,13 @@ async fn watch_rescan_requests(shared: Arc<Shared>, root: PathBuf) {
 
 /// The workspace scan. `explicit` means the user asked, which lifts the silence
 /// rules and turns a clean result into a confirmation instead of nothing.
-async fn scan_and_notify(client: &Client, source: &PyPiClient, root: &Path, explicit: bool) {
+/// Returns whether the user's answer changed the environment.
+async fn scan_and_notify(
+    client: &Client,
+    source: &PyPiClient,
+    root: &Path,
+    explicit: bool,
+) -> bool {
     let settings = Settings::load(root);
 
     if !explicit
@@ -729,7 +738,7 @@ async fn scan_and_notify(client: &Client, source: &PyPiClient, root: &Path, expl
             || settings.dismissed
             || !settings.auto_check_on_open)
     {
-        return;
+        return false;
     }
 
     let assessment = solver::assess(root, &settings, source).await;
@@ -743,7 +752,7 @@ async fn scan_and_notify(client: &Client, source: &PyPiClient, root: &Path, expl
                 )
                 .await;
         }
-        return;
+        return false;
     }
 
     // "problems-only" (the default) only raises a toast for Warning/Error, per
@@ -763,7 +772,7 @@ async fn scan_and_notify(client: &Client, source: &PyPiClient, root: &Path, expl
                 .show_message(MessageType::INFO, all_good_summary(&assessment))
                 .await;
         }
-        return;
+        return false;
     }
 
     let mut actions = vec![
@@ -792,12 +801,15 @@ async fn scan_and_notify(client: &Client, source: &PyPiClient, root: &Path, expl
     match chosen.as_ref().map(|a| a.title.as_str()) {
         Some(BTN_FIX) => {
             run_fix(client, source, root).await;
+            return true;
         }
         Some(BTN_DETAILS) => show_details(client, source, root, None).await,
         Some(BTN_NEVER) => mark_never(client, root).await,
+        // The migration's own install leaves a rescan request behind.
         Some(BTN_PIXI) => run_migrate_to_pixi(client, root, &[]).await,
         _ => {}
     }
+    false
 }
 
 /// Does the toast offer "Initialize pixi project"? Only for a pixi finding
@@ -1090,18 +1102,23 @@ pub fn run_stdio() {
     rt.block_on(async {
         let stdin = tokio::io::stdin();
         let stdout = tokio::io::stdout();
-        let (service, socket) = LspService::new(|client| Backend {
-            shared: Arc::new(Shared {
-                client,
-                root: Mutex::new(None),
-                documents: Mutex::new(HashMap::new()),
-                revisions: Mutex::new(HashMap::new()),
-                published: Mutex::new(HashMap::new()),
-                source: PyPiClient::new(),
-            }),
-        });
+        let (service, socket) = service(PyPiClient::new());
         Server::new(stdin, stdout, socket).serve(service).await;
     });
+}
+
+fn service(source: PyPiClient) -> (LspService<Backend>, tower_lsp::ClientSocket) {
+    LspService::new(|client| Backend {
+        shared: Arc::new(Shared {
+            client,
+            root: Mutex::new(None),
+            documents: Mutex::new(HashMap::new()),
+            revisions: Mutex::new(HashMap::new()),
+            published: Mutex::new(HashMap::new()),
+            workspace: Mutex::new(Default::default()),
+            source,
+        }),
+    })
 }
 
 #[cfg(test)]
@@ -1220,5 +1237,197 @@ mod tests {
         assert_eq!(string_args(&[], 0), None);
         assert_eq!(string_args(&[json!("3.12")], 1), None);
         assert_eq!(string_args(&[json!("numpy"), json!(1)], 0), None);
+    }
+}
+
+/// The server driven in-process over an in-memory pipe, as an editor would.
+#[cfg(test)]
+mod protocol_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    use serde_json::{json, Value};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+    struct FakeClient {
+        to_server: tokio::io::WriteHalf<tokio::io::DuplexStream>,
+        from_server: tokio::sync::mpsc::UnboundedReceiver<Value>,
+        next_id: i64,
+    }
+
+    impl FakeClient {
+        fn start() -> FakeClient {
+            let (client_end, server_end) = tokio::io::duplex(1 << 20);
+            let (server_read, server_write) = tokio::io::split(server_end);
+            let (client_read, to_server) = tokio::io::split(client_end);
+            let (service, socket) = service(PyPiClient::unreachable());
+            tokio::spawn(Server::new(server_read, server_write, socket).serve(service));
+
+            let (tx, from_server) = tokio::sync::mpsc::unbounded_channel();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(client_read);
+                loop {
+                    let mut length = 0usize;
+                    loop {
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).await.unwrap_or(0) == 0 {
+                            return;
+                        }
+                        let line = line.trim();
+                        if line.is_empty() {
+                            break;
+                        }
+                        if let Some(n) = line.strip_prefix("Content-Length:") {
+                            length = n.trim().parse().unwrap();
+                        }
+                    }
+                    let mut body = vec![0; length];
+                    if reader.read_exact(&mut body).await.is_err() {
+                        return;
+                    }
+                    let _ = tx.send(serde_json::from_slice(&body).unwrap());
+                }
+            });
+            FakeClient {
+                to_server,
+                from_server,
+                next_id: 1,
+            }
+        }
+
+        async fn send(&mut self, message: Value) {
+            let body = message.to_string();
+            let frame = format!("Content-Length: {}\r\n\r\n{body}", body.len());
+            self.to_server.write_all(frame.as_bytes()).await.unwrap();
+        }
+
+        async fn request(&mut self, method: &str, params: Value) {
+            let id = self.next_id;
+            self.next_id += 1;
+            self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
+                .await;
+        }
+
+        async fn notify(&mut self, method: &str, params: Value) {
+            self.send(json!({"jsonrpc": "2.0", "method": method, "params": params}))
+                .await;
+        }
+
+        /// The next message from the server, answering its requests with null.
+        async fn next(&mut self) -> Option<Value> {
+            let message = tokio::time::timeout(Duration::from_secs(30), self.from_server.recv())
+                .await
+                .ok()??;
+            if let (Some(id), Some(_)) = (message.get("id"), message.get("method")) {
+                let id = id.clone();
+                self.send(json!({"jsonrpc": "2.0", "id": id, "result": null}))
+                    .await;
+            }
+            Some(message)
+        }
+
+        /// The next `publishDiagnostics`: file name and diagnostics.
+        async fn next_publish(&mut self) -> Option<(String, Vec<Value>)> {
+            loop {
+                let m = self.next().await?;
+                if m["method"] != "textDocument/publishDiagnostics" {
+                    continue;
+                }
+                let uri = m["params"]["uri"].as_str().unwrap_or_default();
+                let name = uri.rsplit('/').next().unwrap_or_default().to_string();
+                let diagnostics = m["params"]["diagnostics"].as_array().cloned();
+                return Some((name, diagnostics.unwrap_or_default()));
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn workspace_scope_publishes_for_unopened_files_and_clears_on_switch_back() {
+        let root = std::env::temp_dir().join(format!("pypilot-lsp-ws-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let missing = "import pypilot_missing_pkg_xyz\n";
+        for f in ["a.py", "b.py", "sub/c.py", ".venv/lib/v.py", "opened.py"] {
+            let path = root.join(f);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, missing).unwrap();
+        }
+        let root_uri = Url::from_file_path(&root).unwrap();
+        let opened_uri = Url::from_file_path(root.join("opened.py")).unwrap();
+
+        let mut client = FakeClient::start();
+        client
+            .request(
+                "initialize",
+                json!({
+                    "capabilities": {},
+                    "rootUri": root_uri,
+                    "workspaceFolders": [{"uri": root_uri, "name": "p"}],
+                    "initializationOptions": {
+                        "diagnosticsScope": "workspace",
+                        "autoCheckOnOpen": false
+                    }
+                }),
+            )
+            .await;
+        // Like an editor, wait for the answer before anything else: the
+        // server drops notifications that arrive before it is initialized.
+        while client
+            .next()
+            .await
+            .is_some_and(|m| m.get("result").is_none())
+        {}
+        client.notify("initialized", json!({})).await;
+        // Opened before the scan's debounce ends, with the import fixed: the
+        // editor's text wins over the file on disk.
+        client
+            .notify(
+                "textDocument/didOpen",
+                json!({"textDocument": {
+                    "uri": opened_uri, "languageId": "python", "version": 1,
+                    "text": "import os\n"
+                }}),
+            )
+            .await;
+
+        let mut flagged = HashSet::new();
+        while flagged.len() < 3 {
+            let Some((name, diagnostics)) = client.next_publish().await else {
+                break;
+            };
+            assert_ne!(name, "v.py", "environments are not scanned");
+            if name == "opened.py" {
+                assert!(diagnostics.is_empty(), "the open buffer wins");
+                continue;
+            }
+            assert_eq!(diagnostics.len(), 1, "{name}: {diagnostics:?}");
+            assert_eq!(diagnostics[0]["source"], "pypilot");
+            let message = diagnostics[0]["message"].as_str().unwrap_or_default();
+            assert!(message.contains("pypilot"), "{message}");
+            flagged.insert(name);
+        }
+        let expected: HashSet<String> = ["a.py", "b.py", "c.py"].map(String::from).into();
+        assert_eq!(flagged, expected);
+
+        // Back to open files: what the scan published is cleared.
+        client
+            .notify(
+                "workspace/didChangeConfiguration",
+                json!({"settings": {"pypilot": {"diagnosticsScope": "openFiles"}}}),
+            )
+            .await;
+        let mut cleared = HashSet::new();
+        while cleared.len() < 3 {
+            let Some((name, diagnostics)) = client.next_publish().await else {
+                break;
+            };
+            assert!(diagnostics.is_empty(), "{name}: {diagnostics:?}");
+            if name != "opened.py" {
+                cleared.insert(name);
+            }
+        }
+        assert_eq!(cleared, expected);
+
+        crate::settings::set_editor_settings(&Value::Null);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
