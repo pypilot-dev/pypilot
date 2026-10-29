@@ -128,6 +128,8 @@ pypilot install-pixi      Install pixi with its official installer
 pypilot lsp               Start the language server (launched automatically by Zed)
 ```
 
+Every mode but `lsp` takes `--json` (one stable JSON document on stdout, for scripts and bug reports) and `doctor` and `check` take `--markdown` (the editor's report, ready to paste into an issue). The JSON fields are listed in [USAGE.md](USAGE.md#json-output).
+
 Running `pypilot doctor` or `pypilot setup` from a Zed task also writes a request file to the cache directory. The running language server reads this file and presents the results as interactive editor notifications.
 
 ## Configuration

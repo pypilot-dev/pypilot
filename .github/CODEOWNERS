@@ -1,0 +1,12 @@
+# Reviews requested automatically for every PR. Owners need write access
+# to pypilot-dev/pypilot. Later, more specific lines win.
+*                     @Abdullah-Masood-05
+
+# Shipped to every installed engine within a week (AGENTS.md section 1).
+/helper/data/         @Abdullah-Masood-05
+
+# Release integrity: build, signing and supply-chain policy.
+/.github/             @Abdullah-Masood-05
+/deny.toml            @Abdullah-Masood-05
+/rust-toolchain.toml  @Abdullah-Masood-05
+/Cargo.lock           @Abdullah-Masood-05

@@ -1,0 +1,40 @@
+name: Supply chain
+
+# cargo-deny over the whole workspace: RustSec advisories, license policy,
+# banned crates (OpenSSL) and allowed sources. Policy lives in deny.toml.
+#
+# Advisories run separately and also on a schedule, because a new RustSec
+# entry can turn an untouched main red overnight; that should show up as its
+# own failed check rather than break every unrelated PR without warning.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: "41 5 * * *" # daily 05:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deny:
+    name: cargo-deny ${{ matrix.checks }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        checks:
+          - advisories
+          - bans licenses sources
+    # Pull requests and pushes are only blocked by license/ban/source
+    # problems they introduce; a fresh advisory against an existing
+    # dependency is reported but does not block unrelated work.
+    continue-on-error: ${{ matrix.checks == 'advisories' && github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check ${{ matrix.checks }}

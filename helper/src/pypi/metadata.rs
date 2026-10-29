@@ -123,7 +123,7 @@ pub enum SdistKind {
 }
 
 /// Result of analyzing one package's latest release against a platform.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PackageAnalysis {
     pub name: String,
     pub version: String,
