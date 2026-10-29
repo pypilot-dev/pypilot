@@ -224,10 +224,15 @@ pub async fn migrate_with<S: MetadataSource, I: CondaIndex>(
 ) -> crate::Result<MigrationSummary> {
     let mut summary = plan(workspace, source, index, opts).await?;
     if !opts.write {
-        summary.next_command = Some(if opts.install {
-            "pypilot migrate-to-pixi --write --install".to_string()
+        let command = if opts.source == MigrationSource::CondaEnvironment {
+            "pypilot migrate-conda --to pixi --write"
         } else {
-            "pypilot migrate-to-pixi --write".to_string()
+            "pypilot migrate-to-pixi --write"
+        };
+        summary.next_command = Some(if opts.install {
+            format!("{command} --install")
+        } else {
+            command.to_string()
         });
         return Ok(summary);
     }

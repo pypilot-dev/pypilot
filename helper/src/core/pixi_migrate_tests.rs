@@ -470,11 +470,24 @@ fn environment_yml_is_read() {
 async fn an_environment_yml_becomes_a_pixi_manifest() {
     let dir = tempdir("conda");
     std::fs::write(dir.join("environment.yml"), ENV_YML).unwrap();
-    let opts = MigrateOptions {
+    let mut opts = MigrateOptions {
         source: MigrationSource::CondaEnvironment,
-        write: true,
         ..MigrateOptions::default()
     };
+    let dry = migrate_with(
+        &dir,
+        &FixtureSource::new(),
+        &FixtureIndex::default(),
+        None,
+        &opts,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        dry.next_command.as_deref(),
+        Some("pypilot migrate-conda --to pixi --write")
+    );
+    opts.write = true;
     let m = migrate_with(
         &dir,
         &FixtureSource::new(),
