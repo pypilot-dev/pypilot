@@ -1,0 +1,27 @@
+{
+  "_comment": "Recorded 2026-10-29 from https://pypi.org/pypi/pywin32/312/json, trimmed to the fields the engine reads (info name/version/requires_python; file name/type/yanked). File names are real. Windows-only: win32, win_amd64 and win_arm64 wheels, no sdist.",
+  "info": {"name": "pywin32", "version": "312", "requires_python": ">=3.9"},
+  "urls": [
+    {"filename": "pywin32-312-cp310-cp310-win32.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp310-cp310-win_amd64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp310-cp310-win_arm64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp311-cp311-win32.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp311-cp311-win_amd64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp311-cp311-win_arm64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp312-cp312-win32.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp312-cp312-win_amd64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp312-cp312-win_arm64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp313-cp313-win32.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp313-cp313-win_amd64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp313-cp313-win_arm64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp314-cp314-win32.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp314-cp314-win_amd64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp314-cp314-win_arm64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp315-cp315-win32.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp315-cp315-win_amd64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp315-cp315-win_arm64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp39-cp39-win32.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp39-cp39-win_amd64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pywin32-312-cp39-cp39-win_arm64.whl", "packagetype": "bdist_wheel", "yanked": false}
+  ]
+}
