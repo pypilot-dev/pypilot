@@ -76,6 +76,12 @@ pub async fn run<S: MetadataSource>(
             .join(", ");
         println!("  {:<16}: {list}", "interpreters");
     }
+    // Read-only: cache mtimes, no network (`update-data --check` asks main).
+    println!(
+        "  {:<16}: {}",
+        "data tables",
+        crate::matrix::status::doctor_line(settings.data_refresh_days)
+    );
     println!();
 
     // --- Project ---
