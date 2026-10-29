@@ -12,7 +12,7 @@ use crate::core::command;
 use crate::pypi::pyversion::{PyVersion, MAX_MINOR, MIN_MINOR};
 
 /// A Python interpreter found on the machine.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Interpreter {
     /// The command name we found it under (e.g. "python3.12").
     pub command: String,

@@ -1,4 +1,7 @@
 //! `pypilot doctor` — read-only probe + compatibility report. Executes nothing.
+//!
+//! `--json` prints [`DoctorReport`]; `--markdown` the editor's "Show details"
+//! report.
 
 use std::path::Path;
 
@@ -8,14 +11,37 @@ use crate::core::project::ProjectDeps;
 use crate::core::solver;
 use crate::core::Severity;
 use crate::pypi::MetadataSource;
+use crate::report::doctor::{DoctorReport, PixiSection};
 use crate::settings::Settings;
+
+use super::output::{self, OutputFormat};
 
 pub async fn run<S: MetadataSource>(
     workspace: &Path,
     settings: &Settings,
     source: &S,
+    format: OutputFormat,
 ) -> crate::Result<()> {
     let a = solver::assess(workspace, settings, source).await;
+
+    match format {
+        OutputFormat::Text => {}
+        OutputFormat::Json => {
+            let pixi = match crate::core::pixi::detect(workspace) {
+                Some(project) => Some(PixiSection::gather(&project, workspace).await),
+                None => None,
+            };
+            let report = DoctorReport::new(workspace, settings.package_manager, &a, pixi.as_ref());
+            output::print_json("doctor", report.ok(), &report)?;
+            crate::core::rescan::notify(workspace, crate::core::rescan::Kind::Doctor);
+            return Ok(());
+        }
+        OutputFormat::Markdown => {
+            print!("{}", crate::report::markdown::details_markdown(&a));
+            crate::core::rescan::notify(workspace, crate::core::rescan::Kind::Doctor);
+            return Ok(());
+        }
+    }
 
     println!(
         "{} — {}",
@@ -131,7 +157,9 @@ pub async fn run<S: MetadataSource>(
     // --- pixi: environments, platforms, lock ---
     let mut extra_findings = Vec::new();
     if let Some(pixi) = crate::core::pixi::detect(workspace) {
-        extra_findings.extend(print_pixi(&pixi, workspace).await);
+        let section = PixiSection::gather(&pixi, workspace).await;
+        print_pixi(&section);
+        extra_findings.extend(section.finding);
     }
 
     // --- Compatibility ---
@@ -206,14 +234,10 @@ pub async fn run<S: MetadataSource>(
 }
 
 /// The pixi section: each environment with its Python and key packages, the
-/// declared platforms, and whether `pixi.lock` is current. The lock check
-/// runs `pixi lock --check --dry-run`, which writes nothing; its finding is
-/// returned for the Findings list (the rest come from the assessment).
-async fn print_pixi(
-    project: &crate::core::pixi::PixiProject,
-    workspace: &Path,
-) -> Option<crate::core::Finding> {
-    use crate::core::pixi_envs::{self, LockStatus};
+/// declared platforms, and whether `pixi.lock` is current (see
+/// [`PixiSection::gather`]).
+fn print_pixi(section: &PixiSection) {
+    use crate::core::pixi_envs::LockStatus;
 
     println!(
         "{}",
@@ -221,11 +245,10 @@ async fn print_pixi(
             .bold()
             .cyan()
     );
-    if !project.platforms.is_empty() {
-        println!("  {:<16}: {}", "platforms", project.platforms.join(", "));
+    if !section.platforms.is_empty() {
+        println!("  {:<16}: {}", "platforms", section.platforms.join(", "));
     }
-    let status = pixi_envs::lock_status(&project.root).await;
-    let lock = match &status {
+    let lock = match &section.lock {
         LockStatus::Missing => "missing".yellow().to_string(),
         LockStatus::UpToDate => "up to date".green().to_string(),
         LockStatus::Stale { changes } => format!("out of date ({} changes)", changes.len())
@@ -240,13 +263,11 @@ async fn print_pixi(
     };
     println!("  {:<16}: {lock}", "pixi.lock");
 
-    let selected = pixi_envs::selected(project, workspace);
     println!("  {:<16}:", "environments");
-    for env in pixi_envs::reports(project, &selected) {
-        println!("    {} {}", "•".cyan(), env_line(&env));
+    for env in &section.environments {
+        println!("    {} {}", "•".cyan(), env_line(env));
     }
     println!();
-    pixi_envs::lock_finding(project, &status)
 }
 
 /// `default (selected)  Python 3.12 (installed)  conda: numpy · pypi: requests`.

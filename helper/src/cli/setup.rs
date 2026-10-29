@@ -8,11 +8,55 @@ use crate::core::setup;
 use crate::pypi::MetadataSource;
 use crate::settings::Settings;
 
+use super::output::{self, OutputFormat};
+
+/// The `--json` body of every command that runs steps (`setup`, `install`,
+/// `fix python`): the [`setup::SetupSummary`] plus what the terminal adds.
+#[derive(serde::Serialize)]
+pub(crate) struct StepsReport<'a> {
+    pub workspace: &'a Path,
+    /// `install`: the package asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub package: Option<&'a str>,
+    /// `fix python`: the Python rebuilt on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_python: Option<crate::pypi::PyVersion>,
+    pub summary: &'a setup::SetupSummary,
+    /// When a failed build needed a system library conda-forge ships.
+    pub pixi_advice: Option<String>,
+}
+
+impl<'a> StepsReport<'a> {
+    pub fn new(workspace: &'a Path, summary: &'a setup::SetupSummary) -> Self {
+        StepsReport {
+            workspace,
+            package: None,
+            target_python: None,
+            summary,
+            pixi_advice: pixi_build_advice(workspace, summary),
+        }
+    }
+
+    pub fn print(&self, command: &str) -> crate::Result<()> {
+        output::print_json(command, self.summary.ok, self)
+    }
+}
+
 pub async fn run<S: MetadataSource>(
     workspace: &Path,
     settings: &Settings,
     source: &S,
+    format: OutputFormat,
 ) -> crate::Result<()> {
+    if format.is_json() {
+        let summary = setup::run(workspace, settings, source).await?;
+        crate::core::rescan::notify(workspace, crate::core::rescan::Kind::Setup);
+        StepsReport::new(workspace, &summary).print("setup")?;
+        if summary.ok {
+            return Ok(());
+        }
+        anyhow::bail!("setup did not complete — see the steps above");
+    }
     println!(
         "{} — {} ({})",
         "PyPilot setup".bold().cyan(),
@@ -75,19 +119,26 @@ pub async fn run<S: MetadataSource>(
 /// ships, say so (see [`crate::core::pixi_advice::explain_build_failure`]).
 /// Silent in a pixi project, whose failures pixi_compat explains.
 pub(crate) fn print_pixi_build_advice(workspace: &Path, summary: &setup::SetupSummary) {
+    if let Some(message) = pixi_build_advice(workspace, summary) {
+        println!("  {} {message}", "[PIXI ]".cyan().bold());
+    }
+}
+
+/// The advice [`print_pixi_build_advice`] prints, for `--json`.
+pub(crate) fn pixi_build_advice(workspace: &Path, summary: &setup::SetupSummary) -> Option<String> {
     if crate::core::pixi::detect(workspace).is_some() {
-        return;
+        return None;
     }
     let table = crate::matrix::conda_forge();
     let platform = crate::core::platform::Platform::current();
-    for step in summary.steps.iter().filter(|s| !s.ok) {
-        if let Some(advice) =
+    summary
+        .steps
+        .iter()
+        .filter(|s| !s.ok)
+        .find_map(|step| {
             crate::core::pixi_advice::explain_build_failure(&step.detail, table, platform)
-        {
-            println!("  {} {}", "[PIXI ]".cyan().bold(), advice.message);
-            return;
-        }
-    }
+        })
+        .map(|advice| advice.message)
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -97,5 +148,50 @@ fn truncate(s: &str, max: usize) -> String {
     } else {
         let cut: String = s.chars().take(max).collect();
         format!("{cut}…")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::{PackageManager, ResolvedMode};
+
+    #[test]
+    fn steps_report_shape_is_stable() {
+        let summary = setup::SetupSummary {
+            package_manager: PackageManager::Auto,
+            resolved_mode: ResolvedMode::UvPipCompat,
+            python: Some(crate::pypi::PyVersion::py3(12)),
+            venv_path: ".venv".into(),
+            why: "w".into(),
+            steps: vec![setup::Step {
+                name: "uv venv".into(),
+                ok: true,
+                detail: ".venv".into(),
+            }],
+            ok: true,
+        };
+        let report = StepsReport::new(Path::new("proj"), &summary);
+        let text = output::to_json("setup", summary.ok, &report).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({
+                "pypilot": env!("CARGO_PKG_VERSION"),
+                "command": "setup",
+                "ok": true,
+                "workspace": "proj",
+                "summary": {
+                    "package_manager": "auto",
+                    "resolved_mode": "uv_pip_compat",
+                    "python": "3.12",
+                    "venv_path": ".venv",
+                    "why": "w",
+                    "steps": [{"name": "uv venv", "ok": true, "detail": ".venv"}],
+                    "ok": true,
+                },
+                "pixi_advice": null,
+            })
+        );
     }
 }
