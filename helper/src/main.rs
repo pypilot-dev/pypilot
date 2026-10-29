@@ -93,7 +93,9 @@ fn print_help() {
          OPTIONS:\n\
          \x20   --path <dir>       Workspace directory to analyze (default: current dir)\n\
          \x20   --json             explain: print the explanation as JSON\n\
-         \x20   --pixi-env <name>  pixi environment to use (default: the pixi_environment setting)\n",
+         \x20   --pixi-env <name>  pixi environment to use (default: the pixi_environment setting)\n\
+         \x20   --suggest-alternatives\n\
+         \x20                      check: show conda-forge alternatives even when it passes\n",
         ver = env!("CARGO_PKG_VERSION")
     );
 }

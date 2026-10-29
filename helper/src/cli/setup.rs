@@ -66,7 +66,27 @@ pub async fn run<S: MetadataSource>(
         );
         Ok(())
     } else {
+        print_pixi_build_advice(workspace, &summary);
         anyhow::bail!("setup did not complete — see the steps above");
+    }
+}
+
+/// When a failed step is a build that needed a system library conda-forge
+/// ships, say so (see [`crate::core::pixi_advice::explain_build_failure`]).
+/// Silent in a pixi project, whose failures pixi_compat explains.
+pub(crate) fn print_pixi_build_advice(workspace: &Path, summary: &setup::SetupSummary) {
+    if crate::core::pixi::detect(workspace).is_some() {
+        return;
+    }
+    let table = crate::matrix::conda_forge();
+    let platform = crate::core::platform::Platform::current();
+    for step in summary.steps.iter().filter(|s| !s.ok) {
+        if let Some(advice) =
+            crate::core::pixi_advice::explain_build_failure(&step.detail, table, platform)
+        {
+            println!("  {} {}", "[PIXI ]".cyan().bold(), advice.message);
+            return;
+        }
     }
 }
 
