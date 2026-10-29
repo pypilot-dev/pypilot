@@ -9,7 +9,7 @@ Every finding PyPilot can raise, as `doctor` prints it and as the editor shows i
 | No environment set up yet | Warning | **Fix environment** / `pypilot setup` on the recommended Python |
 | Python X.Y is not supported by this project | Error | **Fix environment** / `pypilot fix python` |
 | Dependencies conflict on Python version | Error | Manual: no single Python works. `pypilot explain` shows what blocks each version |
-| Could not resolve `name` | Warning | Manual: a typo or a private package |
+| Could not resolve `name` | Warning | Manual: a typo or a private package. The detail says why the lookup failed; offline it reads ``PyPI lookup failed for `name` (requesting metadata …)``, and the package then constrains nothing, so the supported range can look wider than it is |
 | Will compile from source | Warning | Manual: no wheel here, the sdist will be built |
 | … cannot be installed on *platform* | Error | Manual: the release has no files for this platform |
 | uv could not resolve dependencies for Python X.Y | Warning | Manual: `uv --dry-run` found a conflict metadata cannot see (a yanked release, a transitive pin) |
@@ -61,7 +61,7 @@ Each carries `pypilot migrate-to-pixi` as its fix. See [the advisory](/pixi/advi
 
 ## Import diagnostics (editor)
 
-Shown on the import line, with `source: "pypilot"`:
+Shown on the import line, with `source: "pypilot"`, in open files or <Badge type="tip" text="next" /> in every file with [`diagnostics_scope = "workspace"`](./configuration#diagnostics-scope):
 
 | Message | Severity | Quick fix |
 |---|---|---|
@@ -69,7 +69,7 @@ Shown on the import line, with `source: "pypilot"`:
 | `` `pkg` is not installed, and this project has no virtual environment yet. `` | Warning | Create the environment on Python X.Y, then install |
 | `` `pkg` has no wheels for Python X.Y. It supports A–B. `` | Error | Recreate the environment on a supported Python, reinstall, then install |
 | `` The installed `pkg` V has no `attr`. It provides: … `` | Error | None: which version to pin is your call |
-| `` PyPI has no project named `pkg`. … `` | Warning | None on purpose: installing a name PyPI does not know is how a typo becomes a supply-chain incident |
+| `` PyPI has no project named `pkg`. … `` | Warning | None on purpose: installing a name PyPI does not know is how a typo becomes a supply-chain incident. <Badge type="tip" text="next" /> Only a real 404 from PyPI raises it; when PyPI cannot be reached, the import gets no diagnostic |
 | `` `pkg`: … `` (no files for this platform) | Error | None |
 | CUDA extension problems (see above) | Error / Warning | None: a plain install is what would fail |
 
