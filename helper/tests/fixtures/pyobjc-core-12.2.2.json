@@ -1,0 +1,16 @@
+{
+  "_comment": "Recorded 2026-10-29 from https://pypi.org/pypi/pyobjc-core/12.2.2/json, trimmed to the fields the engine reads (info name/version/requires_python; file name/type/yanked). File names are real. macOS-only: universal2 wheels plus an sdist.",
+  "info": {"name": "pyobjc-core", "version": "12.2.2", "requires_python": ">=3.10"},
+  "urls": [
+    {"filename": "pyobjc_core-12.2.2-cp310-cp310-macosx_10_9_universal2.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pyobjc_core-12.2.2-cp311-cp311-macosx_10_9_universal2.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pyobjc_core-12.2.2-cp312-cp312-macosx_10_13_universal2.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pyobjc_core-12.2.2-cp313-cp313-macosx_10_13_universal2.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pyobjc_core-12.2.2-cp313-cp313t-macosx_10_13_universal2.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pyobjc_core-12.2.2-cp314-cp314-macosx_10_15_universal2.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pyobjc_core-12.2.2-cp314-cp314t-macosx_10_15_universal2.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pyobjc_core-12.2.2-cp315-cp315-macosx_10_15_universal2.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pyobjc_core-12.2.2-cp315-cp315t-macosx_10_15_universal2.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "pyobjc_core-12.2.2.tar.gz", "packagetype": "sdist", "yanked": false}
+  ]
+}

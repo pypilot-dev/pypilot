@@ -13,6 +13,7 @@ pub mod logs;
 mod migrate_conda;
 pub mod output;
 mod pixi;
+mod plan;
 mod setup;
 mod update_data;
 pub mod version;
@@ -33,6 +34,7 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
             // `fix python`, `fix cuda`: the name its report carries.
             let command = match (mode, positional(args)) {
                 ("fix", what) => format!("fix {}", what.as_deref().unwrap_or("python")),
+                ("doctor", _) if args.iter().any(|a| a == "--fix") => "doctor --fix".to_string(),
                 _ => mode.to_string(),
             };
             output::print_error(&command, e);
@@ -54,10 +56,28 @@ async fn dispatch_mode(mode: &str, args: &[String]) -> crate::Result<()> {
     let settings = Settings::load(&workspace);
     crate::core::logs::note_context(&workspace, &format!("{:?}", settings.package_manager));
     let source = PyPiClient::new();
+    // setup, fix, install and `doctor --fix`: print the plan, change nothing.
+    let dry_run = plan::dry_run(args);
 
     match mode {
+        // `--fix` runs what the editor's "Fix environment" runs: setup.
+        "doctor" if args.iter().any(|a| a == "--fix") => {
+            if !format.is_json() {
+                doctor::run(&workspace, &settings, &source, format).await?;
+                println!();
+            }
+            setup::run(
+                &workspace,
+                &settings,
+                &source,
+                format,
+                "doctor --fix",
+                dry_run,
+            )
+            .await
+        }
         "doctor" => doctor::run(&workspace, &settings, &source, format).await,
-        "setup" => setup::run(&workspace, &settings, &source, format).await,
+        "setup" => setup::run(&workspace, &settings, &source, format, "setup", dry_run).await,
 
         "check" => {
             let Some(package) = positional(args) else {
@@ -69,8 +89,10 @@ async fn dispatch_mode(mode: &str, args: &[String]) -> crate::Result<()> {
 
         "fix" => {
             let what = positional(args).unwrap_or_else(|| "python".to_string());
-            let result = fix::run(&workspace, &settings, &source, &what, format).await;
-            crate::core::rescan::notify(&workspace, crate::core::rescan::Kind::Setup);
+            let result = fix::run(&workspace, &settings, &source, &what, format, dry_run).await;
+            if !dry_run {
+                crate::core::rescan::notify(&workspace, crate::core::rescan::Kind::Setup);
+            }
             result
         }
 
@@ -78,8 +100,10 @@ async fn dispatch_mode(mode: &str, args: &[String]) -> crate::Result<()> {
             let Some(package) = positional(args) else {
                 anyhow::bail!("usage: pypilot install <package>");
             };
-            let result = fix::install_one(&workspace, &settings, &package, format).await;
-            crate::core::rescan::notify(&workspace, crate::core::rescan::Kind::Setup);
+            let result = fix::install_one(&workspace, &settings, &package, format, dry_run).await;
+            if !dry_run {
+                crate::core::rescan::notify(&workspace, crate::core::rescan::Kind::Setup);
+            }
             result
         }
 

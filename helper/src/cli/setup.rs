@@ -1,4 +1,5 @@
 //! `pypilot setup` — full F1 bootstrap. Same engine as the LSP "Fix everything".
+//! `--dry-run` prints the plan instead (see [`super::plan`]).
 
 use std::path::Path;
 
@@ -9,6 +10,7 @@ use crate::pypi::MetadataSource;
 use crate::settings::Settings;
 
 use super::output::{self, OutputFormat};
+use crate::core::exec::{self, Plan};
 
 /// The `--json` body of every command that runs steps (`setup`, `install`,
 /// `fix python`): the [`setup::SetupSummary`] plus what the terminal adds.
@@ -42,16 +44,24 @@ impl<'a> StepsReport<'a> {
     }
 }
 
+/// `pypilot setup`, or `doctor --fix` under the name `command`.
 pub async fn run<S: MetadataSource>(
     workspace: &Path,
     settings: &Settings,
     source: &S,
     format: OutputFormat,
+    command: &str,
+    dry_run: bool,
 ) -> crate::Result<()> {
+    if dry_run {
+        let (summary, steps) = exec::dry_run(setup::run(workspace, settings, source)).await;
+        let plan = Plan::from_summary(&summary?, steps);
+        return super::plan::finish(command, workspace, &plan, format);
+    }
     if format.is_json() {
         let summary = setup::run(workspace, settings, source).await?;
         crate::core::rescan::notify(workspace, crate::core::rescan::Kind::Setup);
-        StepsReport::new(workspace, &summary).print("setup")?;
+        StepsReport::new(workspace, &summary).print(command)?;
         if summary.ok {
             return Ok(());
         }

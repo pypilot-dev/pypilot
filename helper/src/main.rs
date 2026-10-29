@@ -106,6 +106,7 @@ fn print_help() {
          USAGE:\n    pypilot <MODE> [ARG] [--path <dir>]\n\n\
          MODES:\n\
          \x20   doctor            Read-only environment and compatibility report\n\
+         \x20                     (--fix then runs setup, like the editor's Fix environment)\n\
          \x20   setup             Build the environment (uv by default, pip if configured)\n\
          \x20   check <package>   Can this package run on this project's Python?\n\
          \x20   explain [package] Why these Pythons: requires_python vs wheels per platform;\n\
@@ -134,6 +135,8 @@ fn print_help() {
          \x20   --json             Print the result as one JSON document (every mode but lsp;\n\
          \x20                      progress goes to stderr; schema in USAGE.md)\n\
          \x20   --markdown         doctor, check: print the Markdown report the editor shows\n\
+         \x20   --dry-run          setup, fix, install, doctor --fix: print every command\n\
+         \x20                      and file change they would make, and change nothing\n\
          \x20   --pixi-env <name>  pixi environment to use (default: the pixi_environment setting)\n\
          \x20   --suggest-alternatives\n\
          \x20                      check: show conda-forge alternatives even when it passes\n",

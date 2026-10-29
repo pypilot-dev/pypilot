@@ -203,12 +203,36 @@ pub fn parse_requires_python(spec: &str) -> PyVersionSet {
 
     let mut set = PyVersionSet::empty();
     for minor in MIN_MINOR..=MAX_MINOR {
-        let candidate = [3u64, minor as u64, 0];
-        if clauses.iter().all(|c| c.matches(&candidate)) {
+        let allowed = patch_candidates(&clauses, minor).iter().any(|&patch| {
+            let candidate = [3u64, minor as u64, patch];
+            clauses.iter().all(|c| c.matches(&candidate))
+        });
+        if allowed {
             set.minors.insert(minor);
         }
     }
     set
+}
+
+/// Stand-in for "the newest patch release of a minor" when testing clauses.
+const LATEST_PATCH: u64 = 999;
+
+/// Patch releases of `3.<minor>` worth testing against `clauses`: a minor is
+/// allowed when any of its patch releases is. `.0` alone would drop 3.8 from
+/// `>=3.8.1` and 3.9 from `!=3.9.0,!=3.9.1,>=3.9`, though every current 3.8 or
+/// 3.9 interpreter satisfies them. The answer can only change at a patch a
+/// clause names, so its neighbours plus `.0` and a latest stand-in cover
+/// every case.
+fn patch_candidates(clauses: &[Clause], minor: u8) -> Vec<u64> {
+    let mut out = vec![0, LATEST_PATCH];
+    for c in clauses {
+        if let [3, m, patch, ..] = c.version[..] {
+            if m == u64::from(minor) {
+                out.extend([patch.saturating_sub(1), patch, patch + 1]);
+            }
+        }
+    }
+    out
 }
 
 /// One comparator clause from a specifier, e.g. `>=3.8` or `~=3.9` or `!=3.10.*`.
@@ -400,6 +424,28 @@ mod tests {
         assert!(s.contains(PyVersion::py3(8)));
         assert!(!s.contains(PyVersion::py3(9)));
         assert!(s.contains(PyVersion::py3(10)));
+    }
+
+    /// A patch-level floor keeps its minor: 3.8.20 satisfies `>=3.8.1`.
+    #[test]
+    fn patch_level_bounds_keep_their_minor() {
+        // uvloop 0.23.0
+        let s = parse_requires_python(">=3.8.1");
+        assert!(s.contains(PyVersion::py3(8)));
+        assert!(!s.contains(PyVersion::py3(7)));
+        // cryptography 50.0.2
+        let s = parse_requires_python("!=3.9.0,!=3.9.1,>=3.9");
+        assert!(s.contains(PyVersion::py3(9)));
+        assert!(!s.contains(PyVersion::py3(8)));
+        // A window inside one minor.
+        let s = parse_requires_python(">=3.10.2,<3.10.5");
+        assert_eq!(s, set(&[10]));
+        // Excluding one patch release does not exclude the minor.
+        assert!(parse_requires_python("!=3.12.0").contains(PyVersion::py3(12)));
+        // Whole-minor caps are unchanged.
+        assert!(!parse_requires_python("<3.13").contains(PyVersion::py3(13)));
+        assert!(parse_requires_python("<=3.10").contains(PyVersion::py3(10)));
+        assert!(!parse_requires_python("==3.11.*").contains(PyVersion::py3(12)));
     }
 
     #[test]
