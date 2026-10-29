@@ -40,8 +40,13 @@ pub struct ConflictPair {
 pub struct CompatReport {
     pub platform: Platform,
     pub per_package: Vec<PackageAnalysis>,
-    /// Packages that couldn't be fetched (name → error string).
+    /// Packages PyPI has no project for (name → error string): a typo, or
+    /// a package from a private index.
     pub unresolved: Vec<(String, String)>,
+    /// Packages whose lookup failed for another reason (offline, a proxy,
+    /// PyPI down). Nothing is known about them, so they are neither typos
+    /// nor part of the intersection.
+    pub unreachable: Vec<(String, String)>,
     /// Intersection of every resolved package's supported set.
     pub intersection: PyVersionSet,
     /// Populated only when `intersection` is empty, and only from packages
@@ -136,6 +141,7 @@ pub async fn analyze<S: MetadataSource>(
 
     let mut per_package = Vec::new();
     let mut unresolved = Vec::new();
+    let mut unreachable = Vec::new();
     let mut sdist_warnings = Vec::new();
 
     for (name, res) in results {
@@ -154,6 +160,9 @@ pub async fn analyze<S: MetadataSource>(
                     None => {}
                 }
                 per_package.push(analysis);
+            }
+            Err(e) if crate::pypi::client::is_unreachable(&e) => {
+                unreachable.push((name, format!("{e:#}")))
             }
             Err(e) => unresolved.push((name, e.to_string())),
         }
@@ -188,6 +197,7 @@ pub async fn analyze<S: MetadataSource>(
         platform,
         per_package,
         unresolved,
+        unreachable,
         intersection,
         conflicts,
         sdist_warnings,

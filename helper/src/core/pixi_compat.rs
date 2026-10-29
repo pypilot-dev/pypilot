@@ -462,6 +462,7 @@ mod tests {
                 requires_python: Some(">=3.9".into()),
             }],
             unresolved: Vec::new(),
+            unreachable: Vec::new(),
             intersection: PyVersionSet::from_versions([PyVersion::py3(10)]),
             conflicts: Vec::new(),
             sdist_warnings: Vec::new(),

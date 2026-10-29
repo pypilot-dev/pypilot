@@ -217,6 +217,14 @@ pub async fn run<S: MetadataSource>(
                 format!("unresolved ({err})").red().bold()
             );
         }
+        for (name, _) in &compat.unreachable {
+            println!(
+                "    {} {:<20} {}",
+                "•".cyan(),
+                name.bold(),
+                "not checked (PyPI unreachable)".yellow()
+            );
+        }
         println!();
     }
 

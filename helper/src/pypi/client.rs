@@ -33,6 +33,27 @@ pub fn is_not_on_pypi(err: &anyhow::Error) -> bool {
     err.downcast_ref::<NotOnPyPi>().is_some()
 }
 
+/// PyPI answered with a server error (5xx).
+#[derive(Debug)]
+pub struct PyPiUnavailable(pub String);
+
+impl std::fmt::Display for PyPiUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for PyPiUnavailable {}
+
+/// True when the lookup never got an answer about the package: no
+/// connection, a timeout, a proxy refusing, or a PyPI server error.
+pub fn is_unreachable(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause.downcast_ref::<reqwest::Error>().is_some()
+            || cause.downcast_ref::<PyPiUnavailable>().is_some()
+    })
+}
+
 /// Anything that can resolve a package name to its latest-release metadata.
 ///
 /// Uses native `async fn` in traits (stable), so the engine is generic over the
@@ -132,7 +153,11 @@ impl MetadataSource for PyPiClient {
             if resp.status() == reqwest::StatusCode::NOT_FOUND {
                 return Err(NotOnPyPi(name.to_string()).into());
             }
-            anyhow::bail!("PyPI returned {} for `{name}`", resp.status());
+            let message = format!("PyPI returned {} for `{name}`", resp.status());
+            if resp.status().is_server_error() {
+                return Err(PyPiUnavailable(message).into());
+            }
+            anyhow::bail!(message);
         }
 
         let meta: PackageMetadata = resp
@@ -164,7 +189,11 @@ impl MetadataSource for PyPiClient {
             if resp.status() == reqwest::StatusCode::NOT_FOUND {
                 anyhow::bail!("`{name}` has no release {version} on PyPI");
             }
-            anyhow::bail!("PyPI returned {} for `{name}=={version}`", resp.status());
+            let message = format!("PyPI returned {} for `{name}=={version}`", resp.status());
+            if resp.status().is_server_error() {
+                return Err(PyPiUnavailable(message).into());
+            }
+            anyhow::bail!(message);
         }
 
         let meta: PackageMetadata = resp

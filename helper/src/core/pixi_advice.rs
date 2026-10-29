@@ -925,6 +925,7 @@ mod tests {
             platform: linux(),
             per_package,
             unresolved: Vec::new(),
+            unreachable: Vec::new(),
             intersection: PyVersionSet::from_versions((10..=14).map(PyVersion::py3)),
             conflicts: Vec::new(),
             sdist_warnings: Vec::new(),

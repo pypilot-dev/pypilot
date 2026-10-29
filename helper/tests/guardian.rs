@@ -273,12 +273,15 @@ fn uninstalled_packages_are_not_attribute_checked() {
     assert!(check_attributes(buffer, &venv, &Installed::default()).is_empty());
 }
 
-/// A source whose every lookup fails as an unreachable PyPI would.
+/// A source whose every lookup fails as a PyPI outage would.
 struct Offline;
 
 impl pypilot::pypi::MetadataSource for Offline {
     async fn fetch(&self, name: &str) -> pypilot::Result<pypilot::pypi::metadata::PackageMetadata> {
-        anyhow::bail!("requesting metadata for `{name}`: connection refused")
+        Err(
+            pypilot::pypi::client::PyPiUnavailable(format!("PyPI returned 503 for `{name}`"))
+                .into(),
+        )
     }
 
     async fn fetch_version(
@@ -286,7 +289,10 @@ impl pypilot::pypi::MetadataSource for Offline {
         name: &str,
         _version: &str,
     ) -> pypilot::Result<pypilot::pypi::metadata::PackageMetadata> {
-        anyhow::bail!("requesting metadata for `{name}`: connection refused")
+        Err(
+            pypilot::pypi::client::PyPiUnavailable(format!("PyPI returned 503 for `{name}`"))
+                .into(),
+        )
     }
 }
 
@@ -320,4 +326,19 @@ async fn a_project_pypi_does_not_know_is_still_reported() {
     .await;
     assert_eq!(findings.len(), 1);
     assert!(matches!(findings[0].problem, Problem::NotOnPyPi));
+}
+
+/// doctor's side of the same rule: a lookup that never got an answer leaves
+/// the package out of the range as "not checked", not as a typo.
+#[tokio::test]
+async fn doctor_files_an_unreachable_package_as_not_checked() {
+    let report = pypilot::pypi::analyze(
+        &Offline,
+        linux(),
+        &[pypilot::core::project::Requirement::any("requests")],
+    )
+    .await;
+    assert!(report.unresolved.is_empty(), "{:?}", report.unresolved);
+    assert_eq!(report.unreachable.len(), 1);
+    assert_eq!(report.unreachable[0].0, "requests");
 }

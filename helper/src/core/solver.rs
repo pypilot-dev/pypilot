@@ -348,6 +348,26 @@ pub fn synthesize(
         return (None, findings);
     };
 
+    // A lookup that failed for another reason (offline, a proxy) says
+    // nothing about the package: one note, no "typo".
+    if !compat.unreachable.is_empty() {
+        let names: Vec<String> = compat
+            .unreachable
+            .iter()
+            .map(|(n, _)| format!("`{n}`"))
+            .collect();
+        let first = &compat.unreachable[0].1;
+        findings.push(Finding {
+            severity: Severity::Info,
+            title: "Could not reach PyPI for some dependencies".to_string(),
+            detail: format!(
+                "{} could not be checked ({first}), so the supported range leaves them out. Run doctor again when PyPI is reachable.",
+                names.join(", ")
+            ),
+            fix: FixKind::Manual,
+        });
+    }
+
     // Surface unresolved dependency names (typos, private packages).
     for (name, err) in &compat.unresolved {
         findings.push(Finding {
@@ -725,6 +745,7 @@ mod tests {
             platform: Platform::current(),
             per_package: pkgs,
             unresolved: vec![],
+            unreachable: Vec::new(),
             intersection,
             conflicts: vec![],
             sdist_warnings: vec![],

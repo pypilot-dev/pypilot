@@ -63,6 +63,9 @@ pub struct Compatibility<'a> {
     pub recommended: Option<String>,
     pub packages: &'a [PackageAnalysis],
     pub unresolved: Vec<Unresolved<'a>>,
+    /// Lookups that failed for another reason (offline, a proxy): not
+    /// typos, and left out of `supported`.
+    pub unreachable: Vec<Unresolved<'a>>,
     /// Set when `supported` is empty: the packages that share no Python.
     pub conflicts: &'a [ConflictPair],
 }
@@ -136,6 +139,11 @@ impl<'a> DoctorReport<'a> {
                     .iter()
                     .map(|(name, error)| Unresolved { name, error })
                     .collect(),
+                unreachable: c
+                    .unreachable
+                    .iter()
+                    .map(|(name, error)| Unresolved { name, error })
+                    .collect(),
                 conflicts: &c.conflicts,
             }),
             target_python: a.target_python,
@@ -180,6 +188,7 @@ mod tests {
                 intersection: legacy.supported.clone(),
                 per_package: vec![legacy],
                 unresolved: vec![("typo".into(), "not found".into())],
+                unreachable: Vec::new(),
                 conflicts: Vec::new(),
                 sdist_warnings: Vec::new(),
             }),
