@@ -9,7 +9,20 @@ use std::path::Path;
 
 use crate::core::project;
 
-pub async fn run(workspace: &Path) -> crate::Result<()> {
+use super::output::{self, OutputFormat};
+
+/// `migrate-conda --json`.
+#[derive(serde::Serialize)]
+struct Migrated<'a> {
+    /// The `pyproject.toml` written.
+    written: &'a Path,
+    /// The dependencies carried over, as written.
+    dependencies: Vec<String>,
+    /// Left in place.
+    environment_file: std::path::PathBuf,
+}
+
+pub async fn run(workspace: &Path, format: OutputFormat) -> crate::Result<()> {
     let deps = project::scan(workspace);
     if deps.is_pixi() {
         anyhow::bail!(
@@ -35,6 +48,28 @@ pub async fn run(workspace: &Path) -> crate::Result<()> {
 
     let toml = project::conda_migration_pyproject(&deps, &project_name);
     std::fs::write(&target, &toml)?;
+
+    if format.is_json() {
+        crate::core::rescan::notify(workspace, crate::core::rescan::Kind::Setup);
+        let environment_file = deps
+            .sources
+            .iter()
+            .find(|p| {
+                p.file_name()
+                    .is_some_and(|f| f.to_string_lossy().starts_with("environment"))
+            })
+            .cloned()
+            .unwrap_or_else(|| workspace.join("environment.yml"));
+        return output::print_json(
+            "migrate-conda",
+            true,
+            &Migrated {
+                written: &target,
+                dependencies: deps.packages.iter().map(ToString::to_string).collect(),
+                environment_file,
+            },
+        );
+    }
 
     println!("Wrote {}", target.display());
     println!(

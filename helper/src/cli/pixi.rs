@@ -10,6 +10,8 @@ use crate::core::pixi_install;
 use crate::core::pixi_migrate::{self, MigrateOptions, MigrationSource, MigrationSummary};
 use crate::settings::Settings;
 
+use super::output::{self, OutputFormat};
+
 /// Options shared by both migrations: `--write`, `--install`, and
 /// `--platform <p>` (repeatable, or comma-separated).
 pub fn options(args: &[String], source: MigrationSource) -> MigrateOptions {
@@ -40,18 +42,44 @@ pub fn options(args: &[String], source: MigrationSource) -> MigrateOptions {
     opts
 }
 
+/// `--json` for both migrations: the [`MigrationSummary`] under `summary`.
+#[derive(serde::Serialize)]
+struct Migration<'a> {
+    summary: &'a MigrationSummary,
+}
+
+/// `install-pixi --json`.
+#[derive(serde::Serialize)]
+struct Installed<'a> {
+    #[serde(flatten)]
+    pixi: &'a pixi_install::PixiInstall,
+    /// What to run so shells opened before the install find pixi; `null`
+    /// when it was already installed.
+    refresh_path: Option<String>,
+}
+
 pub async fn migrate(
     workspace: &Path,
     settings: &Settings,
     opts: MigrateOptions,
+    format: OutputFormat,
 ) -> crate::Result<()> {
+    let opts_source = opts.source;
     if opts.install && !opts.write {
         anyhow::bail!(
             "--install needs --write: a dry run changes nothing, so there is nothing to install"
         );
     }
     let summary = pixi_migrate::migrate_to_pixi(workspace, settings, opts).await?;
-    print_summary(&summary);
+    if format.is_json() {
+        let command = match opts_source {
+            MigrationSource::CondaEnvironment => "migrate-conda",
+            _ => "migrate-to-pixi",
+        };
+        output::print_json(command, summary.ok(), &Migration { summary: &summary })?;
+    } else {
+        print_summary(&summary);
+    }
     if summary.written {
         // Let a running LSP pick up the new manifest immediately.
         crate::core::rescan::notify(workspace, crate::core::rescan::Kind::Setup);
@@ -112,12 +140,27 @@ fn print_summary(s: &MigrationSummary) {
     }
 }
 
-pub async fn install_pixi() -> crate::Result<()> {
-    println!(
-        "Installing pixi with its official installer ({})…",
-        pixi_install::installer_url()
+pub async fn install_pixi(format: OutputFormat) -> crate::Result<()> {
+    output::progress(
+        format,
+        format!(
+            "Installing pixi with its official installer ({})…",
+            pixi_install::installer_url()
+        ),
     );
     let installed = pixi_install::install().await?;
+    if format.is_json() {
+        let refresh_path = (!installed.already_installed)
+            .then(|| pixi_install::refresh_path_command().to_string());
+        return output::print_json(
+            "install-pixi",
+            true,
+            &Installed {
+                pixi: &installed,
+                refresh_path,
+            },
+        );
+    }
     if installed.already_installed {
         println!(
             "pixi {} is already installed at {}.",
