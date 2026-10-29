@@ -1,0 +1,37 @@
+# Labels this repo's issue templates and workflows rely on. GitHub does not
+# read this file; it is the reference for creating them by hand
+# (`gh label create <name> --color <color> --description <text>`) or with a
+# label-sync action. Existing labels are listed too so a sync never deletes
+# them. Colors are hex without "#".
+- name: bug
+  color: d73a4a
+  description: Something isn't working
+- name: documentation
+  color: 0075ca
+  description: Improvements or additions to documentation
+- name: duplicate
+  color: cfd3d7
+  description: This issue or pull request already exists
+- name: enhancement
+  color: a2eeef
+  description: New feature or request
+- name: good first issue
+  color: 7057ff
+  description: Good for newcomers
+- name: help wanted
+  color: "008672"
+  description: Extra attention is needed
+- name: invalid
+  color: e4e669
+  description: This doesn't seem right
+- name: question
+  color: d876e3
+  description: Further information is requested
+- name: wontfix
+  color: ffffff
+  description: This will not be worked on
+# New: opened/updated by .github/workflows/live-pypi.yml when PyPI, PyTorch,
+# NVIDIA or conda-forge drift breaks the nightly smoke run.
+- name: data-drift
+  color: fbca04
+  description: Upstream data (PyPI, PyTorch, NVIDIA, conda-forge) changed; tables or parsers need an update
