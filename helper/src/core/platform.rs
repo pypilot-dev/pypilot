@@ -54,8 +54,10 @@ impl Platform {
             return true;
         }
         match self.os {
+            // `win32` is the 32-bit x86 build: it does not load into the
+            // 64-bit CPython uv and the python.org installer put on x64.
             Os::Windows => match self.arch {
-                Arch::X86_64 => tag == "win_amd64" || tag == "win32",
+                Arch::X86_64 => tag == "win_amd64",
                 Arch::Aarch64 => tag == "win_arm64",
             },
             Os::Macos => {
@@ -167,6 +169,7 @@ mod tests {
             arch: Arch::X86_64,
         };
         assert!(p.wheel_tag_matches("win_amd64"));
+        assert!(!p.wheel_tag_matches("win32"));
         assert!(!p.wheel_tag_matches("manylinux_2_17_x86_64"));
     }
 }

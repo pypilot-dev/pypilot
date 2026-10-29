@@ -132,6 +132,7 @@ fn wheel_platform_tags_match_only_their_own_platform() {
         ("macosx_10_15_universal2",    [false, false, true,  true,  false, false]),
         ("win_amd64",                  [false, false, false, false, true,  false]),
         ("win_arm64",                  [false, false, false, false, false, true ]),
+        ("win32",                      [false, false, false, false, false, false]),
     ];
     for (tag, expected) in table {
         for (platform, want) in ALL.iter().zip(expected) {
@@ -386,4 +387,24 @@ fn unlabelled_torch_build_depends_on_the_platform() {
             TorchBuild::Cuda(None)
         );
     }
+}
+
+/// A `win32` wheel is a 32-bit build and does not install into the 64-bit
+/// CPython on Windows x64. Taken from numpy 1.26.4's real file names, with
+/// the win_amd64 cp312 wheel removed: the win32 one must not stand in for it.
+#[test]
+fn win32_wheels_do_not_count_on_64_bit_windows() {
+    let mut meta = fixture("numpy-1.26.4.json");
+    meta.urls.retain(|f| {
+        f.filename.contains("win32")
+            || f.filename.contains("win_amd64") && !f.filename.contains("cp312")
+    });
+    let a = meta.analyze(&WIN_X64);
+    assert_eq!(a.supported.to_range_string(), "3.9–3.11");
+
+    // Only win32 wheels: nothing installs, and the message says why.
+    meta.urls.retain(|f| f.filename.contains("win32"));
+    let a = meta.analyze(&WIN_X64);
+    assert_nothing_installs(&a, WIN_X64);
+    assert_eq!(a.wheel_platforms, ["Windows x86"]);
 }
