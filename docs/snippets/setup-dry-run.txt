@@ -1,0 +1,21 @@
+PyPilot setup --dry-run — C:\src\demo (uv mode, Python 3.12)
+  Python 3.12 chosen: dependencies support 3.12; mediapipe caps the upper bound (supports 3.9–3.12).
+  • ensure uv: uv 0.13.5 (on PATH)
+── Plan (nothing was changed) ───────────────────────────
+  1. uv init
+     $ uv init --bare --no-workspace --pin-python --python 3.12
+     writes: pyproject.toml, .python-version
+     why: the project has no pyproject.toml; create a bare one pinned to Python 3.12 so `uv add` has a manifest to record dependencies in
+  2. uv python install 3.12
+     $ uv python install 3.12
+     why: make CPython 3.12 available (uv downloads it into its own Python store if missing)
+  3. uv venv
+     $ uv venv --clear --python 3.12 C:\src\demo\.venv
+     writes: .venv
+     why: create the project environment on Python 3.12, replacing any existing one
+  4. uv add -r requirements.txt
+     $ uv add -r requirements.txt
+     writes: pyproject.toml, uv.lock, .venv
+     why: move requirements.txt's dependencies into pyproject.toml and install them
+
+  Dry run only; run without --dry-run to apply.

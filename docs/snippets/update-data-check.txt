@@ -1,0 +1,8 @@
+PyPilot data tables: refreshed just now (next in 6 days); 1 of 5 bundled
+  nvidia.json                schema 3   in use: cache, refreshed just now          same as main
+  frameworks.json            schema 2   in use: cache, refreshed just now          same as main
+  import_map.json            schema 1   in use: cache, refreshed just now          same as main
+  cuda_extensions.json       schema 1   in use: cache, refreshed just now          same as main
+  conda_forge_packages.json  schema 1   in use: bundled                            not on main (only the bundled copy exists)
+
+The tables in use match main.
