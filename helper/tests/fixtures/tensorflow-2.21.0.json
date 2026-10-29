@@ -1,0 +1,23 @@
+{
+  "_comment": "Recorded 2026-10-29 from https://pypi.org/pypi/tensorflow/json, trimmed to the fields the engine reads (info name/version/requires_python; file name/type/yanked; release keys). File names are real. No macOS x64 and no Windows arm64 wheels, no sdist.",
+  "info": {"name": "tensorflow", "version": "2.21.0", "requires_python": ">=3.10"},
+  "urls": [
+    {"filename": "tensorflow-2.21.0-cp310-cp310-macosx_12_0_arm64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp310-cp310-manylinux_2_27_aarch64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp310-cp310-manylinux_2_27_x86_64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp310-cp310-win_amd64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp311-cp311-macosx_12_0_arm64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp311-cp311-manylinux_2_27_aarch64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp311-cp311-manylinux_2_27_x86_64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp311-cp311-win_amd64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp312-cp312-macosx_12_0_arm64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp312-cp312-manylinux_2_27_aarch64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp312-cp312-manylinux_2_27_x86_64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp312-cp312-win_amd64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp313-cp313-macosx_12_0_arm64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp313-cp313-manylinux_2_27_aarch64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp313-cp313-manylinux_2_27_x86_64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "tensorflow-2.21.0-cp313-cp313-win_amd64.whl", "packagetype": "bdist_wheel", "yanked": false}
+  ],
+  "releases": ["0.12.0", "0.12.1", "1.0.0", "1.0.1", "1.1.0", "1.10.0", "1.10.1", "1.11.0", "1.12.0", "1.12.2", "1.12.3", "1.13.1", "1.13.2", "1.14.0", "1.15.0", "1.15.2", "1.15.3", "1.15.4", "1.15.5", "1.2.0", "1.2.1", "1.3.0", "1.4.0", "1.4.1", "1.5.0", "1.5.1", "1.6.0", "1.7.0", "1.7.1", "1.8.0", "1.9.0", "2.0.0", "2.0.1", "2.0.2", "2.0.3", "2.0.4", "2.1.0", "2.1.1", "2.1.2", "2.1.3", "2.1.4", "2.10.0", "2.10.0rc0", "2.10.0rc1", "2.10.0rc2", "2.10.0rc3", "2.10.1", "2.11.0", "2.11.0rc0", "2.11.0rc1", "2.11.0rc2", "2.11.1", "2.12.0", "2.12.0rc0", "2.12.0rc1", "2.12.1", "2.13.0", "2.13.0rc0", "2.13.0rc1", "2.13.0rc2", "2.13.1", "2.14.0", "2.14.0rc0", "2.14.0rc1", "2.14.1", "2.15.0", "2.15.0.post1", "2.15.0rc0", "2.15.0rc1", "2.15.1", "2.16.0rc0", "2.16.1", "2.16.2", "2.17.0", "2.17.0rc0", "2.17.0rc1", "2.17.1", "2.18.0", "2.18.0rc0", "2.18.0rc1", "2.18.0rc2", "2.18.1", "2.19.0", "2.19.0rc0", "2.19.1", "2.2.0", "2.2.1", "2.2.2", "2.2.3", "2.20.0", "2.20.0rc0", "2.21.0", "2.21.0rc0", "2.21.0rc1", "2.22.0rc0", "2.3.0", "2.3.1", "2.3.2", "2.3.3", "2.3.4", "2.4.0", "2.4.1", "2.4.2", "2.4.3", "2.4.4", "2.5.0", "2.5.1", "2.5.2", "2.5.3", "2.6.0", "2.6.0rc0", "2.6.0rc1", "2.6.0rc2", "2.6.1", "2.6.2", "2.6.3", "2.6.4", "2.6.5", "2.7.0", "2.7.0rc0", "2.7.0rc1", "2.7.1", "2.7.2", "2.7.3", "2.7.4", "2.8.0", "2.8.0rc0", "2.8.0rc1", "2.8.1", "2.8.2", "2.8.3", "2.8.4", "2.9.0", "2.9.0rc0", "2.9.0rc1", "2.9.0rc2", "2.9.1", "2.9.2", "2.9.3"]
+}

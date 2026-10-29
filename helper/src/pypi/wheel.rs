@@ -11,7 +11,7 @@
 //! where the last three dash-separated fields are the compatibility tags, each of
 //! which may itself be dot-compound (`cp39.cp310`, `manylinux1.manylinux2010`).
 
-use crate::core::platform::Platform;
+use crate::core::platform::{Libc, Platform};
 use crate::pypi::pyversion::{PyVersion, PyVersionSet, MAX_MINOR};
 
 /// A parsed wheel filename's compatibility tags.
@@ -44,8 +44,24 @@ impl WheelTags {
     /// Which Python minor versions does this wheel support *on this platform*?
     /// Empty if no platform tag matches (wheel is for a different OS/arch).
     pub fn supported_on(&self, platform: &Platform) -> PyVersionSet {
-        let platform_ok = self.platform.iter().any(|t| platform.wheel_tag_matches(t));
+        self.supported_on_with(platform, Libc::host())
+    }
+
+    /// [`WheelTags::supported_on`] for a Linux system with the given C library.
+    pub fn supported_on_with(&self, platform: &Platform, libc: Libc) -> PyVersionSet {
+        let platform_ok = self
+            .platform
+            .iter()
+            .any(|t| platform.wheel_tag_matches_with(t, libc));
         if !platform_ok {
+            return PyVersionSet::empty();
+        }
+
+        // A wheel built only for the free-threaded interpreter (`cp313t`,
+        // `abi3t`) does not load into the default GIL build, which is what
+        // uv and the python.org installers provide. Its `cp313` python tag
+        // must not count as support for 3.13.
+        if !self.abi.is_empty() && self.abi.iter().all(|a| is_free_threaded_abi(a)) {
             return PyVersionSet::empty();
         }
 
@@ -72,6 +88,16 @@ impl WheelTags {
         }
         set
     }
+}
+
+/// `cp313t`, `cp314t`, `abi3t`: ABIs of the free-threaded (no-GIL) build.
+fn is_free_threaded_abi(abi: &str) -> bool {
+    if abi == "abi3t" {
+        return true;
+    }
+    abi.strip_prefix("cp")
+        .and_then(|rest| rest.strip_suffix('t'))
+        .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
 }
 
 enum PyTag {
@@ -183,6 +209,24 @@ mod tests {
                 "{wheel} should support Python 3.15"
             );
         }
+    }
+
+    /// Free-threaded wheels need the free-threaded interpreter; the stable
+    /// ABI wheel that also lists `abi3t` still serves the GIL build.
+    #[test]
+    fn free_threaded_only_wheels_do_not_count() {
+        for wheel in [
+            "numpy-2.5.4-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+            "cryptography-50.0.2-cp314-cp314t-manylinux_2_28_x86_64.whl",
+        ] {
+            let t = WheelTags::parse(wheel).unwrap();
+            assert!(t.supported_on(&linux()).is_empty(), "{wheel}");
+        }
+        let t = WheelTags::parse("cryptography-50.0.2-cp315-abi3.abi3t-manylinux_2_28_x86_64.whl")
+            .unwrap();
+        assert!(t.supported_on(&linux()).contains(PyVersion::py3(15)));
+        let t = WheelTags::parse("numpy-2.5.4-cp314-cp314-manylinux_2_28_x86_64.whl").unwrap();
+        assert!(t.supported_on(&linux()).contains(PyVersion::py3(14)));
     }
 
     #[test]

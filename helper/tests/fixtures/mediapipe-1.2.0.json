@@ -1,0 +1,11 @@
+{
+  "_comment": "Recorded 2026-10-29 from https://pypi.org/pypi/mediapipe/1.2.0/json, trimmed to the fields the engine reads (info name/version/requires_python; file name/type/yanked). File names are real. py3-none wheels for five platforms; no macOS x64, no sdist.",
+  "info": {"name": "mediapipe", "version": "1.2.0", "requires_python": null},
+  "urls": [
+    {"filename": "mediapipe-1.2.0-py3-none-macosx_11_0_arm64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "mediapipe-1.2.0-py3-none-manylinux_2_28_aarch64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "mediapipe-1.2.0-py3-none-manylinux_2_28_x86_64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "mediapipe-1.2.0-py3-none-win_amd64.whl", "packagetype": "bdist_wheel", "yanked": false},
+    {"filename": "mediapipe-1.2.0-py3-none-win_arm64.whl", "packagetype": "bdist_wheel", "yanked": false}
+  ]
+}
