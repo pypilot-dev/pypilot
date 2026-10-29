@@ -45,17 +45,17 @@ yourself (pin one package differently, drop one, etc.).
 
 | Situation | Severity | What you see | Auto-fix? |
 |---|---|---|---|
-| No venv yet, versions agree | Warning | "No environment set up yet" + recommended version | Yes — "Fix environment" |
-| Venv exists, wrong Python | Error | "Python X.Y is not supported by this project" + which package(s) block it | Yes — "Recreate with Python X.Y" |
-| Venv exists, right Python | — | Nothing. Silent on purpose. | — |
-| Dependencies conflict (empty intersection) | Error | Both blocking packages named, each one's supported range | No — manual |
-| A dependency name doesn't resolve on PyPI | Warning | "Could not resolve `name`" (typo or private package) | No — manual |
-| A dependency has no wheels, will compile from source | Warning | Which package, that it'll build from an sdist | No — manual |
+| No venv yet, versions agree | Warning | "No environment set up yet" + recommended version | Yes: "Fix environment" |
+| Venv exists, wrong Python | Error | "Python X.Y is not supported by this project" + which package(s) block it | Yes: "Recreate with Python X.Y" |
+| Venv exists, right Python | none | Nothing. Silent on purpose. | none |
+| Dependencies conflict (empty intersection) | Error | Both blocking packages named, each one's supported range | No, manual |
+| A dependency name doesn't resolve on PyPI | Warning | "Could not resolve `name`" (typo or private package) | No, manual |
+| A dependency has no wheels, will compile from source | Warning | Which package, that it'll build from an sdist | No, manual |
 | `environment.yml` found (conda project) | Info | Points at `pypilot migrate-conda` (`--to pixi` for a pixi.toml) | Command, not a button |
-| `uv --dry-run` disagrees with the metadata verdict | Warning | Names the real resolver conflict metadata alone can't see (yanked release, transitive pin) | No — manual |
+| `uv --dry-run` disagrees with the metadata verdict | Warning | Names the real resolver conflict metadata alone can't see (yanked release, transitive pin) | No, manual |
 | GPU present, torch/tensorflow declared | Info | Which CUDA build was picked for your driver | Applied automatically on install |
-| No GPU | — | Silent; installs the plain CPU build | — |
-| Apple Silicon, torch/tensorflow declared | Info | Note that you get the MPS backend, not CUDA | — |
+| No GPU | none | Silent; installs the plain CPU build | none |
+| Apple Silicon, torch/tensorflow declared | Info | Note that you get the MPS backend, not CUDA | none |
 
 ## Two separate systems: onboarding scan vs. live diagnostics
 
@@ -75,7 +75,7 @@ diagnostics (F4) on your imports:
   (this is real: mediapipe 0.10.35 dropped it), and you get a squiggle
   naming the missing attribute and what the package does provide, before you
   ever run the file. This only fires when PyPilot can be sure the attribute
-  is genuinely absent — if the module uses dynamic attribute resolution
+  is genuinely absent: if the module uses dynamic attribute resolution
   (`__getattr__`), it stays quiet rather than guessing.
 
 Live diagnostics don't wait for a manual scan or a saved file; they update
@@ -87,7 +87,7 @@ Nothing is lost. The assessment isn't a one-shot popup, it's re-derivable
 any time:
 
 - Run **`pypilot: show details (doctor report)`** from `task: spawn` for a
-  full read-only report — same information the toast would have shown,
+  full read-only report, with the same information the toast would have shown,
   without needing the toast to still be on screen.
 - Run **`pypilot: fix environment (set up environment)`** to apply whatever
   the current assessment recommends, whether or not you saw the original
