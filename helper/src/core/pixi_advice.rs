@@ -129,13 +129,22 @@ pub fn advise(
     if !repo.languages.is_empty() {
         let names: Vec<&str> = repo.languages.iter().map(|(l, _)| *l).collect();
         let evidence: Vec<&str> = repo.languages.iter().map(|(_, e)| e.as_str()).collect();
+        let packages: Vec<&str> = names
+            .iter()
+            .map(|l| match *l {
+                "R" => "r-base",
+                "Rust" => "rust",
+                _ => "cxx-compiler and cmake",
+            })
+            .collect();
         findings.push(Finding {
             severity: Severity::Info,
             title: format!("This project mixes Python with {}", join_and(&names)),
             detail: format!(
-                "Found {}. pip and uv manage only the Python side. pixi manages {} and Python in one manifest from conda-forge (r-base, cxx-compiler, cmake, rust), so one environment builds and runs all of it. Run `{MIGRATE_COMMAND}` if you want that.",
+                "Found {}. pip and uv manage only the Python side. pixi manages {} and Python in one manifest from conda-forge ({}), so one environment builds and runs all of it. Run `{MIGRATE_COMMAND}` if you want that.",
                 evidence.join(", "),
-                join_and(&names)
+                join_and(&names),
+                join_and(&packages)
             ),
             fix: FixKind::MigrateToPixi,
         });
@@ -326,7 +335,13 @@ fn source_build_title(row: &CondaPackage, p: &PackageAnalysis) -> String {
 
 /// The table's "why" clauses start with "it"; name the package instead.
 fn capitalize_it(why: &str, name: &str) -> String {
-    let body = why.strip_prefix("it ").map(|rest| format!("{name} {rest}"));
+    let body = why
+        .strip_prefix("it ")
+        .map(|rest| format!("{name} {rest}"))
+        .or_else(|| {
+            why.strip_prefix("its ")
+                .map(|rest| format!("{name}'s {rest}"))
+        });
     let mut s = body.unwrap_or_else(|| format!("{name}: {why}"));
     if !s.ends_with('.') {
         s.push('.');
