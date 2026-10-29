@@ -3,7 +3,7 @@
 All notable changes to PyPilot's engine and Zed extension. Releases and their
 full notes are on the [Releases page](https://github.com/pypilot-dev/pypilot/releases).
 
-## Unreleased
+## [1.3.0]
 
 - pixi: `pixi_environment` and `--pixi-env` choose the environment; doctor checks
   every environment, Python drift between them, a stale `pixi.lock` (read-only) and
@@ -19,6 +19,20 @@ full notes are on the [Releases page](https://github.com/pypilot-dev/pypilot/rel
   `setup`, `install`, `fix` and `doctor --fix`.
 - `diagnostics_scope = "workspace"`: import diagnostics for files that are not open.
 - Releases carry `SHA256SUMS`, a CycloneDX SBOM and build-provenance attestations.
+- `pypilot check` names the project dependency a package conflicts with, and suggests a
+  conda-forge build when it fails.
+- Editors' settings now reach the engine (VS Code's `pypilot.*` settings had no effect
+  before); precedence is global file < editor < project file.
+- Fixed: wheel resolution. A patch-level `requires-python` (`>=3.8.1`) no longer drops
+  the whole minor version; 64-bit Windows no longer counts 32-bit `win32` wheels;
+  free-threaded `cp3XXt` wheels no longer count for the regular build; manylinux and
+  musllinux wheels are kept apart.
+- Fixed: offline, or behind a refusing proxy, PyPilot no longer calls every package it
+  could not look up a typo. The editor shows nothing for those imports, and doctor
+  lists them as "not checked".
+- Fixed: after `migrate-to-pixi`, doctor no longer warns that conda-forge packages from
+  the old `requirements.txt` will compile from source.
+- Dependencies updated for security advisories in rustls, tokio and zip.
 
 ## [1.2.2]
 

@@ -1,6 +1,6 @@
 id = "pypilot-language-server"
 name = "PyPilot"
-version = "1.2.2"
+version = "1.3.0"
 schema_version = 1
 authors = ["PyPilot contributors"]
 description = "Creates Python virtual environments on the interpreter version your dependencies actually support, and names the package that set the limit. It reads wheel tags and requires_python from PyPI, so a library with no wheel for your Python is caught before the install fails. Runs on uv by default, with a pip mode, and answers from package metadata rather than a language model."

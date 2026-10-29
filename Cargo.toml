@@ -12,7 +12,7 @@ resolver = "2"
 members = ["helper", "extension"]
 
 [workspace.package]
-version = "1.2.2"
+version = "1.3.0"
 edition = "2021"
 rust-version = "1.80"
 # No workspace-wide license: the two crates differ. See LICENSE and the
