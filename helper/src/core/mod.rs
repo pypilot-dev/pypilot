@@ -17,6 +17,7 @@ pub mod interpreter;
 pub mod modules;
 pub mod pip;
 pub mod pixi;
+pub mod pixi_advice;
 pub mod pixi_compat;
 pub mod pixi_manage;
 pub mod platform;
@@ -56,6 +57,11 @@ pub enum FixKind {
     /// Translate a conda `environment.yml` into a PEP 621 `pyproject.toml`
     /// (`pypilot migrate-conda`). Optional per F5 — conda projects work as-is.
     MigrateConda,
+    /// Set the project up with pixi (`pypilot migrate-to-pixi`, the LSP
+    /// command `pypilot.migrateToPixi`): pip and uv cannot install what a
+    /// dependency needs (system libraries, nvcc), and conda-forge ships it.
+    /// Only suggested, never run without the user asking.
+    MigrateToPixi,
     /// Nothing to automate; the message itself is the guidance.
     Manual,
 }

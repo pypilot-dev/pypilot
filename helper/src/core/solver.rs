@@ -123,6 +123,17 @@ pub async fn assess<S: MetadataSource>(
     let (target_python, mut findings) = synthesize(&env, &project, compat.as_ref());
     findings.extend(hardware.findings);
 
+    // Walls pip and uv cannot climb but conda-forge can (system libraries,
+    // nvcc): say pixi would help. Skips pixi projects.
+    crate::core::pixi_advice::apply(
+        &mut findings,
+        workspace,
+        &project,
+        compat.as_ref(),
+        env.venv_python,
+        target_python,
+    );
+
     if let Some(venv) = &probes.venv {
         // A CPU torch on an NVIDIA machine, however it got there: checked
         // against what is installed, not what is declared, since a later
