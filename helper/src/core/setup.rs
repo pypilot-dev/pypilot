@@ -89,7 +89,22 @@ pub async fn run_with_mode<S: MetadataSource>(
             steps: Vec::new(),
             ok: true,
         };
-        run_pixi(workspace, pixi::locate().await.as_deref(), &mut summary).await;
+        let pixi_bin = pixi::locate().await;
+        // `package_manager = "pixi"` on a project pixi does not manage yet:
+        // create its manifest from the declared dependencies first.
+        if pixi::detect(workspace).is_none()
+            && !crate::core::pixi_migrate::create_for_setup(
+                workspace,
+                settings,
+                source,
+                pixi_bin.as_deref(),
+                &mut summary,
+            )
+            .await
+        {
+            return Ok(summary);
+        }
+        run_pixi(workspace, pixi_bin.as_deref(), &mut summary).await;
         if assessment
             .project
             .packages
