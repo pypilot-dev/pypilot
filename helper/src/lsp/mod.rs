@@ -19,6 +19,7 @@
 //! which is how a terminal command surfaces in the editor.
 
 mod diagnostics;
+mod pixi;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -134,7 +135,10 @@ impl LanguageServer for Backend {
                         CMD_INSTALL.into(),
                         CMD_RECREATE.into(),
                         CMD_INSTALL_UV.into(),
-                    ],
+                    ]
+                    .into_iter()
+                    .chain(pixi::COMMANDS.iter().map(|c| c.to_string()))
+                    .collect(),
                     work_done_progress_options: Default::default(),
                 }),
                 ..Default::default()
@@ -265,6 +269,12 @@ impl LanguageServer for Backend {
         let root = self.shared.root.lock().await.clone();
         let Some(root) = root else { return Ok(None) };
         let client = &self.shared.client;
+
+        // pixi commands answer with their own JSON (see `pixi`).
+        if let Some(result) = pixi::execute(&params.command, client, &root, &params.arguments).await
+        {
+            return Ok(Some(result));
+        }
 
         // Commands that change the environment answer `{"ok": bool}`. Zed
         // ignores the result; the VS Code extension reads it so that a failed
@@ -602,6 +612,14 @@ fn spawn_pyright_pin_offer(client: &Client, root: &Path) {
 }
 
 async fn report_failed_step(client: &Client, summary: &setup::SetupSummary) {
+    if let Some(step) = summary
+        .steps
+        .iter()
+        .find(|s| !s.ok && s.name == crate::core::pixi_manage::LOCATE_STEP)
+    {
+        pixi::offer_install_pixi(client, &format!("PyPilot: {}", step.detail));
+        return;
+    }
     let detail = summary
         .steps
         .iter()
