@@ -108,11 +108,110 @@ body {
   transition: color 0.25s var(--pp-ease);
 }
 
+/* Sidebar: a pill fades in under the hovered link, a glowing bar grows
+   beside the current page, and the text glides rather than jumps. */
+.VPSidebar .VPSidebarItem.is-link > .item {
+  position: relative;
+  border-radius: 8px;
+  isolation: isolate;
+}
+.VPSidebar .VPSidebarItem.is-link > .item::before {
+  content: '';
+  position: absolute;
+  inset: 2px -10px;
+  z-index: -1;
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(42, 169, 255, 0.14), rgba(42, 169, 255, 0));
+  opacity: 0;
+  transform: scaleX(0.92);
+  transform-origin: left center;
+  transition:
+    opacity 0.35s var(--pp-ease),
+    transform 0.45s cubic-bezier(0.22, 1.2, 0.36, 1);
+}
+.VPSidebar .VPSidebarItem.is-link > .item:hover::before,
+.VPSidebar .VPSidebarItem.is-active > .item::before {
+  opacity: 1;
+  transform: scaleX(1);
+}
+.VPSidebar .VPSidebarItem.is-link > .item::after {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 2px;
+  height: 18px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #7cd1ff, var(--vp-c-brand-1));
+  box-shadow: 0 0 10px rgba(42, 169, 255, 0.85);
+  transform: translateY(-50%) scaleY(0);
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.VPSidebar .VPSidebarItem.is-active > .item::after {
+  transform: translateY(-50%) scaleY(1);
+}
 .VPSidebarItem .text {
-  transition: color 0.2s var(--pp-ease), transform 0.2s var(--pp-ease);
+  transition:
+    color 0.3s var(--pp-ease),
+    transform 0.4s cubic-bezier(0.22, 1.2, 0.36, 1),
+    text-shadow 0.4s var(--pp-ease);
 }
 .VPSidebarItem.is-link:hover .text {
-  transform: translateX(2px);
+  transform: translateX(4px);
+}
+.VPSidebar .VPSidebarItem.is-active > .item .link > .text {
+  transform: translateX(4px);
+  text-shadow: 0 0 16px rgba(42, 169, 255, 0.55);
+}
+
+/* "On this page": the marker becomes a glowing bar that glides to the new
+   section with a soft overshoot, and the active link lights up. */
+.VPDoc .VPDocAsideOutline .outline-marker {
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #7cd1ff, var(--vp-c-brand-1));
+  box-shadow: 0 0 12px rgba(42, 169, 255, 0.9);
+  transition:
+    top 0.55s cubic-bezier(0.34, 1.4, 0.64, 1),
+    opacity 0.3s var(--pp-ease),
+    background-color 0.5s;
+}
+.VPDoc .VPDocAsideOutline .outline-link {
+  transition:
+    color 0.3s var(--pp-ease),
+    transform 0.4s cubic-bezier(0.22, 1.2, 0.36, 1),
+    text-shadow 0.4s var(--pp-ease);
+}
+.VPDoc .VPDocAsideOutline .outline-link:hover {
+  color: var(--vp-c-text-1);
+  transform: translateX(3px);
+}
+.VPDoc .VPDocAsideOutline .outline-link.active {
+  color: #fff;
+  transform: translateX(4px);
+  text-shadow: 0 0 14px rgba(42, 169, 255, 0.6);
+}
+
+/* Jumping to a section scrolls there, and the heading glows briefly. */
+html {
+  scroll-behavior: smooth;
+}
+.vp-doc :is(h2, h3, h4):target {
+  animation: pp-target 1.4s var(--pp-ease);
+}
+@keyframes pp-target {
+  0% {
+    text-shadow: 0 0 0 rgba(42, 169, 255, 0);
+    filter: brightness(1);
+  }
+  25% {
+    text-shadow: 0 0 22px rgba(42, 169, 255, 0.9);
+    filter: brightness(1.35);
+  }
+  100% {
+    text-shadow: 0 0 0 rgba(42, 169, 255, 0);
+    filter: brightness(1);
+  }
 }
 
 /* ---------- Typography ---------- */
