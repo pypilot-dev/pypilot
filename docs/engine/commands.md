@@ -12,24 +12,32 @@ pypilot <MODE> [ARG] [--path <dir>]
 |---|---|---|
 | `--path <dir>`, `-p <dir>`, `--path=<dir>` | all project modes | Project folder to analyze. Default: the current directory. If the folder's only Python code lives in one subfolder, that subfolder is used. |
 | `--pixi-env <name>`, `--pixi-env=<name>` <Badge type="tip" text="next" /> | all project modes | Which pixi environment counts as the project's, for this run only. Default: the [`pixi_environment`](/reference/configuration#pixi-environment) setting (`default`). |
-| `--json` <Badge type="tip" text="next" /> | every mode except `lsp` | Print one JSON document on stdout instead of text. See [Machine-readable output](./output). |
-| `--markdown` <Badge type="tip" text="next" /> | `doctor`, `check` | Print the Markdown report the editors show under **Show details**. |
-| `--version`, `-V`, `version` | — | Print `pypilot 1.2.2`. |
+| `--json` <Badge type="tip" text="next" /> | every mode except `lsp` and `completions` | Print one JSON document on stdout instead of text (`--format=json` too); `logs --json` prints raw log lines instead. See [Machine-readable output](./output). |
+| `--markdown`, `--md` <Badge type="tip" text="next" /> | `doctor`, `check` | Print the Markdown report the editors show under **Show details** (`--format=markdown` too). When both are given, `--json` wins. |
+| `--dry-run` <Badge type="tip" text="next" /> | `setup`, `install`, `fix python`, `fix cuda`, `doctor --fix` | Print the plan (every command, the files it writes, and why) and change nothing. See [Dry runs](./dry-run). |
+| `--version`, `-V` | — | Print `pypilot 1.2.2`, one line. Wrappers parse it, so it stays that way. |
+| `version`, `--version --verbose` <Badge type="tip" text="next" /> | — | Add the commit, target and data-table state; `--json` for all of it. See [`version`](#version). |
 | `--help`, `-h`, `help` | — | Print usage. |
 
 With no mode at all, `pypilot` runs `doctor`. An unknown mode prints the usage and exits with status 1.
 
-**Exit status.** `0` when the command ran, `1` when it could not (bad arguments, a package not on PyPI, a failed install). `doctor` exits `0` even when it reports problems: read the findings, or use the [JSON output](./output) for scripting.
+**Exit status.** `0` when the command ran, `1` when it could not (bad arguments, a package not on PyPI, a failed install, or a [dry run](./dry-run) whose plan would stop). `doctor` exits `0` even when it reports problems: read the findings, or use the [JSON output](./output) for scripting. `update-data --check` has its own codes: `0` current, `1` stale, `2` a fetch failed.
 
 ## doctor
 
 Read-only report on the environment and the project's compatibility. Nothing is installed or written, except a small request file in the cache directory that tells a running language server to refresh its notification.
 
 ```bash
-pypilot doctor [--path <dir>] [--pixi-env <name>]
+pypilot doctor [--json | --markdown] [--fix [--dry-run]] [--path <dir>] [--pixi-env <name>]
 ```
 
-Sections: **Environment** (uv, the project environment, pixi, interpreters found), **Project** (files, `requires-python`, dependencies), **pixi** (in pixi projects: platforms, lock status, environments), **Compatibility** (the supported range, the recommendation, each dependency's range) and **Findings**.
+| Flag | Meaning |
+|---|---|
+| `--json`, `--markdown` <Badge type="tip" text="next" /> | The same report as one JSON document, or as the Markdown the editors show. See [Machine-readable output](./output). |
+| `--fix` <Badge type="tip" text="next" /> | Print the report, then run what the editor's **Fix environment** runs (`setup`). With `--json` only setup's document is printed, with `command: "doctor --fix"`. |
+| `--fix --dry-run` <Badge type="tip" text="next" /> | Print the report, then the plan `--fix` would run. See [Dry runs](./dry-run). |
+
+Sections: **Environment** (uv, the project environment, pixi, interpreters found, and <Badge type="tip" text="next" /> the data tables' refresh state), **Project** (files, `requires-python`, dependencies), **pixi** (in pixi projects: platforms, lock status, environments), **Compatibility** (the supported range, the recommendation, each dependency's range) and **Findings**.
 
 <TerminalDemo src="doctor" cmd="pypilot doctor" title="~/src/demo" />
 
@@ -39,14 +47,13 @@ When no Python satisfies every dependency:
 
 The [Findings reference](/reference/checks) lists everything doctor can report.
 
-`pypilot doctor --json` and `pypilot doctor --markdown` ship in the next release; see [Machine-readable output](./output).
 
 ## check
 
 Can one package run on this project's Python? Read-only. Takes a name or any requirement a requirements file accepts; a specifier is judged on the release it selects.
 
 ```bash
-pypilot check <package> [--suggest-alternatives] [--path <dir>]
+pypilot check <package> [--suggest-alternatives] [--json | --markdown] [--path <dir>]
 ```
 
 | Flag | Meaning |
@@ -58,6 +65,8 @@ pypilot check <package> [--suggest-alternatives] [--path <dir>]
 <Badge type="tip" text="next" /> When the verdict is a failure (no files for this platform, no wheel for this Python, a source build), check says why and names the conda-forge build pixi could install instead:
 
 <<< @/snippets/check-gdal.txt{text}
+
+<Badge type="tip" text="next" /> When the package shares no Python with one of the project's own dependencies, check names that dependency and both ranges (the JSON `conflict` field), so you know which pin to change.
 
 A name that is not on PyPI exits with status 1: ``pypilot check: `nosuchpkg-zzqq` is not on PyPI; check the spelling``.
 
@@ -106,7 +115,7 @@ The JSON form starts like this (trimmed); the `kind` is `project` or `package`:
 Build the project's environment on the recommended Python, honouring [`package_manager`](/reference/configuration#package-manager). Same code path as the editor's **Fix environment** button.
 
 ```bash
-pypilot setup [--path <dir>] [--pixi-env <name>]
+pypilot setup [--dry-run] [--json] [--path <dir>] [--pixi-env <name>]
 ```
 
 What it does, by mode:
@@ -123,16 +132,14 @@ In projects with notebooks, setup also makes sure the environment has `ipykernel
 
 <<< @/snippets/setup.txt{text}
 
-::: info Still to come
-`setup --dry-run`, `fix --dry-run` and `install --dry-run` print the plan (the commands and file changes) without running it.
-:::
+<Badge type="tip" text="next" /> `pypilot setup --dry-run` prints the same steps as a plan, with each exact command line, the files it writes and why, and runs none of them. See [Dry runs](./dry-run).
 
 ## install
 
 Install one package and record it in the manifest.
 
 ```bash
-pypilot install <package> [--path <dir>]
+pypilot install <package> [--dry-run] [--json] [--path <dir>]
 ```
 
 | Mode | Command run |
@@ -149,7 +156,7 @@ pypilot install <package> [--path <dir>]
 Recompute the target Python and rebuild the environment on it, reinstalling the dependencies. Fails with a reason when there are no dependencies to solve for, or when they conflict. In a pixi project the move happens through pixi (`pixi add python=X.Y`).
 
 ```bash
-pypilot fix python [--path <dir>]
+pypilot fix python [--dry-run] [--json] [--path <dir>]
 ```
 
 `pypilot fix` with no target means `fix python`.
@@ -159,7 +166,7 @@ pypilot fix python [--path <dir>]
 Re-pin `torch` and `tensorflow` to the build that matches your NVIDIA driver. In a uv project the PyTorch index is written to `pyproject.toml` (an explicit `[[tool.uv.index]]` plus `[tool.uv.sources]` for the torch family) and synced, so the next `uv sync` does not swap the CUDA build back. pixi projects are never re-pinned here.
 
 ```bash
-pypilot fix cuda [--path <dir>]
+pypilot fix cuda [--dry-run] [--json] [--path <dir>]
 ```
 
 Without torch or tensorflow in the project:
@@ -173,7 +180,7 @@ Without torch or tensorflow in the project:
 Refresh the bundled data tables now, ignoring `data_refresh_days`. Global: takes no `--path`.
 
 ```bash
-pypilot update-data
+pypilot update-data [--check] [--json]
 ```
 
 Each table is reported as `ok` or `failed`, and a failure never breaks anything: the engine keeps the snapshot it was built with. This run happened before `conda_forge_packages.json` was published on `main`:
@@ -191,9 +198,19 @@ One or more datasets could not be refreshed; PyPilot keeps using the bundled sna
 
 When every table refreshes, the last line reads `All datasets refreshed.`
 
-::: info Still to come
-`update-data --check` reports whether the tables are stale without downloading them.
-:::
+### update-data --check <Badge type="tip" text="next" /> {#update-data-check}
+
+Fetch the tables from `main` and compare them with the copies in use, writing nothing. For each table: its schema, whether the bundled or a refreshed copy is in use and how old it is, and how it compares with `main`.
+
+<<< @/snippets/update-data-check.txt{text}
+
+| Exit | Meaning |
+|---|---|
+| `0` | The tables in use match `main` |
+| `1` | Stale: `pypilot update-data` refreshes them |
+| `2` | A fetch failed (offline, a proxy); the line for each table says why |
+
+`pypilot doctor` shows the same state without any network access, as its `data tables` line (`refreshed 3 days ago (next in 4 days)`).
 
 ## migrate-conda
 
@@ -250,6 +267,40 @@ pypilot install-pixi
 
 <<< @/snippets/install-pixi.txt{text}
 
+## logs <Badge type="tip" text="next" /> {#logs}
+
+Print where the local log is, or its last entries. Every CLI command and every LSP action appends one JSON line; nothing is sent anywhere.
+
+```bash
+pypilot logs [--tail [N]] [--json]
+```
+
+| Flag | Meaning |
+|---|---|
+| (none) | Print the log file's path |
+| `--tail [N]`, `--tail=N` | The last `N` entries (default 10), one summary line each; a failed entry lists its last three failed steps and the error |
+| `--json` | With `--tail`: the raw JSON lines instead of the summary |
+
+See [Logs, version & completions](./logs) for the file's location, rotation, fields and redaction.
+
+## completions <Badge type="tip" text="next" /> {#completions}
+
+Print a completion script for `bash`, `zsh`, `fish` or `powershell`. An unknown shell exits with status 1.
+
+```bash
+pypilot completions <bash|zsh|fish|powershell>
+```
+
+Loading them is shown in [Shell completion](./logs#shell-completion).
+
+## version <Badge type="tip" text="next" /> {#version}
+
+`pypilot --version` (and `-V`) prints one line, `pypilot 1.2.2`, because the editor extensions and `pypilot-cli` parse exactly that. `pypilot version`, or `pypilot --version --verbose`, adds the build details:
+
+<<< @/snippets/version.txt{text}
+
+`commit`, `target` and the date come from the build (each is missing when the build did not record it). The `data` lines are the same refresh state as `update-data --check`, read offline. `pypilot version --json` (or `--version --json`) prints all of it; see [Machine-readable output](./output#version-json).
+
 ## lsp
 
 Run as a language server over stdio. Zed and VS Code start it for you; other editors can too, see [Other editors](/reference/editors) and the [LSP protocol](/reference/lsp).
@@ -257,15 +308,3 @@ Run as a language server over stdio. Zed and VS Code start it for you; other edi
 ```bash
 pypilot lsp
 ```
-
-## Still to come
-
-Being built in parallel; documented here so the reference is complete once they land. <!-- verify after merge -->
-
-| Addition | What it does |
-|---|---|
-| `--dry-run` on `setup`, `fix`, `install`; `doctor --fix --dry-run` | Print the plan (commands and file changes) without running it. |
-| `pypilot logs [--tail [N]]` | Print the path of the local log (`<cache>/logs/pypilot.log`, one JSON line per CLI command and LSP action, rotated at 1 MB, secrets redacted), or its last N entries. |
-| `pypilot completions <shell>` | Print a shell completion script. |
-| `update-data --check` | Report stale tables without downloading. |
-| `--version` details | Build details beyond the version number. |

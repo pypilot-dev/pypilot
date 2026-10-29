@@ -93,6 +93,8 @@ export default defineConfig({
             { text: 'Overview', link: '/engine/' },
             { text: 'Command reference', link: '/engine/commands' },
             { text: 'Machine-readable output', link: '/engine/output' },
+            { text: 'Dry runs', link: '/engine/dry-run' },
+            { text: 'Logs, version & completions', link: '/engine/logs' },
             { text: 'Building from source', link: '/engine/building' }
           ]
         },
