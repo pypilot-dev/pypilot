@@ -37,6 +37,11 @@ const FILE_NAME: &str = "pypilot.log";
 
 /// Where the log lives. `PYPILOT_LOG_DIR` overrides it (tests, debugging).
 pub fn log_dir() -> PathBuf {
+    // Unit tests drive the CLI and LSP in-process; keep them out of the
+    // user's real log.
+    if cfg!(test) {
+        return std::env::temp_dir().join("pypilot-test-logs");
+    }
     match std::env::var_os("PYPILOT_LOG_DIR") {
         Some(dir) if !dir.is_empty() => PathBuf::from(dir),
         _ => platform::cache_dir().join("logs"),
