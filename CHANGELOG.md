@@ -3,6 +3,23 @@
 All notable changes to PyPilot's engine and Zed extension. Releases and their
 full notes are on the [Releases page](https://github.com/pypilot-dev/pypilot/releases).
 
+## Unreleased
+
+- pixi: `pixi_environment` and `--pixi-env` choose the environment; doctor checks
+  every environment, Python drift between them, a stale `pixi.lock` (read-only) and
+  PyPI dependencies with no wheel for a declared platform.
+- A "pixi can help here" advisory in pip and uv projects (no wheel and native
+  libraries, failed builds missing a header, CUDA sources without nvcc, mixed-language
+  repos); it only suggests.
+- `pypilot migrate-to-pixi`, `pypilot migrate-conda --to pixi`, `pypilot install-pixi`
+  and `package_manager = "pixi"`; Zed's "Initialize pixi project" button.
+- `pypilot explain`, `logs`, `completions` and `version`; `doctor --fix`;
+  `update-data --check`.
+- `--json` on every command, `--markdown` on `doctor` and `check`, `--dry-run` on
+  `setup`, `install`, `fix` and `doctor --fix`.
+- `diagnostics_scope = "workspace"`: import diagnostics for files that are not open.
+- Releases carry `SHA256SUMS`, a CycloneDX SBOM and build-provenance attestations.
+
 ## [1.2.2]
 
 - Python 3.15 support. On a 3.15 project every package was reported as unsupported,
