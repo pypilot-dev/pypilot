@@ -79,11 +79,14 @@ Channels and conda packages are kept, conda pins become pixi specs (`numpy=1.26`
 pypilot migrate-conda --to pixi --write --install
 ```
 
-## From the editor
+## From the editor {#from-the-editor}
 
-- **VS Code**: **PyPilot: Initialize pixi project** shows the preview and writes it only after you confirm, optionally running `pixi install`.
-- **Zed**: the tasks `pypilot: preview migration to pixi (pixi.toml)` and `pypilot: migrate to pixi (write pixi.toml and install)`, or the **Initialize pixi project** button on the notification.
-- Both: `package_manager = "pixi"` makes `setup` write `pixi.toml` (as `--write` would) and run `pixi install` on a project without a pixi manifest.
+How you confirm depends on where you start. Nothing is written before you choose.
+
+- **The Initialize pixi project button**, on the workspace notification (the [advisory](./advisory)) or on the toast after a pip/uv build failed on a system library: the same in Zed and VS Code, because the engine handles it. It runs a dry run and shows one message with the headline, `PyPilot: Would write <path>/pixi.toml: python X.Y, N conda-forge and M PyPI dependencies. pyproject.toml and requirements.txt stay as they are; pypilot migrate-to-pixi shows the full preview.` (with `, K left for review` when some lines could not be translated). The buttons are **Write and install**, **Write pixi.toml** and **Cancel**.
+- **VS Code: PyPilot: Initialize pixi project** (palette): asks for the engine's preview (`pypilot.migrateToPixi` with `{ "write": false }`), opens the full preview beside the editor, then asks in a modal *write pixi.toml as shown in the preview?* with **Write pixi.toml** and **Write and run pixi install**. Only then does it call the command again with `{ "write": true, "install": … }`.
+- **CLI and Zed tasks**: `pypilot migrate-to-pixi` previews (task `pypilot: preview migration to pixi (pixi.toml)`); `--write` writes and `--write --install` also runs `pixi install` (task `pypilot: migrate to pixi (write pixi.toml and install)`).
+- Everywhere: `package_manager = "pixi"` makes `setup` write `pixi.toml` (as `--write` would) and run `pixi install` on a project without a pixi manifest.
 
 ## Undo
 

@@ -26,7 +26,7 @@ A running editor locks `pypilot.exe`. Rename the old one (for example to `pypilo
 cargo test -p pypilot-helper
 ```
 
-Tests run offline against recorded PyPI responses and fixed Linux x86-64 target tags. The checks CI runs, and that every pull request touching Rust must pass:
+Tests run offline against recorded PyPI responses. The platform is always passed in, never read from the host, so Linux (x64, arm64, glibc and musl), macOS (x64, arm64) and Windows (x64, arm64) are all checked on any machine; `helper/tests/platforms.rs` covers the cases where they differ. `cargo nextest run -p pypilot-helper` runs the same suite faster. The checks CI runs, and that every pull request touching Rust must pass:
 
 ```bash
 cargo fmt --all -- --check
@@ -34,6 +34,8 @@ cargo clippy -p pypilot-helper --all-targets -- -D warnings
 cargo test -p pypilot-helper
 cargo build -p pypilot-zed --target wasm32-wasip2 --release
 ```
+
+CI builds with `--locked`. A separate job runs `cargo deny check` (advisories, licenses, banned crates, sources; `deny.toml`), and a nightly job runs against the live PyPI, PyTorch, NVIDIA and conda-forge. See [Security](/guide/security#supply-chain).
 
 ## Repository layout
 

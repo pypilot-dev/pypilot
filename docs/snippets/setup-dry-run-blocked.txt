@@ -1,0 +1,8 @@
+PyPilot setup --dry-run — C:\src\pipdemo (pip mode, Python 3.12)
+  Python 3.12 chosen: dependencies support 3.9–3.12; mediapipe caps the upper bound (supports 3.9–3.12).
+  ✗ select interpreter: Python 3.12 is required but not installed. Install it (e.g. from python.org or your package manager), then run setup again. pip mode cannot fetch interpreters.
+── Plan (nothing was changed) ───────────────────────────
+  Nothing to do.
+
+  ✗ The run would stop here: select interpreter: Python 3.12 is required but not installed. Install it (e.g. from python.org or your package manager), then run setup again. pip mode cannot fetch interpreters.
+pypilot setup: the plan stops before it finishes: select interpreter: Python 3.12 is required but not installed. Install it (e.g. from python.org or your package manager), then run setup again. pip mode cannot fetch interpreters.

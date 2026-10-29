@@ -1,0 +1,12 @@
+# pypilot PowerShell completion. Load with:
+#   pypilot completions powershell | Out-String | Invoke-Expression
+Register-ArgumentCompleter -Native -CommandName 'pypilot', 'pypilot.exe' -ScriptBlock {
+    param($wordToComplete, $commandAst, $cursorPosition)
+    $commands = @{
+        'doctor' = @{ Flags = @('--json', '--markdown', '--fix', '--dry-run', '--path', '-p', '--pixi-env', '--help', '-h'); Takes = @{ '--path' = @(); '-p' = @(); '--pixi-env' = @() }; Positional = @() }
+        'setup' = @{ Flags = @('--dry-run', '--json', '--path', '-p', '--pixi-env', '--help', '-h'); Takes = @{ '--path' = @(); '-p' = @(); '--pixi-env' = @() }; Positional = @() }
+        'check' = @{ Flags = @('--suggest-alternatives', '--json', '--markdown', '--path', '-p', '--pixi-env', '--help', '-h'); Takes = @{ '--path' = @(); '-p' = @(); '--pixi-env' = @() }; Positional = @() }
+        'explain' = @{ Flags = @('--json', '--path', '-p', '--pixi-env', '--help', '-h'); Takes = @{ '--path' = @(); '-p' = @(); '--pixi-env' = @() }; Positional = @() }
+        'install' = @{ Flags = @('--dry-run', '--json', '--path', '-p', '--pixi-env', '--help', '-h'); Takes = @{ '--path' = @(); '-p' = @(); '--pixi-env' = @() }; Positional = @() }
+        'fix' = @{ Flags = @('--dry-run', '--json', '--path', '-p', '--pixi-env', '--help', '-h'); Takes = @{ '--path' = @(); '-p' = @(); '--pixi-env' = @() }; Positional = @('python', 'cuda') }
+        'update-data' = @{ Flags = @('--check', '--json'); Takes = @{  }; Positional = @() }

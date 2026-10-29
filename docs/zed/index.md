@@ -10,7 +10,7 @@ The shim uses a `pypilot` on your `PATH` when its version is new enough; otherwi
 
 ## What you see
 
-- **One notification on open** when something needs attention, with **Fix environment**, **Show details**, **Ignore** and **Never for this project**. A correct environment stays silent. <Badge type="tip" text="next" /> When pixi would help, an **Initialize pixi project** button is added; it describes what the migration would write and writes it only after you choose **Write and install** or **Write pixi.toml**.
+- **One notification on open** when something needs attention, with **Fix environment**, **Show details**, **Ignore** and **Never for this project**. A correct environment stays silent. <Badge type="tip" text="next" /> When pixi would help, an **Initialize pixi project** button is added; the engine runs a dry run, shows one message with what `pixi.toml` would contain, and offers **Write and install**, **Write pixi.toml** or **Cancel**; nothing is written before you choose (see [From the editor](/pixi/migrate#from-the-editor)).
 - **Diagnostics on imports** in Python files, with code actions (`ctrl-.`) to install the package or recreate the environment on a supported Python.
 - **Show details** opens the full report as a Markdown document.
 - **Pointing Zed's Python server at the environment.** If Zed's own Python language server keeps reporting installed packages as missing because it looks at another interpreter, PyPilot offers to pin pyright to the project environment (in `pyproject.toml` under `[tool.pyright]`, or a new `pyrightconfig.json`). This is offered in Zed only, and only after you agree is anything written.
@@ -59,9 +59,10 @@ package_manager    = "uv"
 notifications      = "problems-only"
 auto_check_on_open = true
 data_refresh_days  = 7
+diagnostics_scope  = "workspace"     # next: import diagnostics for every file, not just open ones
 ```
 
-All keys are in the [configuration reference](/reference/configuration).
+The Zed extension itself sends no PyPilot settings over LSP, so set them in this file or in the global `config.toml`. All keys are in the [configuration reference](/reference/configuration). <Badge type="tip" text="next" /> In Zed, `pypilot completions`, `pypilot logs --tail` and `pypilot setup --dry-run` work in the terminal next to the tasks; see [Logs, version & completions](/engine/logs) and [Dry runs](/engine/dry-run).
 
 ## Develop the extension
 

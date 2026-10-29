@@ -5,6 +5,7 @@ PyPilot doctor — C:\src\demo
   uv              : present (v0.13.5, on PATH)
   virtualenv      : none
   interpreters    : 3.15 (python3), 3.14 (C:\Python314\python.exe)
+  data tables     : refreshed just now (next in 6 days); 1 of 5 bundled
 
 ── Project ──────────────────────────────────────────────
   files           : requirements.txt

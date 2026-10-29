@@ -1,0 +1,79 @@
+{
+  "pypilot": "1.2.2",
+  "command": "setup",
+  "ok": true,
+  "dry_run": true,
+  "plan": {
+    "mode": "uv_full",
+    "python": "3.12",
+    "why": "Python 3.12 chosen: dependencies support 3.12; mediapipe caps the upper bound (supports 3.9–3.12).",
+    "steps": [
+      {
+        "name": "uv init",
+        "command": [
+          "uv",
+          "init",
+          "--bare",
+          "--no-workspace",
+          "--pin-python",
+          "--python",
+          "3.12"
+        ],
+        "writes": [
+          "C:\\src\\demo\\pyproject.toml",
+          "C:\\src\\demo\\.python-version"
+        ],
+        "why": "the project has no pyproject.toml; create a bare one pinned to Python 3.12 so `uv add` has a manifest to record dependencies in"
+      },
+      {
+        "name": "uv python install 3.12",
+        "command": [
+          "uv",
+          "python",
+          "install",
+          "3.12"
+        ],
+        "writes": [],
+        "why": "make CPython 3.12 available (uv downloads it into its own Python store if missing)"
+      },
+      {
+        "name": "uv venv",
+        "command": [
+          "uv",
+          "venv",
+          "--clear",
+          "--python",
+          "3.12",
+          "C:\\src\\demo\\.venv"
+        ],
+        "writes": [
+          "C:\\src\\demo\\.venv"
+        ],
+        "why": "create the project environment on Python 3.12, replacing any existing one"
+      },
+      {
+        "name": "uv add -r requirements.txt",
+        "command": [
+          "uv",
+          "add",
+          "-r",
+          "requirements.txt"
+        ],
+        "writes": [
+          "C:\\src\\demo\\pyproject.toml",
+          "C:\\src\\demo\\uv.lock",
+          "C:\\src\\demo\\.venv"
+        ],
+        "why": "move requirements.txt's dependencies into pyproject.toml and install them"
+      }
+    ],
+    "notes": [
+      {
+        "name": "ensure uv",
+        "ok": true,
+        "detail": "uv 0.13.5 (on PATH)"
+      }
+    ],
+    "blocked": null
+  }
+}

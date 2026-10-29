@@ -1,28 +1,31 @@
 # Other editors
 
-PyPilot's language server is editor-agnostic: any client that speaks LSP over stdio can run `pypilot lsp`. You get import diagnostics, quick fixes, and the workspace notification as `window/showMessageRequest`. Run it **alongside** your usual Python server (pyright, basedpyright, pylsp, ruff); it does not do completion, hover or type checking.
+PyPilot's language server is editor-agnostic: any client that speaks LSP over stdio can run `pypilot lsp`. You get import diagnostics, quick fixes, and the workspace notification as `window/showMessageRequest`. Run it **alongside** your usual Python server (pyright, basedpyright, pylsp, ruff, ty); it does not do completion, hover or type checking.
 
 First put the engine on your `PATH`: `pip install pypilot-cli`, a release archive, or `cargo install --path helper --locked` (see [Getting started](/guide/getting-started)). Check with `pypilot --version`.
 
-The configurations below follow each editor's documented way of adding a language server; adapt them to your setup. The commands from [Engine CLI](/engine/) work in any terminal next to them.
+The snippets below are the ones in [`helper/src/lsp/PROTOCOL.md`](https://github.com/pypilot-dev/pypilot/blob/main/helper/src/lsp/PROTOCOL.md) <Badge type="tip" text="next" />, the protocol reference kept next to the server code. They turn on [workspace diagnostics](/reference/configuration#diagnostics-scope) as an example of passing a setting; leave that out to check open files only (engine 1.2.2 ignores it anyway). The commands from [Engine CLI](/engine/) work in any terminal next to them.
+
+::: tip How settings reach PyPilot
+PyPilot never asks the editor for settings (`workspace/configuration`); the client must push them, in `initializationOptions` or `workspace/didChangeConfiguration`. Each message **replaces** the previous editor settings, so pick one way per editor, as below. `pypilot.toml` in the project always works and wins over the editor. See [precedence](./configuration#precedence).
+:::
 
 ## Neovim
 
-With Neovim 0.11+ built-in configuration:
+Neovim 0.11+ with `vim.lsp.config`:
 
 ```lua
 -- init.lua
 vim.lsp.config('pypilot', {
   cmd = { 'pypilot', 'lsp' },
   filetypes = { 'python' },
-  root_markers = { 'pyproject.toml', 'requirements.txt', 'pixi.toml', 'environment.yml', '.git' },
-  -- Optional: the same keys as pypilot.toml, in camelCase.
-  init_options = { notifications = 'problems-only' },
+  root_markers = { 'pyproject.toml', 'requirements.txt', 'pixi.toml', 'setup.py', '.git' },
+  init_options = { diagnosticsScope = 'workspace' },
 })
 vim.lsp.enable('pypilot')
 ```
 
-Quick fixes are under `vim.lsp.buf.code_action()` (`gra` by default in 0.11). The notification buttons appear through `vim.ui.select`.
+Use `init_options`, not `settings`: Neovim serves `settings` through `workspace/configuration`, which PyPilot never requests. Quick fixes are under `vim.lsp.buf.code_action()` (`gra` by default in 0.11). The notification buttons appear through `vim.ui.select`.
 
 ## Helix
 
@@ -31,25 +34,34 @@ Quick fixes are under `vim.lsp.buf.code_action()` (`gra` by default in 0.11). Th
 [language-server.pypilot]
 command = "pypilot"
 args = ["lsp"]
+config = { diagnosticsScope = "workspace" }
 
 [[language]]
 name = "python"
-language-servers = ["pyright", "pypilot"]   # keep your usual server first
+# List the servers you already use as well; this array replaces the default.
+language-servers = ["pyright", "pypilot"]
 ```
 
 Code actions: `space a`. Helix shows `window/showMessage` in the status line.
 
-## Emacs (eglot)
-
-eglot runs one server per major mode, so in eglot PyPilot replaces your Python server unless you put an LSP multiplexer in front. As the only server:
+## Emacs (Eglot)
 
 ```elisp
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-server-programs
                '((python-mode python-ts-mode) . ("pypilot" "lsp"))))
+
+;; Eglot sends this with workspace/didChangeConfiguration on connect, which
+;; replaces initializationOptions (see the tip above), so configure it here.
+(setq-default eglot-workspace-configuration
+              '(:pypilot (:diagnosticsScope "workspace")))
 ```
 
-With `lsp-mode`, register it as an add-on client so it runs next to pyright:
+Eglot runs one server per buffer, so this entry replaces your other Python server for those modes; put the two behind an LSP multiplexer if you want both.
+
+### lsp-mode
+
+`lsp-mode` can run PyPilot as an add-on client next to pyright. This snippet is not in PROTOCOL.md; adapt it to your setup:
 
 ```elisp
 (with-eval-after-load 'lsp-mode
@@ -63,6 +75,7 @@ With `lsp-mode`, register it as an add-on client so it runs next to pyright:
 ## What to expect
 
 - The project root is the client's first workspace folder (or `rootUri`). Open the project folder, not a single file.
-- Settings come from `pypilot.toml` (and the global config); editors that send `initializationOptions` can override them per session. See [Configuration](./configuration).
 - `pypilot.showDetails` opens the report with `window/showDocument`; clients that do not support it get the report as a message.
+- With `diagnosticsScope = "workspace"`, the server watches `**/*.py` and `**/*.ipynb` only if your client supports dynamic registration of `workspace/didChangeWatchedFiles`. Without it, files changed outside the editor are re-checked after the next install, rebuild, terminal command or configuration change.
+- A terminal command (`pypilot setup`, `pypilot doctor`, …) run in the project makes the running server re-check, as in Zed.
 - Everything is described in the [LSP protocol](./lsp) reference.

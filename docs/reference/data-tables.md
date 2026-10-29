@@ -15,6 +15,7 @@ Some answers cannot come from PyPI alone: which CUDA a driver supports, which CU
 - They are **compiled into the engine**, so an offline machine is never wrong, only possibly stale.
 - Every engine **re-downloads them from `main`** every `data_refresh_days` (default 7) from `raw.githubusercontent.com/pypilot-dev/pypilot/main/helper/data/`. A downloaded file that does not parse is ignored and the built-in copy is used.
 - `pypilot update-data` refreshes them now; `data_refresh_days = 0` never does.
+- <Badge type="tip" text="next" /> `pypilot update-data --check` compares the copies in use with `main` without writing (exit `0` current, `1` stale, `2` a fetch failed); `pypilot doctor` and `pypilot version` show the refresh state offline. See [Is the data current?](/engine/logs#is-the-data-current)
 
 So a data change merged to `main` reaches every installed engine within about a week, without a release.
 
