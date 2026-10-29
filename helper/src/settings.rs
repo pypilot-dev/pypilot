@@ -78,6 +78,23 @@ pub enum Notifications {
     Off,
 }
 
+/// Which files get import diagnostics.
+///
+/// - `openFiles` (default): the buffers open in the editor.
+/// - `workspace`: also every `.py` file and notebook in the workspace, scanned
+///   in the background and published so they show up in the Problems panel
+///   (see `crate::lsp`'s workspace scan). Open buffers still win.
+///
+/// TOML takes `"openFiles"` or `"open-files"`, the editor `"openFiles"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum DiagnosticsScope {
+    #[default]
+    #[serde(alias = "open-files")]
+    OpenFiles,
+    Workspace,
+}
+
 /// Raw, all-optional shape as parsed from a TOML file. Merging is "last write
 /// wins per present key", which is why every field is an `Option`.
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
@@ -87,6 +104,7 @@ struct RawSettings {
     auto_check_on_open: Option<bool>,
     data_refresh_days: Option<u32>,
     pixi_environment: Option<String>,
+    diagnostics_scope: Option<DiagnosticsScope>,
     #[serde(default)]
     state: RawState,
 }
@@ -111,6 +129,8 @@ pub struct Settings {
     /// The editor and `--pixi-env` can override it for one process; see
     /// [`crate::core::pixi_envs::selected_name`].
     pub pixi_environment: String,
+    /// Which files get import diagnostics (`diagnostics_scope`).
+    pub diagnostics_scope: DiagnosticsScope,
 }
 
 impl Default for Settings {
@@ -122,6 +142,7 @@ impl Default for Settings {
             data_refresh_days: 7,
             dismissed: false,
             pixi_environment: crate::core::pixi::DEFAULT_ENV.to_string(),
+            diagnostics_scope: DiagnosticsScope::default(),
         }
     }
 }
@@ -151,6 +172,7 @@ impl Settings {
                 .map(|e| e.trim().to_string())
                 .filter(|e| !e.is_empty())
                 .unwrap_or(d.pixi_environment),
+            diagnostics_scope: merged.diagnostics_scope.unwrap_or(d.diagnostics_scope),
         }
     }
 
@@ -220,7 +242,7 @@ fn editor_settings() -> Option<RawSettings> {
 /// Replace the editor's settings layer with what the client sent: its
 /// `initializationOptions`, or the `settings` of a `didChangeConfiguration`.
 /// Keys are camelCase (`packageManager`, `notifications`, `autoCheckOnOpen`,
-/// `dataRefreshDays`, `pixiEnvironment`), either at the top level or under
+/// `dataRefreshDays`, `pixiEnvironment`, `diagnosticsScope`), either at the top level or under
 /// `pypilot`. Values that do not parse are ignored with a log line, never an
 /// error; values equal to the built-in default are treated as unset.
 pub fn set_editor_settings(value: &serde_json::Value) {
@@ -267,6 +289,8 @@ fn parse_editor_settings(value: &serde_json::Value) -> RawSettings {
             }
             ok
         });
+    raw.diagnostics_scope =
+        typed::<DiagnosticsScope>(obj, "diagnosticsScope").filter(|s| *s != d.diagnostics_scope);
     raw
 }
 
@@ -327,6 +351,9 @@ fn merge(base: &mut RawSettings, overlay: Option<RawSettings>) {
     }
     if o.pixi_environment.is_some() {
         base.pixi_environment = o.pixi_environment;
+    }
+    if o.diagnostics_scope.is_some() {
+        base.diagnostics_scope = o.diagnostics_scope;
     }
     if o.state.never.is_some() {
         base.state.never = o.state.never;
@@ -522,6 +549,93 @@ mod tests {
         // Blank means unset.
         std::fs::write(dir.join("pypilot.toml"), "pixi_environment = \"\"\n").unwrap();
         assert_eq!(Settings::load(&dir).pixi_environment, "default");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diagnostics_scope_from_editor_and_toml() {
+        // didChangeConfiguration (nested) and initializationOptions (flat).
+        let nested = serde_json::json!({ "pypilot": { "diagnosticsScope": "workspace" } });
+        assert_eq!(
+            parse_editor_settings(&nested).diagnostics_scope,
+            Some(DiagnosticsScope::Workspace)
+        );
+        let flat = serde_json::json!({ "diagnosticsScope": "workspace" });
+        assert_eq!(
+            parse_editor_settings(&flat).diagnostics_scope,
+            Some(DiagnosticsScope::Workspace)
+        );
+        // The default counts as unset; anything unknown is dropped.
+        for v in ["openFiles", "everything", "Workspace"] {
+            let raw = parse_editor_settings(&serde_json::json!({ "diagnosticsScope": v }));
+            assert_eq!(raw.diagnostics_scope, None, "{v}");
+        }
+
+        for (text, expected) in [
+            (
+                "diagnostics_scope = \"workspace\"
+",
+                DiagnosticsScope::Workspace,
+            ),
+            (
+                "diagnostics_scope = \"openFiles\"
+",
+                DiagnosticsScope::OpenFiles,
+            ),
+            (
+                "diagnostics_scope = \"open-files\"
+",
+                DiagnosticsScope::OpenFiles,
+            ),
+        ] {
+            let raw: RawSettings = toml::from_str(text).unwrap();
+            assert_eq!(raw.diagnostics_scope, Some(expected), "{text}");
+        }
+        assert_eq!(
+            Settings::default().diagnostics_scope,
+            DiagnosticsScope::OpenFiles
+        );
+    }
+
+    #[test]
+    fn diagnostics_scope_precedence_is_global_editor_project() {
+        let toml_scope = |s: &str| -> RawSettings {
+            toml::from_str(&format!(
+                "diagnostics_scope = \"{s}\"
+"
+            ))
+            .unwrap()
+        };
+        let editor = |s: &str| parse_editor_settings(&serde_json::json!({ "diagnosticsScope": s }));
+
+        // Editor beats the global file.
+        let mut base = toml_scope("openFiles");
+        merge(&mut base, Some(editor("workspace")));
+        assert_eq!(base.diagnostics_scope, Some(DiagnosticsScope::Workspace));
+
+        // The project file beats the editor.
+        merge(&mut base, Some(toml_scope("openFiles")));
+        assert_eq!(base.diagnostics_scope, Some(DiagnosticsScope::OpenFiles));
+
+        // An editor sending the default does not mask a global "workspace".
+        let mut base = toml_scope("workspace");
+        merge(&mut base, Some(editor("openFiles")));
+        assert_eq!(base.diagnostics_scope, Some(DiagnosticsScope::Workspace));
+
+        // And through `Settings::load`, from the project file.
+        let dir = std::env::temp_dir().join(format!("pypilot-diag-scope-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("pypilot.toml"),
+            "diagnostics_scope = \"workspace\"
+",
+        )
+        .unwrap();
+        assert_eq!(
+            Settings::load(&dir).diagnostics_scope,
+            DiagnosticsScope::Workspace
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
