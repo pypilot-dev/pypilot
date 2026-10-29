@@ -9,7 +9,8 @@ Every finding PyPilot can raise, as `doctor` prints it and as the editor shows i
 | No environment set up yet | Warning | **Fix environment** / `pypilot setup` on the recommended Python |
 | Python X.Y is not supported by this project | Error | **Fix environment** / `pypilot fix python` |
 | Dependencies conflict on Python version | Error | Manual: no single Python works. `pypilot explain` shows what blocks each version |
-| Could not resolve `name` | Warning | Manual: a typo or a private package. The detail says why the lookup failed; offline it reads ``PyPI lookup failed for `name` (requesting metadata …)``, and the package then constrains nothing, so the supported range can look wider than it is |
+| Could not resolve `name` | Warning | Manual: a typo or a private package. PyPI answered that it has no such project, or no release matches the pin |
+| Could not reach PyPI for some dependencies | Info | <Badge type="tip" text="next" /> Re-run online. The lookup never got an answer (offline, a proxy, a PyPI outage), so those packages are listed as *not checked* and constrain nothing; the supported range can look wider than it is |
 | Will compile from source | Warning | Manual: no wheel here, the sdist will be built |
 | … cannot be installed on *platform* | Error | Manual: the release has no files for this platform |
 | uv could not resolve dependencies for Python X.Y | Warning | Manual: `uv --dry-run` found a conflict metadata cannot see (a yanked release, a transitive pin) |

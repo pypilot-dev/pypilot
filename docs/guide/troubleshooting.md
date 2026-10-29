@@ -69,7 +69,7 @@ If it keeps happening, `pypilot logs --tail` (engine newer than 1.2.2) shows the
 
 PyPilot keeps working from its caches and the tables compiled into it; only packages it has never looked up cannot be judged.
 
-- `pypilot doctor` lists each package it has no metadata for as **Could not resolve `name`**, with the reason (for example ``requesting metadata for `name` ``), and that package does not narrow the supported range. Re-run it online before trusting a recommendation.
+- `pypilot doctor` lists each package it could not look up as **not checked (PyPI unreachable)** and adds one note, *Could not reach PyPI for some dependencies*, with the reason. Those packages do not narrow the supported range, so re-run it online before trusting a recommendation. <Badge type="tip" text="next" /> Engine 1.2.2 reported each of them as *Could not resolve `name` … It may be a typo*.
 - In the editor, <Badge type="tip" text="next" /> those imports get no diagnostic. "PyPI has no project named …" only appears when PyPI really answered 404. Engine 1.2.2 showed it for every import it could not look up, offline included.
 - `pypilot update-data` prints `failed` per table and keeps the copies it has; <Badge type="tip" text="next" /> `update-data --check` exits `2`.
 - The engine reads `HTTPS_PROXY` / `NO_PROXY` for its own requests. Downloads of the engine itself: see [VS Code](/vscode/#a-pinned-verified-engine) and [pypilot-cli](/python/#offline).
