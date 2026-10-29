@@ -15,9 +15,9 @@ pypilot <MODE> [ARG] [--path <dir>]
 | `--json` <Badge type="tip" text="1.3" /> | every mode except `lsp` and `completions` | Print one JSON document on stdout instead of text (`--format=json` too); `logs --json` prints raw log lines instead. See [Machine-readable output](./output). |
 | `--markdown`, `--md` <Badge type="tip" text="1.3" /> | `doctor`, `check` | Print the Markdown report the editors show under **Show details** (`--format=markdown` too). When both are given, `--json` wins. |
 | `--dry-run` <Badge type="tip" text="1.3" /> | `setup`, `install`, `fix python`, `fix cuda`, `doctor --fix` | Print the plan (every command, the files it writes, and why) and change nothing. See [Dry runs](./dry-run). |
-| `--version`, `-V` | — | Print `pypilot 1.3.0`, one line. Wrappers parse it, so it stays that way. |
-| `version`, `--version --verbose` <Badge type="tip" text="1.3" /> | — | Add the commit, target and data-table state; `--json` for all of it. See [`version`](#version). |
-| `--help`, `-h`, `help` | — | Print usage. |
+| `--version`, `-V` | none | Print `pypilot 1.3.0`, one line. Wrappers parse it, so it stays that way. |
+| `version`, `--version --verbose` <Badge type="tip" text="1.3" /> | none | Add the commit, target and data-table state; `--json` for all of it. See [`version`](#version). |
+| `--help`, `-h`, `help` | none | Print usage. |
 
 With no mode at all, `pypilot` runs `doctor`. An unknown mode prints the usage and exits with status 1.
 

@@ -96,14 +96,14 @@ Titles look like ``Install `numpy` ``, `Install 3 packages: a, b, c`, ``Create e
 
 | Command | Arguments | Result | Does |
 |---|---|---|---|
-| `pypilot.fixEverything` | — | `{ ok }` | Same as `pypilot setup` (asks how to proceed first when uv is missing in `auto` mode) |
+| `pypilot.fixEverything` | none | `{ ok }` | Same as `pypilot setup` (asks how to proceed first when uv is missing in `auto` mode) |
 | `pypilot.showDetails` | `[package?]` | `null` | Writes the report to `<temp>/pypilot-report.md` and opens it with `window/showDocument`; with a package (or a requirement such as `numpy>=2`), adds a `pypilot check` section. Falls back to `window/showMessage` |
-| `pypilot.ignore` | — | `null` | Nothing (dismisses) |
-| `pypilot.neverForProject` | — | `null` | Writes `[state] never = true` to `.zed/pypilot.toml` |
+| `pypilot.ignore` | none | `null` | Nothing (dismisses) |
+| `pypilot.neverForProject` | none | `null` | Writes `[state] never = true` to `.zed/pypilot.toml` |
 | `pypilot.installPackage` | `[package, …]` | `{ ok }` | Installs one or more packages in one step; names are validated |
 | `pypilot.recreateWithPython` | `[python, package, …]` | `{ ok }` | Builds (or rebuilds) the environment on `python`, then installs every package |
-| `pypilot.installUvGlobally` (alias `pypilot.installUv`) | — | `{ ok }` | Installs uv; `true` if already present |
-| `pypilot.installPixi` <Badge type="tip" text="1.3" /> | — | `{ ok }` | Runs pixi's official installer |
+| `pypilot.installUvGlobally` (alias `pypilot.installUv`) | none | `{ ok }` | Installs uv; `true` if already present |
+| `pypilot.installPixi` <Badge type="tip" text="1.3" /> | none | `{ ok }` | Runs pixi's official installer |
 | `pypilot.migrateToPixi` <Badge type="tip" text="1.3" /> | `[{ write?: bool, install?: bool }]` | see below | Previews or writes `pixi.toml` |
 
 `pypilot.migrateToPixi`:

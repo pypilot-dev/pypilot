@@ -189,7 +189,7 @@ pypilot doctor --markdown | clip
 Every document starts with the same three keys, then the command's own:
 
 ```json
-{ "pypilot": "1.2.2", "command": "check", "ok": true, ... }
+{ "pypilot": "1.3.0", "command": "check", "ok": true, ... }
 ```
 
 | Key | Meaning |

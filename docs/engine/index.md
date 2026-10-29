@@ -22,7 +22,7 @@ pypilot <MODE> [ARG] [--path <dir>]
 | [`logs`](./commands#logs) <Badge type="tip" text="1.3" /> | no | The local log's path, or its last entries |
 | [`completions <shell>`](./commands#completions) <Badge type="tip" text="1.3" /> | no | Shell completion script |
 | [`version`](./commands#version) <Badge type="tip" text="1.3" /> | no | Version, commit, target and data-table state |
-| [`lsp`](./commands#lsp) | — | Language server over stdio |
+| [`lsp`](./commands#lsp) | none | Language server over stdio |
 
 Modes marked 1.3 are new in engine 1.3.0; older releases have the others. `doctor`, `check` and `explain` only read. `setup`, `fix` and `install` share their code with the matching editor actions, so the terminal and the editor cannot disagree, and <Badge type="tip" text="1.3" /> each takes [`--dry-run`](./dry-run) to show its plan first.
 

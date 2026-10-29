@@ -23,7 +23,7 @@ A **PyPilot** item sits to the left of the Python interpreter picker:
 | `✓ PyPilot` | Environment looks good | Opens the doctor report |
 | `⚠ PyPilot: …` (warning background) | Something needs attention | Runs setup |
 | `⊗ PyPilot: …` (error background) | Environment error | Runs setup |
-| `PyPilot: checking…` (spinning) | Scan in progress | — |
+| `PyPilot: checking…` (spinning) | Scan in progress | none |
 | `⚠ PyPilot`, no command | The engine could not be found or downloaded | See the error notification |
 
 <Badge type="tip" text="1.3" /> The tooltip shows the environment's Python version and path, the package manager PyPilot uses (`uv`, `uv-pip`, `pip` or `pixi`, marked "auto" when chosen automatically) and, in pixi projects, the pixi environment. It reads files on disk and starts no process.
