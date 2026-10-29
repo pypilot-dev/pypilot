@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 
-use pypilot::core::platform::{Arch, Os, Platform};
+use pypilot::core::platform::{Arch, Libc, Os, Platform};
 use pypilot::core::project::Requirement;
 use pypilot::core::torch_gpu::{classify, TorchBuild};
 use pypilot::pypi::metadata::{PackageAnalysis, PackageMetadata, SdistKind};
@@ -425,4 +425,52 @@ fn free_threaded_wheels_do_not_stand_in_for_the_gil_build() {
     meta.urls.retain(|f| f.filename.contains("t-manylinux"));
     assert!(!meta.urls.is_empty());
     assert_nothing_installs(&meta.analyze(&LINUX_X64), LINUX_X64);
+}
+
+// ---------------------------------------------------------------------------
+// Linux C library: manylinux needs glibc, musllinux needs musl.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn linux_tags_follow_the_c_library() {
+    for (p, arch) in [(LINUX_X64, "x86_64"), (LINUX_ARM64, "aarch64")] {
+        let many = format!("manylinux_2_28_{arch}");
+        let musl = format!("musllinux_1_2_{arch}");
+        assert!(p.wheel_tag_matches_with(&many, Libc::Glibc));
+        assert!(!p.wheel_tag_matches_with(&musl, Libc::Glibc));
+        assert!(p.wheel_tag_matches_with(&musl, Libc::Musl));
+        assert!(!p.wheel_tag_matches_with(&many, Libc::Musl));
+    }
+    // Off Linux the C library does not enter into it.
+    assert!(WIN_X64.wheel_tag_matches_with("win_amd64", Libc::Musl));
+    assert!(MAC_ARM64.wheel_tag_matches_with("macosx_11_0_arm64", Libc::Musl));
+}
+
+/// torch and tensorflow publish manylinux wheels only and no sdist: nothing
+/// installs on Alpine. numpy and uvloop publish musllinux wheels too.
+#[test]
+fn musl_linux_gets_only_musllinux_wheels() {
+    for p in [LINUX_X64, LINUX_ARM64] {
+        for name in ["torch-2.15.0.json", "tensorflow-2.21.0.json"] {
+            let a = fixture(name).analyze_with(&p, Libc::Musl);
+            assert_nothing_installs(&a, p);
+        }
+        let a = fixture("numpy-2.5.4.json").analyze_with(&p, Libc::Musl);
+        assert_wheels(&a, p, "3.12–3.15");
+        let a = fixture("uvloop-0.23.0.json").analyze_with(&p, Libc::Musl);
+        assert_wheels(&a, p, "3.8–3.15");
+    }
+}
+
+/// On glibc a musllinux wheel must not count. uvloop's real file names with
+/// the manylinux wheels removed leave musllinux wheels and the sdist: on a
+/// glibc system that is a source build, not a wheel install.
+#[test]
+fn musllinux_wheels_do_not_count_on_glibc() {
+    let mut meta = fixture("uvloop-0.23.0.json");
+    meta.urls.retain(|f| !f.filename.contains("manylinux"));
+    for p in [LINUX_X64, LINUX_ARM64] {
+        assert_native_source_build(&meta.analyze_with(&p, Libc::Glibc), p);
+        assert_wheels(&meta.analyze_with(&p, Libc::Musl), p, "3.8–3.15");
+    }
 }

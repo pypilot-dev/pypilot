@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::platform::Platform;
+use crate::core::platform::{Libc, Platform};
 use crate::pypi::pyversion::{parse_requires_python, PyVersion, PyVersionSet};
 use crate::pypi::wheel::WheelTags;
 
@@ -164,6 +164,12 @@ impl PackageMetadata {
     /// * With no files at all, keep `requires_python`: there is no evidence
     ///   either way, and an empty set would blame the wrong thing.
     pub fn analyze(&self, platform: &Platform) -> PackageAnalysis {
+        self.analyze_with(platform, Libc::host())
+    }
+
+    /// [`PackageMetadata::analyze`] for a Linux system with the given C
+    /// library, so tests can check musl from a glibc machine.
+    pub fn analyze_with(&self, platform: &Platform, libc: Libc) -> PackageAnalysis {
         let declared = self
             .info
             .requires_python
@@ -184,7 +190,7 @@ impl PackageMetadata {
             if file.is_wheel() {
                 has_any_wheel = true;
                 if let Some(tags) = WheelTags::parse(&file.filename) {
-                    let s = tags.supported_on(platform);
+                    let s = tags.supported_on_with(platform, libc);
                     if !s.is_empty() {
                         has_platform_wheels = true;
                         wheel_union = wheel_union.union(&s);

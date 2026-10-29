@@ -18,6 +18,31 @@ pub enum Arch {
     Aarch64,
 }
 
+/// The C library a Linux CPython is built against. `manylinux` wheels need
+/// glibc and `musllinux` wheels need musl (Alpine); neither installs on the
+/// other. Meaningless off Linux.
+///
+/// Kept out of [`Platform`] so the many places that build one by hand do not
+/// change; [`Libc::host`] is the default everywhere and tests pass one in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Libc {
+    Glibc,
+    Musl,
+}
+
+impl Libc {
+    /// The C library this binary was built for. A glibc build does not run on
+    /// a musl system or the reverse, so on Linux this is the machine's, and
+    /// the one the CPython uv installs there links against.
+    pub fn host() -> Libc {
+        if cfg!(target_env = "musl") {
+            Libc::Musl
+        } else {
+            Libc::Glibc
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Platform {
     pub os: Os,
@@ -50,6 +75,12 @@ impl Platform {
     /// every modern x86-64 Linux, and getting the glibc floor exactly right is
     /// out of scope for interpreter-version reasoning.
     pub fn wheel_tag_matches(&self, tag: &str) -> bool {
+        self.wheel_tag_matches_with(tag, Libc::host())
+    }
+
+    /// [`Platform::wheel_tag_matches`] for a Linux system with the given C
+    /// library: `manylinux` tags for glibc, `musllinux` tags for musl.
+    pub fn wheel_tag_matches_with(&self, tag: &str, libc: Libc) -> bool {
         if tag == "any" {
             return true;
         }
@@ -75,8 +106,11 @@ impl Platform {
                 }
             }
             Os::Linux => {
-                let is_linux = tag.starts_with("manylinux") || tag.starts_with("musllinux");
-                if !is_linux {
+                let family = match libc {
+                    Libc::Glibc => "manylinux",
+                    Libc::Musl => "musllinux",
+                };
+                if !tag.starts_with(family) {
                     return false;
                 }
                 match self.arch {
@@ -149,6 +183,19 @@ mod tests {
         assert!(p.wheel_tag_matches("manylinux2014_x86_64"));
         assert!(!p.wheel_tag_matches("win_amd64"));
         assert!(!p.wheel_tag_matches("macosx_11_0_arm64"));
+    }
+
+    #[test]
+    fn manylinux_and_musllinux_need_their_own_libc() {
+        let p = Platform {
+            os: Os::Linux,
+            arch: Arch::X86_64,
+        };
+        assert!(p.wheel_tag_matches_with("manylinux_2_28_x86_64", Libc::Glibc));
+        assert!(!p.wheel_tag_matches_with("musllinux_1_2_x86_64", Libc::Glibc));
+        assert!(p.wheel_tag_matches_with("musllinux_1_2_x86_64", Libc::Musl));
+        assert!(!p.wheel_tag_matches_with("manylinux_2_28_x86_64", Libc::Musl));
+        assert!(p.wheel_tag_matches_with("any", Libc::Musl));
     }
 
     #[test]

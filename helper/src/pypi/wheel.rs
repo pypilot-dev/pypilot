@@ -11,7 +11,7 @@
 //! where the last three dash-separated fields are the compatibility tags, each of
 //! which may itself be dot-compound (`cp39.cp310`, `manylinux1.manylinux2010`).
 
-use crate::core::platform::Platform;
+use crate::core::platform::{Libc, Platform};
 use crate::pypi::pyversion::{PyVersion, PyVersionSet, MAX_MINOR};
 
 /// A parsed wheel filename's compatibility tags.
@@ -44,7 +44,15 @@ impl WheelTags {
     /// Which Python minor versions does this wheel support *on this platform*?
     /// Empty if no platform tag matches (wheel is for a different OS/arch).
     pub fn supported_on(&self, platform: &Platform) -> PyVersionSet {
-        let platform_ok = self.platform.iter().any(|t| platform.wheel_tag_matches(t));
+        self.supported_on_with(platform, Libc::host())
+    }
+
+    /// [`WheelTags::supported_on`] for a Linux system with the given C library.
+    pub fn supported_on_with(&self, platform: &Platform, libc: Libc) -> PyVersionSet {
+        let platform_ok = self
+            .platform
+            .iter()
+            .any(|t| platform.wheel_tag_matches_with(t, libc));
         if !platform_ok {
             return PyVersionSet::empty();
         }
