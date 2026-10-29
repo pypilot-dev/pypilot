@@ -150,7 +150,25 @@ global Zed `tasks.json` first.
 | `pypilot: install pixi` | Runs pixi's official installer |
 
 The toast's "Fix environment" button and the task of the same name call the
-identical function, so they can't drift apart.
+identical function, so they can't drift apart. From a terminal,
+`pypilot doctor --fix` prints the report and then runs that same fix.
+
+## Previewing changes: `--dry-run`
+
+`setup`, `install <package>`, `fix python`, `fix cuda` and `doctor --fix`
+take `--dry-run`: they print every step they would run, in order, with its
+exact command line, the files it would create or change, and why, under the
+solver's reason for the chosen Python. Nothing is executed, written or
+downloaded; only the read-only probes and PyPI lookups the analysis always
+does run. The plan comes from the command's own code path with each change
+recorded instead of made, so it is what the real run does. When the real
+run would stop (pip mode without the needed Python, say), the plan says
+where and exits non-zero.
+
+```bash
+pypilot setup --dry-run
+pypilot fix python --dry-run --json
+```
 
 ## Machine-readable output: `--json` and `--markdown`
 
@@ -212,6 +230,15 @@ Per command:
 | `migrate-conda` | written | `written`, `dependencies`, `environment_file`; with `--to pixi`, as `migrate-to-pixi` |
 | `migrate-to-pixi` | the requested `pixi install` succeeded (always for a preview) | `summary`: `{manifest_path, manifest, preview, written, sources, python, platforms, channels, deps: [{name, value, kind: "conda"\|"pypi", from, reason}], skipped: [{line, reason}], notes, install: summary \| null, next_command}` |
 | `install-pixi` | installed | `path`, `version`, `already_installed`, `refresh_path` |
+
+With `--dry-run`, `setup`, `install`, `fix python`, `fix cuda` and
+`doctor --fix` print a plan instead (`command` is `doctor --fix` for the
+last): `{ "pypilot", "command", "ok", "dry_run": true, "plan": { "mode", "python", "why", "steps": [{ "name", "command": [argv], "writes": [paths], "why" }], "notes": [{ "name", "ok", "detail" }], "blocked" } }`.
+`mode` is a `resolved_mode` value; `command` is the exact argument vector,
+program first, and empty for a step that is not a process (writing the
+PyTorch index into pyproject.toml, downloading uv, the GPU self-test);
+`blocked` is why the real run would stop, else `null`, and `ok` is
+`blocked == null`.
 
 `explain --json` predates this and keeps its own top level:
 `{ "pypilot", "kind": "package"|"project", "explanation": {...} }`.

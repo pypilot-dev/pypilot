@@ -319,14 +319,12 @@ pub async fn create_for_setup<S: MetadataSource>(
 
 /// Create `path` with `text`, failing if it exists.
 fn write_new(path: &Path, text: &str) -> crate::Result<()> {
-    use std::io::Write;
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|e| anyhow::anyhow!("cannot create {}: {e}", path.display()))?;
-    f.write_all(text.as_bytes())?;
-    Ok(())
+    let effect = crate::core::exec::Effect::new(
+        "create pixi manifest",
+        "translate the project's declared dependencies into a pixi manifest; the files it is made from are untouched",
+    );
+    crate::core::exec::write_new(path, text, effect)
+        .map_err(|e| anyhow::anyhow!("cannot create {}: {e}", path.display()))
 }
 
 /// Work out the manifest, touching nothing on disk.

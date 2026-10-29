@@ -105,7 +105,11 @@ pub async fn check(
     // Best-effort, non-blocking: refreshes the on-disk cache for the *next*
     // scan without making this one wait on a network round trip. A stale
     // cache always falls back to the bundled snapshot, never to an error.
-    tokio::spawn(refresh::refresh_if_stale(settings.clone()));
+    // A dry run promises no network beyond PyPI metadata, so it plans with
+    // the cached tables as they are.
+    if !crate::core::exec::is_dry_run() {
+        tokio::spawn(refresh::refresh_if_stale(settings.clone()));
+    }
 
     // Platform and pins only, no GPU: a missing wheel or a torch mismatch is
     // a problem whatever card is installed.

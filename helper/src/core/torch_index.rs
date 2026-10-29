@@ -147,12 +147,25 @@ pub fn pin_text(
 /// put it back if the install that follows fails; a failed install should not
 /// leave the project pointing at an index it never used.
 pub fn pin_file(path: &Path, url: Option<&str>, packages: &[String]) -> crate::Result<PinFile> {
-    let original = std::fs::read_to_string(path)?;
+    // A dry run that planned `uv init` has no file yet: plan against the
+    // empty manifest that step would leave behind.
+    let original = match std::fs::read_to_string(path) {
+        Err(_) if crate::core::exec::is_fresh(path) => String::new(),
+        other => other?,
+    };
     Ok(match pin_text(&original, url, packages)? {
         PinText::NotApplicable => PinFile::NotApplicable,
         PinText::Unchanged => PinFile::Unchanged,
         PinText::Changed(new) => {
-            std::fs::write(path, new)?;
+            let effect = crate::core::exec::Effect::new(
+                "record PyTorch index",
+                format!(
+                    "route {} to {} in [tool.uv], so a later `uv sync` keeps the build matched to this machine",
+                    packages.join(", "),
+                    url.unwrap_or("the matched index")
+                ),
+            );
+            crate::core::exec::write(path, new, effect)?;
             PinFile::Changed { original }
         }
     })

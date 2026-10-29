@@ -15,6 +15,7 @@ use std::path::Path;
 
 use anyhow::bail;
 
+use crate::core::exec::{self, Effect};
 use crate::core::setup::{self, SetupSummary, Step};
 use crate::core::{pip, pixi, pixi_manage, torch_index, uv};
 use crate::matrix;
@@ -249,7 +250,7 @@ pub async fn install_packages(
                 }
             };
             let venv = workspace.join(".venv");
-            if !venv.is_dir() {
+            if !exec::exists(&venv) {
                 push(
                     &mut summary,
                     "locate venv",
@@ -277,7 +278,7 @@ pub async fn install_packages(
         }
         ResolvedMode::PurePip => {
             let venv = workspace.join(".venv");
-            if !venv.is_dir() {
+            if !exec::exists(&venv) {
                 push(
                     &mut summary,
                     "locate venv",
@@ -543,8 +544,12 @@ pub async fn recreate_with_python(
                 return Ok(summary);
             };
 
-            if venv_path.is_dir() {
-                if let Err(e) = std::fs::remove_dir_all(&venv_path) {
+            if exec::exists(&venv_path) {
+                let effect = Effect::new(
+                    "remove old venv",
+                    format!("`python -m venv` cannot replace an environment; start Python {version}'s from scratch"),
+                );
+                if let Err(e) = exec::remove_dir_all(&venv_path, effect) {
                     push(&mut summary, "remove old venv", false, &e.to_string());
                     return Ok(summary);
                 }
@@ -688,25 +693,13 @@ async fn freeze_into_requirements_uv(
     workspace: &Path,
     summary: &mut SetupSummary,
 ) {
-    match uv::pip_freeze(uv, workspace).await {
-        Ok(out) if out.success() => {
-            let path = workspace.join("requirements.txt");
-            if let Err(e) = std::fs::write(&path, &out.stdout) {
-                push(
-                    summary,
-                    "uv pip freeze > requirements.txt",
-                    false,
-                    &e.to_string(),
-                );
-            } else {
-                push(
-                    summary,
-                    "uv pip freeze > requirements.txt",
-                    true,
-                    "requirements.txt updated with exact pins",
-                );
-            }
-        }
+    match uv::freeze_into_requirements(uv, workspace).await {
+        Ok(out) if out.success() => push(
+            summary,
+            "uv pip freeze > requirements.txt",
+            true,
+            "requirements.txt updated with exact pins",
+        ),
         Ok(out) => push(
             summary,
             "uv pip freeze > requirements.txt",

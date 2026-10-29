@@ -1,5 +1,8 @@
 //! `pypilot fix python`: recompute the target interpreter and rebuild the venv.
 //! `pypilot fix cuda`: re-pin torch/tensorflow to the build matching the driver.
+//!
+//! Both, and `pypilot install`, take `--dry-run` to print the plan instead
+//! (see [`super::plan`]).
 
 use std::path::Path;
 
@@ -14,6 +17,7 @@ use crate::settings::{ResolvedMode, Settings};
 
 use super::output::{self, OutputFormat};
 use super::setup::StepsReport;
+use crate::core::exec::{self, Plan, PlanNote};
 
 pub async fn run<S: MetadataSource>(
     workspace: &Path,
@@ -21,12 +25,80 @@ pub async fn run<S: MetadataSource>(
     source: &S,
     what: &str,
     format: OutputFormat,
+    dry_run: bool,
 ) -> crate::Result<()> {
     match what {
-        "python" => fix_python(workspace, settings, source, format).await,
+        "python" => fix_python(workspace, settings, source, format, dry_run).await,
+        "cuda" if dry_run => plan_cuda(workspace, settings, format).await,
         "cuda" => fix_cuda(workspace, settings, format).await,
         other => anyhow::bail!("unknown fix target `{other}` (expected `python` or `cuda`)"),
     }
+}
+
+/// A plan with nothing to do yet, for a dry run that stops at a decision.
+fn empty_plan(mode: ResolvedMode, python: Option<crate::pypi::PyVersion>, why: String) -> Plan {
+    Plan {
+        mode,
+        python,
+        why,
+        steps: Vec::new(),
+        notes: Vec::new(),
+        blocked: None,
+    }
+}
+
+/// `fix cuda --dry-run`: the re-pin's own code path, recorded. Its progress
+/// lines are silenced (JSON format sends them to stderr) and its findings
+/// become the plan's notes.
+async fn plan_cuda(
+    workspace: &Path,
+    settings: &Settings,
+    format: OutputFormat,
+) -> crate::Result<()> {
+    let mode = settings.resolve_mode(workspace).await;
+    let mut report = CudaReport::default();
+    let (result, steps) = exec::dry_run(fix_cuda_into(
+        workspace,
+        settings,
+        OutputFormat::Json,
+        &mut report,
+    ))
+    .await;
+    let mut plan = empty_plan(
+        mode,
+        None,
+        "Re-pin torch/tensorflow to the CUDA build matching this machine's GPU driver.".into(),
+    );
+    plan.steps = steps;
+    if let Some(message) = report.message {
+        plan.notes.push(PlanNote {
+            name: "fix cuda".into(),
+            ok: true,
+            detail: message,
+        });
+    }
+    for pin in &report.frameworks {
+        if let Some(finding) = &pin.finding {
+            plan.notes.push(PlanNote {
+                name: finding.title.clone(),
+                ok: true,
+                detail: finding.detail.clone(),
+            });
+        }
+        if !pin.ok {
+            plan.notes.push(PlanNote {
+                name: pin.package.clone(),
+                ok: false,
+                detail: pin.detail.clone(),
+            });
+        }
+    }
+    if let Err(e) = result {
+        plan.blocked = Some(format!("{e:#}"));
+    } else if let Some(pin) = report.frameworks.iter().find(|p| !p.ok) {
+        plan.blocked = Some(format!("{}: {}", pin.package, pin.detail));
+    }
+    super::plan::finish("fix cuda", workspace, &plan, format)
 }
 
 /// `fix cuda --json`: what happened to each framework.
@@ -269,6 +341,7 @@ async fn fix_python<S: MetadataSource>(
     settings: &Settings,
     source: &S,
     format: OutputFormat,
+    dry_run: bool,
 ) -> crate::Result<()> {
     let assessment = solver::assess(workspace, settings, source).await;
 
@@ -288,6 +361,28 @@ async fn fix_python<S: MetadataSource>(
     };
 
     let current = assessment.probes.venv.as_ref().and_then(|v| v.python);
+    if dry_run {
+        let mode = settings.resolve_mode(workspace).await;
+        let why = crate::core::setup::derive_why(&assessment);
+        let plan = if current == Some(target) {
+            empty_plan(
+                mode,
+                Some(target),
+                format!("{why} Already on Python {target}. Nothing to do."),
+            )
+        } else {
+            let (summary, steps) =
+                exec::dry_run(rebuild(workspace, settings, source, mode, target)).await;
+            let mut plan = Plan::from_summary(&summary?, steps);
+            plan.python = Some(target);
+            plan.why = match current {
+                Some(old) => format!("{why} The environment is on Python {old}; rebuild it."),
+                None => why,
+            };
+            plan
+        };
+        return super::plan::finish("fix python", workspace, &plan, format);
+    }
     if current == Some(target) && format.is_json() {
         return output::print_json(
             "fix python",
@@ -342,15 +437,8 @@ async fn fix_python<S: MetadataSource>(
         );
     }
 
-    // Rebuild and restore the declared dependencies. There is no single new
-    // package here, so reuse the bootstrap rather than the add path. A pixi
-    // project changes its manifest's python spec instead (`pixi add
-    // python=X.Y` + `pixi install`).
-    let summary = if settings.resolve_mode(workspace).await == ResolvedMode::Pixi {
-        install::recreate_with_python(workspace, settings, target, &[]).await?
-    } else {
-        crate::core::setup::run(workspace, settings, source).await?
-    };
+    let mode = settings.resolve_mode(workspace).await;
+    let summary = rebuild(workspace, settings, source, mode, target).await?;
     if format.is_json() {
         let report = StepsReport {
             target_python: Some(target),
@@ -384,14 +472,39 @@ async fn fix_python<S: MetadataSource>(
     }
 }
 
+/// Rebuild on `target` and restore the declared dependencies. There is no
+/// single new package here, so reuse the bootstrap rather than the add path.
+/// A pixi project changes its manifest's python spec instead (`pixi add
+/// python=X.Y` + `pixi install`).
+async fn rebuild<S: MetadataSource>(
+    workspace: &Path,
+    settings: &Settings,
+    source: &S,
+    mode: ResolvedMode,
+    target: crate::pypi::PyVersion,
+) -> crate::Result<crate::core::setup::SetupSummary> {
+    if mode == ResolvedMode::Pixi {
+        install::recreate_with_python(workspace, settings, target, &[]).await
+    } else {
+        crate::core::setup::run(workspace, settings, source).await
+    }
+}
+
 /// Install one package from the terminal, sharing the code action's path.
 pub async fn install_one(
     workspace: &Path,
     settings: &Settings,
     package: &str,
     format: OutputFormat,
+    dry_run: bool,
 ) -> crate::Result<()> {
     install::validate_package_name(package)?;
+    if dry_run {
+        let (summary, steps) =
+            exec::dry_run(install::install_package(workspace, settings, package)).await;
+        let plan = Plan::from_summary(&summary?, steps);
+        return super::plan::finish("install", workspace, &plan, format);
+    }
     if format.is_json() {
         output::progress(format, format!("Installing {package}..."));
         let summary = install::install_package(workspace, settings, package).await?;
