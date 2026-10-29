@@ -12,7 +12,8 @@
 //!   * `doctor` — read-only probe report (nothing is executed/installed).
 //!   * `setup`  — full F1 bootstrap, honoring the `package_manager` setting.
 //!   * `lsp`    — stdio LSP server (the mode Zed launches).
-//!   * `check`, `install`, `fix`, `update-data`, `migrate-conda` — see `--help`.
+//!   * `check`, `install`, `fix`, `update-data`, `migrate-conda`,
+//!     `migrate-to-pixi`, `install-pixi` — see `--help`.
 //!
 //! Arg parsing is hand-rolled (no shell involvement anywhere) so every downstream
 //! spawned command uses arg vectors, never a shell string.
@@ -32,7 +33,8 @@ fn main() -> ExitCode {
             lsp::run_stdio();
             ExitCode::SUCCESS
         }
-        "doctor" | "setup" | "check" | "fix" | "install" | "update-data" | "migrate-conda" => {
+        "doctor" | "setup" | "check" | "fix" | "install" | "update-data" | "migrate-conda"
+        | "migrate-to-pixi" | "install-pixi" => {
             // Consoles that predate Windows Terminal print ANSI escapes as
             // literal text unless the process opts in to VT processing.
             #[cfg(windows)]
@@ -86,6 +88,11 @@ fn print_help() {
          \x20   fix cuda          Re-pin torch/tensorflow to the build matching the driver\n\
          \x20   update-data       Force-refresh the bundled driver/framework/import tables\n\
          \x20   migrate-conda     Translate environment.yml into a pyproject.toml\n\
+         \x20                     (--to pixi: into a pixi.toml; a preview unless --write)\n\
+         \x20   migrate-to-pixi   Preview a pixi.toml for this project's dependencies\n\
+         \x20                     (--write creates it, --install then runs pixi install,\n\
+         \x20                     --platform <p> adds a target platform)\n\
+         \x20   install-pixi      Install pixi with its official installer\n\
          \x20   lsp               Run as an LSP server over stdio, used by the Zed extension\n\n\
          OPTIONS:\n\
          \x20   --path <dir>   Workspace directory to analyze (default: current dir)\n",

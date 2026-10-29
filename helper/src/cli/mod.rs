@@ -8,6 +8,7 @@ mod check;
 mod doctor;
 mod fix;
 mod migrate_conda;
+mod pixi;
 mod setup;
 mod update_data;
 
@@ -52,7 +53,26 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
         }
 
         "update-data" => update_data::run().await,
-        "migrate-conda" => migrate_conda::run(&workspace).await,
+        "migrate-conda" => match flag_value(args, "--to").as_deref() {
+            None | Some("pyproject") => migrate_conda::run(&workspace).await,
+            Some("pixi") => {
+                let opts = pixi::options(
+                    args,
+                    crate::core::pixi_migrate::MigrationSource::CondaEnvironment,
+                );
+                pixi::migrate(&workspace, &settings, opts).await
+            }
+            Some(other) => {
+                anyhow::bail!(
+                    "unknown --to `{other}`; use `--to pyproject` (default) or `--to pixi`"
+                )
+            }
+        },
+        "migrate-to-pixi" => {
+            let opts = pixi::options(args, crate::core::pixi_migrate::MigrationSource::Auto);
+            pixi::migrate(&workspace, &settings, opts).await
+        }
+        "install-pixi" => pixi::install_pixi().await,
 
         other => anyhow::bail!("unknown CLI mode `{other}`"),
     }
@@ -70,6 +90,20 @@ fn positional(args: &[String]) -> Option<String> {
             continue;
         }
         return Some(a.clone());
+    }
+    None
+}
+
+/// The value of `--flag <value>` or `--flag=<value>`.
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    let mut iter = args.iter();
+    while let Some(a) = iter.next() {
+        if a == flag {
+            return iter.next().cloned();
+        }
+        if let Some(v) = a.strip_prefix(flag).and_then(|r| r.strip_prefix('=')) {
+            return Some(v.to_string());
+        }
     }
     None
 }
@@ -108,6 +142,19 @@ mod tests {
             Some("mediapipe")
         );
         assert_eq!(positional(&v(&["--path", "/tmp/proj"])), None);
+    }
+
+    #[test]
+    fn flag_values() {
+        assert_eq!(
+            flag_value(&v(&["--to", "pixi"]), "--to").as_deref(),
+            Some("pixi")
+        );
+        assert_eq!(
+            flag_value(&v(&["--to=pixi"]), "--to").as_deref(),
+            Some("pixi")
+        );
+        assert_eq!(flag_value(&v(&["--write"]), "--to"), None);
     }
 
     #[test]
