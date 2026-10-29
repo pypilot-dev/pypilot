@@ -236,6 +236,7 @@ async fn fix_python<S: MetadataSource>(
         );
         Ok(())
     } else {
+        super::setup::print_pixi_build_advice(workspace, &summary);
         anyhow::bail!("the rebuild did not finish, see the steps above")
     }
 }
@@ -275,6 +276,7 @@ pub async fn install_one(
         );
         Ok(())
     } else {
+        super::setup::print_pixi_build_advice(workspace, &summary);
         anyhow::bail!("install did not finish")
     }
 }
