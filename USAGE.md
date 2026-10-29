@@ -51,7 +51,7 @@ yourself (pin one package differently, drop one, etc.).
 | Dependencies conflict (empty intersection) | Error | Both blocking packages named, each one's supported range | No — manual |
 | A dependency name doesn't resolve on PyPI | Warning | "Could not resolve `name`" (typo or private package) | No — manual |
 | A dependency has no wheels, will compile from source | Warning | Which package, that it'll build from an sdist | No — manual |
-| `environment.yml` found (conda project) | Info | Points at `pypilot migrate-conda` | Command, not a button |
+| `environment.yml` found (conda project) | Info | Points at `pypilot migrate-conda` (`--to pixi` for a pixi.toml) | Command, not a button |
 | `uv --dry-run` disagrees with the metadata verdict | Warning | Names the real resolver conflict metadata alone can't see (yanked release, transitive pin) | No — manual |
 | GPU present, torch/tensorflow declared | Info | Which CUDA build was picked for your driver | Applied automatically on install |
 | No GPU | — | Silent; installs the plain CPU build | — |
@@ -145,6 +145,9 @@ global Zed `tasks.json` first.
 | `pypilot: fix cuda (re-pin torch/tensorflow to the driver)` | Reinstall those two packages against the matched CUDA build |
 | `pypilot: update data (refresh bundled tables)` | Force-refresh driver/framework/import tables from this repo |
 | `pypilot: migrate conda to pyproject.toml` | One-shot conda → pyproject.toml translation |
+| `pypilot: preview migration to pixi (pixi.toml)` | Shows the pixi.toml `migrate-to-pixi` would write; changes nothing |
+| `pypilot: migrate to pixi (write pixi.toml and install)` | Writes pixi.toml next to your untouched manifests, then `pixi install` |
+| `pypilot: install pixi` | Runs pixi's official installer |
 
 The toast's "Fix environment" button and the task of the same name call the
 identical function, so they can't drift apart.
@@ -155,7 +158,7 @@ identical function, so they can't drift apart.
 config directory for defaults across all projects:
 
 ```toml
-package_manager    = "uv"             # "uv" or "pip"
+package_manager    = "uv"             # "auto", "uv", "uv-pip", "pip" or "pixi"
 notifications      = "problems-only"  # "all", "problems-only", or "off"
 auto_check_on_open = true
 data_refresh_days  = 7                # 0 stays fully offline
@@ -164,6 +167,12 @@ data_refresh_days  = 7                # 0 stays fully offline
 `package_manager = "pip"` runs the identical compatibility checks; the only
 difference is pip can't fetch a missing interpreter for you, so PyPilot
 tells you which Python you need instead of installing it.
+
+`package_manager = "pixi"` manages the project with pixi. pixi projects are
+detected and managed with pixi whatever the setting says; on a project
+without a pixi manifest, setup writes a `pixi.toml` from its dependencies
+first (see `pypilot migrate-to-pixi`), then runs `pixi install`. Without
+pixi installed it changes nothing and offers `pypilot install-pixi`.
 
 `data_refresh_days` controls how often the bundled driver/framework/import
 tables refresh from this repo in the background. They ship inside the
