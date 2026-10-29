@@ -1,0 +1,54 @@
+{
+  "win-64": [
+    {
+      "name": "numpy",
+      "version": "2.5.4",
+      "build": "py312ha3f287d_0",
+      "subdir": "win-64",
+      "depends": [
+        "python",
+        "python_abi 3.12.* *_cp312"
+      ]
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.4",
+      "build": "py315hb1344af_0",
+      "subdir": "win-64",
+      "depends": [
+        "python",
+        "python_abi 3.15.* *_cp315"
+      ]
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.4",
+      "build": "py314hffb9209_0",
+      "subdir": "win-64",
+      "depends": [
+        "python",
+        "python_abi 3.14.* *_cp314t"
+      ]
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.4",
+      "build": "py314h02f10f6_0",
+      "subdir": "win-64",
+      "depends": [
+        "python",
+        "python_abi 3.14.* *_cp314"
+      ]
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.4",
+      "build": "py313ha8dc839_0",
+      "subdir": "win-64",
+      "depends": [
+        "python",
+        "python_abi 3.13.* *_cp313"
+      ]
+    }
+  ]
+}

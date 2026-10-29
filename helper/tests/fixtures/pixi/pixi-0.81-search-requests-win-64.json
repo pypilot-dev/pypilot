@@ -1,0 +1,74 @@
+{
+  "win-64": [
+    {
+      "name": "requests",
+      "version": "2.23.0",
+      "build": "py38h32f6830_1",
+      "subdir": "win-64",
+      "depends": [
+        "python >=3.8,<3.9.0a0",
+        "python_abi 3.8.* *_cp38"
+      ]
+    },
+    {
+      "name": "requests",
+      "version": "2.23.0",
+      "build": "py27h8c360ce_1",
+      "subdir": "win-64",
+      "depends": [
+        "python >=2.7,<2.8.0a0",
+        "python_abi 2.7.* *_cp27m"
+      ]
+    },
+    {
+      "name": "requests",
+      "version": "2.23.0",
+      "build": "py37hc8dfbb8_1",
+      "subdir": "win-64",
+      "depends": [
+        "python >=3.7,<3.8.0a0",
+        "python_abi 3.7.* *_cp37m"
+      ]
+    },
+    {
+      "name": "requests",
+      "version": "2.23.0",
+      "build": "py36h9f0ad1d_1",
+      "subdir": "win-64",
+      "depends": [
+        "python >=3.6,<3.7.0a0",
+        "python_abi 3.6.* *_cp36m"
+      ]
+    },
+    {
+      "name": "requests",
+      "version": "2.23.0",
+      "build": "py37_0",
+      "subdir": "win-64",
+      "depends": [
+        "python >=3.7,<3.8.0a0"
+      ]
+    },
+    {
+      "name": "requests",
+      "version": "2.23.0",
+      "build": "py38_0",
+      "subdir": "win-64",
+      "depends": [
+        "python >=3.8,<3.9.0a0"
+      ]
+    }
+  ],
+  "noarch": [
+    {
+      "name": "requests",
+      "version": "2.34.2",
+      "build": "pyhcf101f3_0",
+      "subdir": "noarch",
+      "depends": [
+        "python >=3.10",
+        "python"
+      ]
+    }
+  ]
+}
