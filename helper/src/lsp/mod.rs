@@ -47,12 +47,16 @@ const CMD_DETAILS: &str = "pypilot.showDetails";
 const CMD_IGNORE: &str = "pypilot.ignore";
 const CMD_NEVER: &str = "pypilot.neverForProject";
 const CMD_INSTALL_UV: &str = "pypilot.installUvGlobally";
+/// Set the project up with pixi. Arguments: `[{ "write"?: bool, "install"?:
+/// bool }]`; none means a dry run that previews the manifest.
+pub const CMD_MIGRATE_PIXI: &str = "pypilot.migrateToPixi";
 
 // Notification button labels.
 const BTN_FIX: &str = "Fix environment";
 const BTN_DETAILS: &str = "Show details";
 const BTN_IGNORE: &str = "Ignore";
 const BTN_NEVER: &str = "Never for this project";
+const BTN_PIXI: &str = "Initialize pixi project";
 
 const BTN_INSTALL_UV: &str = "Install uv";
 const BTN_NO_THANKS: &str = "No thanks";
@@ -134,6 +138,7 @@ impl LanguageServer for Backend {
                         CMD_INSTALL.into(),
                         CMD_RECREATE.into(),
                         CMD_INSTALL_UV.into(),
+                        CMD_MIGRATE_PIXI.into(),
                     ],
                     work_done_progress_options: Default::default(),
                 }),
@@ -305,6 +310,11 @@ impl LanguageServer for Backend {
 
             CMD_INSTALL_UV | "pypilot.installUv" => Some(run_install_uv(client).await),
 
+            CMD_MIGRATE_PIXI => {
+                run_migrate_to_pixi(client, &root, &params.arguments).await;
+                None
+            }
+
             other => {
                 client
                     .log_message(MessageType::WARNING, format!("unknown command `{other}`"))
@@ -473,7 +483,7 @@ async fn run_install(shared: Arc<Shared>, root: &Path, packages: &[String]) -> b
             true
         }
         Ok(summary) => {
-            report_failed_step(client, &summary).await;
+            report_failed_step(client, root, &summary).await;
             false
         }
         Err(e) => {
@@ -526,7 +536,7 @@ async fn run_recreate(shared: Arc<Shared>, root: &Path, python: &str, packages: 
             true
         }
         Ok(summary) => {
-            report_failed_step(client, &summary).await;
+            report_failed_step(client, root, &summary).await;
             false
         }
         Err(e) => {
@@ -601,16 +611,60 @@ fn spawn_pyright_pin_offer(client: &Client, root: &Path) {
     });
 }
 
-async fn report_failed_step(client: &Client, summary: &setup::SetupSummary) {
-    let detail = summary
-        .steps
-        .iter()
-        .rev()
-        .find(|s| !s.ok)
+async fn report_failed_step(client: &Client, root: &Path, summary: &setup::SetupSummary) {
+    let failed = summary.steps.iter().rev().find(|s| !s.ok);
+    let detail = failed
         .map(|s| format!("{}: {}", s.name, s.detail))
         .unwrap_or_else(|| "the operation did not finish".to_string());
     client
         .show_message(MessageType::ERROR, format!("PyPilot: {detail}"))
+        .await;
+    if let Some(step) = failed {
+        spawn_pixi_build_offer(client, root, &step.detail);
+    }
+}
+
+/// A pip/uv build that failed on a system library conda-forge ships (see
+/// [`crate::core::pixi_advice::explain_build_failure`]): say so, and offer
+/// pixi. Spawned so the command that failed answers now; never in a pixi
+/// project, whose own errors are explained by pixi_compat.
+fn spawn_pixi_build_offer(client: &Client, root: &Path, stderr: &str) {
+    if crate::core::pixi::detect(root).is_some() {
+        return;
+    }
+    let Some(advice) = crate::core::pixi_advice::explain_build_failure(
+        stderr,
+        crate::matrix::conda_forge(),
+        Platform::current(),
+    ) else {
+        return;
+    };
+    let client = client.clone();
+    let root = root.to_path_buf();
+    tokio::spawn(async move {
+        let chosen = client
+            .show_message_request(
+                MessageType::INFO,
+                format!("PyPilot: {}", advice.message),
+                Some(vec![action(BTN_PIXI), action(BTN_IGNORE)]),
+            )
+            .await
+            .ok()
+            .flatten();
+        if chosen.as_ref().map(|a| a.title.as_str()) == Some(BTN_PIXI) {
+            run_migrate_to_pixi(&client, &root, &[]).await;
+        }
+    });
+}
+
+/// `pypilot.migrateToPixi`. Until the migration is wired in here, point at
+/// the CLI that performs it.
+async fn run_migrate_to_pixi(client: &Client, _root: &Path, _args: &[serde_json::Value]) {
+    client
+        .show_message(
+            MessageType::INFO,
+            "PyPilot: to set this project up with pixi, run `pypilot migrate-to-pixi` in a terminal in the project folder.",
+        )
         .await;
 }
 
@@ -693,12 +747,15 @@ async fn scan_and_notify(client: &Client, source: &PyPiClient, root: &Path, expl
         return;
     }
 
-    let actions = vec![
+    let mut actions = vec![
         action(BTN_FIX),
         action(BTN_DETAILS),
         action(BTN_IGNORE),
         action(BTN_NEVER),
     ];
+    if offers_pixi(&assessment, settings.notifications) {
+        actions.insert(1, action(BTN_PIXI));
+    }
     let severity = match assessment.worst_severity() {
         Some(Severity::Error) => MessageType::ERROR,
         Some(Severity::Warning) => MessageType::WARNING,
@@ -719,8 +776,19 @@ async fn scan_and_notify(client: &Client, source: &PyPiClient, root: &Path, expl
         }
         Some(BTN_DETAILS) => show_details(client, source, root, None).await,
         Some(BTN_NEVER) => mark_never(client, root).await,
+        Some(BTN_PIXI) => run_migrate_to_pixi(client, root, &[]).await,
         _ => {}
     }
+}
+
+/// Does the toast offer "Initialize pixi project"? Only for a pixi finding
+/// that is itself worth a toast: an Info one (a mixed-language repo) is
+/// shown only under the "all" tier.
+fn offers_pixi(a: &Assessment, notifications: Notifications) -> bool {
+    a.findings.iter().any(|f| {
+        f.fix == FixKind::MigrateToPixi
+            && (f.severity != Severity::Info || notifications == Notifications::All)
+    })
 }
 
 /// Returns whether the environment ended up set up.
@@ -828,7 +896,7 @@ async fn run_fix(client: &Client, source: &PyPiClient, root: &Path) -> bool {
             true
         }
         Ok(summary) => {
-            report_failed_step(client, &summary).await;
+            report_failed_step(client, root, &summary).await;
             false
         }
         Err(e) => {
@@ -1048,6 +1116,10 @@ fn details_markdown(a: &Assessment) -> String {
                 s.push_str("\n_Fix: run \"Fix environment\", or `pypilot setup`._\n");
             } else if f.fix == FixKind::MigrateConda {
                 s.push_str("\n_Fix: run `pypilot migrate-conda`._\n");
+            } else if f.fix == FixKind::MigrateToPixi {
+                s.push_str(
+                    "\n_Fix: run \"Initialize pixi project\", or `pypilot migrate-to-pixi`._\n",
+                );
             }
             s.push('\n');
         }
@@ -1178,6 +1250,44 @@ pub fn run_stdio() {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn assessment_with(findings: Vec<crate::core::Finding>) -> Assessment {
+        Assessment {
+            probes: Default::default(),
+            project: Default::default(),
+            compat: None,
+            target_python: None,
+            findings,
+        }
+    }
+
+    fn pixi_finding(severity: Severity) -> crate::core::Finding {
+        crate::core::Finding {
+            severity,
+            title: "gdal 3.8.0 needs native libraries pip cannot install".into(),
+            detail: String::new(),
+            fix: FixKind::MigrateToPixi,
+        }
+    }
+
+    #[test]
+    fn the_pixi_button_needs_a_pixi_finding_worth_the_toast() {
+        let warn = assessment_with(vec![pixi_finding(Severity::Warning)]);
+        assert!(offers_pixi(&warn, Notifications::ProblemsOnly));
+        let info = assessment_with(vec![pixi_finding(Severity::Info)]);
+        assert!(!offers_pixi(&info, Notifications::ProblemsOnly));
+        assert!(offers_pixi(&info, Notifications::All));
+        assert!(!offers_pixi(
+            &assessment_with(Vec::new()),
+            Notifications::All
+        ));
+    }
+
+    #[test]
+    fn pixi_findings_name_the_migration_in_the_report() {
+        let report = details_markdown(&assessment_with(vec![pixi_finding(Severity::Warning)]));
+        assert!(report.contains("`pypilot migrate-to-pixi`"));
+    }
 
     #[test]
     fn a_notebook_cell_maps_to_its_notebook_file() {
