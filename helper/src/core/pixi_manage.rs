@@ -31,11 +31,25 @@ pub const MISSING_PIXI: &str =
 /// Step name shared by every pixi flow when pixi is missing.
 pub const LOCATE_STEP: &str = "locate pixi";
 
-/// `pixi install --manifest-path <root>`.
+/// `pixi install --manifest-path <root>`, plus `--environment <name>` when
+/// the project's environment is not `default` (see [`selected_env`]).
 pub fn install_args(root: &Path) -> Vec<String> {
     let mut args = vec!["install".to_string()];
     args.extend(manifest_args(root));
+    let env = selected_env(root);
+    if env != pixi::DEFAULT_ENV {
+        args.extend(["--environment".to_string(), env]);
+    }
     args
+}
+
+/// The pixi environment PyPilot treats as the project's
+/// ([`crate::core::pixi_envs::selected`]); `default` outside a pixi project.
+pub fn selected_env(root: &Path) -> String {
+    pixi::detect(root).map_or_else(
+        || pixi::DEFAULT_ENV.to_string(),
+        |p| crate::core::pixi_envs::selected(&p, root),
+    )
 }
 
 /// `pixi add --manifest-path <root> --pypi <packages...>`.
@@ -68,9 +82,10 @@ fn manifest_args(root: &Path) -> [String; 2] {
     ]
 }
 
-/// Where `pixi install` puts the default environment.
+/// Where `pixi install` puts the project's environment: `default`, unless
+/// another one was selected.
 pub fn default_env_path(root: &Path) -> PathBuf {
-    root.join(".pixi").join("envs").join(pixi::DEFAULT_ENV)
+    root.join(".pixi").join("envs").join(selected_env(root))
 }
 
 /// Install the project's default environment (`pixi install`).
