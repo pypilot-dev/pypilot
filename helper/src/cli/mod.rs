@@ -10,6 +10,7 @@ mod explain;
 mod fix;
 mod migrate_conda;
 mod pixi;
+mod plan;
 mod setup;
 mod update_data;
 
@@ -30,10 +31,21 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
     }
     let settings = Settings::load(&workspace);
     let source = PyPiClient::new();
+    // `--dry-run` (and `--json` for its plan) on setup, fix, install and
+    // `doctor --fix`.
+    let opts = plan::RunOpts::from_args(args);
 
     match mode {
+        // `--fix` runs what the editor's "Fix environment" runs: setup.
+        "doctor" if args.iter().any(|a| a == "--fix") => {
+            if !opts.json {
+                doctor::run(&workspace, &settings, &source).await?;
+                println!();
+            }
+            setup::run(&workspace, &settings, &source, "doctor --fix", opts).await
+        }
         "doctor" => doctor::run(&workspace, &settings, &source).await,
-        "setup" => setup::run(&workspace, &settings, &source).await,
+        "setup" => setup::run(&workspace, &settings, &source, "setup", opts).await,
 
         "check" => {
             let Some(package) = positional(args) else {
@@ -45,8 +57,10 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
 
         "fix" => {
             let what = positional(args).unwrap_or_else(|| "python".to_string());
-            let result = fix::run(&workspace, &settings, &source, &what).await;
-            crate::core::rescan::notify(&workspace, crate::core::rescan::Kind::Setup);
+            let result = fix::run(&workspace, &settings, &source, &what, opts).await;
+            if !opts.dry_run {
+                crate::core::rescan::notify(&workspace, crate::core::rescan::Kind::Setup);
+            }
             result
         }
 
@@ -54,8 +68,10 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
             let Some(package) = positional(args) else {
                 anyhow::bail!("usage: pypilot install <package>");
             };
-            let result = fix::install_one(&workspace, &settings, &package).await;
-            crate::core::rescan::notify(&workspace, crate::core::rescan::Kind::Setup);
+            let result = fix::install_one(&workspace, &settings, &package, opts).await;
+            if !opts.dry_run {
+                crate::core::rescan::notify(&workspace, crate::core::rescan::Kind::Setup);
+            }
             result
         }
 

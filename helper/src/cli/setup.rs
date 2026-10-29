@@ -1,18 +1,29 @@
 //! `pypilot setup` — full F1 bootstrap. Same engine as the LSP "Fix everything".
+//! `--dry-run` prints the plan instead (see [`super::plan`]).
 
 use std::path::Path;
 
 use colored::Colorize;
 
+use super::plan::{self, RunOpts};
+use crate::core::exec::{self, Plan};
 use crate::core::setup;
 use crate::pypi::MetadataSource;
 use crate::settings::Settings;
 
+/// `pypilot setup`, or `doctor --fix` under the name `command`.
 pub async fn run<S: MetadataSource>(
     workspace: &Path,
     settings: &Settings,
     source: &S,
+    command: &str,
+    opts: RunOpts,
 ) -> crate::Result<()> {
+    if opts.dry_run {
+        let (summary, steps) = exec::dry_run(setup::run(workspace, settings, source)).await;
+        let plan = Plan::from_summary(&summary?, steps);
+        return plan::finish(command, workspace, &plan, opts);
+    }
     println!(
         "{} — {} ({})",
         "PyPilot setup".bold().cyan(),

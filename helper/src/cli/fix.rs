@@ -1,10 +1,15 @@
 //! `pypilot fix python`: recompute the target interpreter and rebuild the venv.
 //! `pypilot fix cuda`: re-pin torch/tensorflow to the build matching the driver.
+//!
+//! Both, and `pypilot install`, take `--dry-run` to print the plan instead
+//! (see [`super::plan`]).
 
 use std::path::Path;
 
 use colored::Colorize;
 
+use super::plan::{self, RunOpts};
+use crate::core::exec::{self, Plan, PlanNote};
 use crate::core::{install, project, solver, torch_index, uv};
 use crate::matrix::frameworks::Framework;
 use crate::matrix::solve::solve_framework;
@@ -16,15 +21,64 @@ pub async fn run<S: MetadataSource>(
     settings: &Settings,
     source: &S,
     what: &str,
+    opts: RunOpts,
 ) -> crate::Result<()> {
     match what {
-        "python" => fix_python(workspace, settings, source).await,
-        "cuda" => fix_cuda(workspace, settings).await,
+        "python" => fix_python(workspace, settings, source, opts).await,
+        "cuda" => fix_cuda(workspace, settings, opts).await,
         other => anyhow::bail!("unknown fix target `{other}` (expected `python` or `cuda`)"),
     }
 }
 
-async fn fix_cuda(workspace: &Path, settings: &Settings) -> crate::Result<()> {
+/// A plan with nothing to do, for a dry run that stops at a decision.
+fn empty_plan(mode: ResolvedMode, python: Option<String>, why: String) -> Plan {
+    Plan {
+        mode: exec::mode_name(mode).to_string(),
+        python,
+        why,
+        steps: Vec::new(),
+        notes: Vec::new(),
+        blocked: None,
+    }
+}
+
+const CUDA_WHY: &str =
+    "Re-pin torch/tensorflow to the CUDA build matching this machine's GPU driver.";
+
+async fn fix_cuda(workspace: &Path, settings: &Settings, opts: RunOpts) -> crate::Result<()> {
+    let mode = settings.resolve_mode(workspace).await;
+    if !opts.dry_run {
+        return repin_frameworks(workspace, settings, mode, opts)
+            .await
+            .map(|_| ());
+    }
+    let (result, steps) = exec::dry_run(repin_frameworks(workspace, settings, mode, opts)).await;
+    let notes = result?;
+    let mut plan = empty_plan(mode, None, CUDA_WHY.to_string());
+    plan.steps = steps;
+    plan.notes = notes;
+    plan::finish("fix cuda", workspace, &plan, opts)
+}
+
+/// The body of `fix cuda`. Returns the GPU findings, which a dry run lists
+/// with its plan.
+async fn repin_frameworks(
+    workspace: &Path,
+    settings: &Settings,
+    mode: ResolvedMode,
+    opts: RunOpts,
+) -> crate::Result<Vec<PlanNote>> {
+    let mut notes = Vec::new();
+    let info = |notes: &mut Vec<PlanNote>, text: &str| {
+        if !opts.dry_run {
+            println!("  {} {text}", "[INFO ]".cyan().bold());
+        }
+        notes.push(PlanNote {
+            name: "fix cuda".into(),
+            ok: true,
+            detail: text.to_string(),
+        });
+    };
     let project = project::scan(workspace);
     let frameworks: Vec<_> = project
         .packages
@@ -33,31 +87,40 @@ async fn fix_cuda(workspace: &Path, settings: &Settings) -> crate::Result<()> {
         .collect();
 
     if frameworks.is_empty() {
-        println!(
-            "  {} no framework packages (torch, tensorflow) found in project.",
-            "[INFO ]".cyan().bold()
+        info(
+            &mut notes,
+            "no framework packages (torch, tensorflow) found in project.",
         );
-        return Ok(());
+        return Ok(notes);
     }
 
-    let mode = settings.resolve_mode(workspace).await;
     if mode == ResolvedMode::Pixi {
         // A `uv pip install` or a `[tool.uv]` index would fight pixi, which
         // rebuilds the environment from its own manifest and lock.
-        println!(
-            "  {} pixi project: PyPilot does not re-pin torch/tensorflow here. Take a CUDA build from conda-forge (pytorch-gpu, with `cuda` under [system-requirements]), or add the matched index under [pypi-options], then run `pixi install`.",
-            "[INFO ]".cyan().bold()
+        info(
+            &mut notes,
+            "pixi project: PyPilot does not re-pin torch/tensorflow here. Take a CUDA build from conda-forge (pytorch-gpu, with `cuda` under [system-requirements]), or add the matched index under [pypi-options], then run `pixi install`.",
         );
-        return Ok(());
+        return Ok(notes);
     }
 
+    // In a dry run the installs below are only recorded, so there is no
+    // outcome to report until the plan is printed.
+    let report = !exec::is_dry_run();
     let mut any_failed = false;
     for req in frameworks {
         let Some(solved) = solve_framework(&req.name, Some(req), settings).await else {
             continue;
         };
         if let Some(finding) = &solved.finding {
-            println!("{}\n  {}\n", finding.title.bold(), finding.detail);
+            if !opts.dry_run {
+                println!("{}\n  {}\n", finding.title.bold(), finding.detail);
+            }
+            notes.push(PlanNote {
+                name: finding.title.clone(),
+                ok: true,
+                detail: finding.detail.clone(),
+            });
         }
 
         let Some(version) = &solved.resolved_version else {
@@ -78,48 +141,53 @@ async fn fix_cuda(workspace: &Path, settings: &Settings) -> crate::Result<()> {
                 Ok(pinned) if pinned.is_pinned() => {
                     let uv_info = uv::ensure(settings).await?;
                     let out = uv::sync(&uv_info, workspace).await?;
-                    if out.success() {
-                        println!(
-                            "  {} {} now resolves from the matched index in pyproject.toml",
-                            "✓".green().bold(),
-                            req.name.bold()
-                        );
-                    } else {
-                        any_failed = true;
-                        if let torch_index::PinFile::Changed { original } = &pinned {
-                            std::fs::write(&pyproject, original)?;
+                    if report {
+                        if out.success() {
+                            println!(
+                                "  {} {} now resolves from the matched index in pyproject.toml",
+                                "✓".green().bold(),
+                                req.name.bold()
+                            );
+                        } else {
+                            any_failed = true;
+                            if let torch_index::PinFile::Changed { original } = &pinned {
+                                std::fs::write(&pyproject, original)?;
+                            }
+                            println!("  {} failed {}", "✗".red().bold(), out.stderr.trim().red());
                         }
-                        println!("  {} failed {}", "✗".red().bold(), out.stderr.trim().red());
                     }
                     continue;
                 }
                 Ok(_) => {}
-                Err(e) => println!(
-                    "  {} pyproject.toml left as is ({e}); a later `uv sync` may swap the build",
-                    "[WARN ]".yellow().bold()
-                ),
+                Err(e) => {
+                    let text = format!(
+                        "pyproject.toml left as is ({e}); a later `uv sync` may swap the build"
+                    );
+                    if !opts.dry_run {
+                        println!("  {} {text}", "[WARN ]".yellow().bold());
+                    }
+                    notes.push(PlanNote {
+                        name: "record PyTorch index".into(),
+                        ok: false,
+                        detail: text,
+                    });
+                }
             }
         }
 
-        match mode {
+        let out = match mode {
             ResolvedMode::UvFull | ResolvedMode::UvPipCompat => {
                 let uv_info = uv::ensure(settings).await?;
-                let out = uv::pip_install(
+                uv::pip_install(
                     &uv_info,
                     std::slice::from_ref(&spec),
                     solved.index_url.as_deref(),
                     workspace,
                 )
-                .await?;
-                if out.success() {
-                    println!("  {} installed {}", "✓".green().bold(), spec.bold());
-                } else {
-                    any_failed = true;
-                    println!("  {} failed {}", "✗".red().bold(), out.stderr.trim().red());
-                }
+                .await?
             }
             // Returned above: pixi projects are never re-pinned here.
-            ResolvedMode::Pixi => {}
+            ResolvedMode::Pixi => continue,
             ResolvedMode::PurePip => {
                 let venv = workspace.join(".venv");
                 if !venv.is_dir() {
@@ -130,19 +198,21 @@ async fn fix_cuda(workspace: &Path, settings: &Settings) -> crate::Result<()> {
                     );
                     continue;
                 }
-                let out = crate::core::pip::install_packages(
+                crate::core::pip::install_packages(
                     &venv,
                     std::slice::from_ref(&spec),
                     solved.index_url.as_deref(),
                     workspace,
                 )
-                .await?;
-                if out.success() {
-                    println!("  {} installed {}", "✓".green().bold(), spec.bold());
-                } else {
-                    any_failed = true;
-                    println!("  {} failed {}", "✗".red().bold(), out.stderr.trim().red());
-                }
+                .await?
+            }
+        };
+        if report {
+            if out.success() {
+                println!("  {} installed {}", "✓".green().bold(), spec.bold());
+            } else {
+                any_failed = true;
+                println!("  {} failed {}", "✗".red().bold(), out.stderr.trim().red());
             }
         }
     }
@@ -150,13 +220,14 @@ async fn fix_cuda(workspace: &Path, settings: &Settings) -> crate::Result<()> {
     if any_failed {
         anyhow::bail!("one or more installs did not finish, see above");
     }
-    Ok(())
+    Ok(notes)
 }
 
 async fn fix_python<S: MetadataSource>(
     workspace: &Path,
     settings: &Settings,
     source: &S,
+    opts: RunOpts,
 ) -> crate::Result<()> {
     let assessment = solver::assess(workspace, settings, source).await;
 
@@ -174,14 +245,47 @@ async fn fix_python<S: MetadataSource>(
     let Some(target) = assessment.target_python else {
         anyhow::bail!("could not determine a target Python version");
     };
+    let mode = settings.resolve_mode(workspace).await;
+    let why = crate::core::setup::derive_why(&assessment);
 
     let current = assessment.probes.venv.as_ref().and_then(|v| v.python);
     if current == Some(target) {
+        if opts.dry_run {
+            let plan = empty_plan(
+                mode,
+                Some(target.to_string()),
+                format!("{why} Already on Python {target}. Nothing to do."),
+            );
+            return plan::finish("fix python", workspace, &plan, opts);
+        }
         println!(
             "  {} Already on Python {target}. Nothing to do.",
             "✓".green().bold()
         );
         return Ok(());
+    }
+
+    // Rebuild and restore the declared dependencies. There is no single new
+    // package here, so reuse the bootstrap rather than the add path. A pixi
+    // project changes its manifest's python spec instead (`pixi add
+    // python=X.Y` + `pixi install`).
+    let rebuild = async {
+        if mode == ResolvedMode::Pixi {
+            install::recreate_with_python(workspace, settings, target, &[]).await
+        } else {
+            crate::core::setup::run(workspace, settings, source).await
+        }
+    };
+
+    if opts.dry_run {
+        let (summary, steps) = exec::dry_run(rebuild).await;
+        let mut plan = Plan::from_summary(&summary?, steps);
+        plan.python = Some(target.to_string());
+        plan.why = match current {
+            Some(old) => format!("{why} The environment is on Python {old}; rebuild it."),
+            None => why,
+        };
+        return plan::finish("fix python", workspace, &plan, opts);
     }
 
     let installed_count = assessment
@@ -210,15 +314,7 @@ async fn fix_python<S: MetadataSource>(
             .cyan()
     );
 
-    // Rebuild and restore the declared dependencies. There is no single new
-    // package here, so reuse the bootstrap rather than the add path. A pixi
-    // project changes its manifest's python spec instead (`pixi add
-    // python=X.Y` + `pixi install`).
-    let summary = if settings.resolve_mode(workspace).await == ResolvedMode::Pixi {
-        install::recreate_with_python(workspace, settings, target, &[]).await?
-    } else {
-        crate::core::setup::run(workspace, settings, source).await?
-    };
+    let summary = rebuild.await?;
     for step in &summary.steps {
         let mark = if step.ok {
             "✓".green().bold()
@@ -246,8 +342,15 @@ pub async fn install_one(
     workspace: &Path,
     settings: &Settings,
     package: &str,
+    opts: RunOpts,
 ) -> crate::Result<()> {
     install::validate_package_name(package)?;
+    if opts.dry_run {
+        let (summary, steps) =
+            exec::dry_run(install::install_package(workspace, settings, package)).await;
+        let plan = Plan::from_summary(&summary?, steps);
+        return plan::finish("install", workspace, &plan, opts);
+    }
     println!(
         "{} Installing {}...",
         "PyPilot install —".bold().cyan(),

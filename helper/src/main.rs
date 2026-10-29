@@ -81,6 +81,7 @@ fn print_help() {
          USAGE:\n    pypilot <MODE> [ARG] [--path <dir>]\n\n\
          MODES:\n\
          \x20   doctor            Read-only environment and compatibility report\n\
+         \x20                     (--fix then runs setup, like the editor's Fix environment)\n\
          \x20   setup             Build the environment (uv by default, pip if configured)\n\
          \x20   check <package>   Can this package run on this project's Python?\n\
          \x20   explain [package] Why these Pythons: requires_python vs wheels per platform;\n\
@@ -98,7 +99,10 @@ fn print_help() {
          \x20   lsp               Run as an LSP server over stdio, used by the Zed extension\n\n\
          OPTIONS:\n\
          \x20   --path <dir>       Workspace directory to analyze (default: current dir)\n\
-         \x20   --json             explain: print the explanation as JSON\n\
+         \x20   --json             explain: print the explanation as JSON;\n\
+         \x20                      with --dry-run: print the plan as JSON\n\
+         \x20   --dry-run          setup, fix, install, doctor --fix: print every command\n\
+         \x20                      and file change they would make, and change nothing\n\
          \x20   --pixi-env <name>  pixi environment to use (default: the pixi_environment setting)\n\
          \x20   --suggest-alternatives\n\
          \x20                      check: show conda-forge alternatives even when it passes\n",
