@@ -1,0 +1,125 @@
+name: Live PyPI smoke
+
+# Nightly run of the engine against the real PyPI, download.pytorch.org,
+# NVIDIA and conda-forge, so upstream drift (a changed JSON API, a new torch
+# CUDA index, a stale data table) is noticed before users hit it. Nothing
+# depends on this workflow; on failure it opens, or comments on, a single
+# issue labelled `data-drift`.
+#
+# The weekly data-freshness.yml only runs check_data.py; this one also
+# exercises the built binary end to end.
+
+on:
+  schedule:
+    - cron: "23 3 * * *" # daily 03:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-pypi
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags, for check_data.py's schema check
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Check data tables
+        id: data
+        shell: bash
+        run: |
+          set +e
+          python scripts/check_data.py
+          code=$?
+          set -e
+          case "$code" in
+            0) echo "Data tables are current." ;;
+            1) echo "::error title=Stale data tables::Run scripts/check_data.py locally and update helper/data (see AGENTS.md)."
+               exit 1 ;;
+            2) echo "::warning title=Upstream unreachable::check_data.py could not reach an upstream; not counted as drift." ;;
+            *) echo "::error::check_data.py exited with $code"
+               exit "$code" ;;
+          esac
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build helper
+        run: cargo build -p pypilot-helper --release --locked
+
+      - name: Smoke commands against live upstreams
+        shell: bash
+        run: |
+          set -euo pipefail
+          pypilot="$PWD/target/release/pypilot"
+          work="$(mktemp -d)"
+          cd "$work" # an empty project: answers come from PyPI, not a venv
+
+          step() { echo "::group::pypilot $*"; }
+
+          step --version
+          "$pypilot" --version
+          echo "::endgroup::"
+
+          step check numpy
+          out="$("$pypilot" check numpy 2>&1)"; echo "$out"
+          grep -q "supported Python" <<<"$out" || { echo "::error::check numpy printed no supported Python range"; exit 1; }
+          echo "::endgroup::"
+
+          # Historic release: its wheels are fixed, so the answer must not move.
+          step check mediapipe==0.10.14
+          out="$("$pypilot" check mediapipe==0.10.14 2>&1)"; echo "$out"
+          grep -Eq "supported Python *: 3\.9.{1,3}3\.12" <<<"$out" || { echo "::error::mediapipe 0.10.14 should support Python 3.9-3.12"; exit 1; }
+          echo "::endgroup::"
+
+          step explain tensorflow==2.15.0 --json
+          "$pypilot" explain tensorflow==2.15.0 --json > explain.json
+          cat explain.json
+          python3 - explain.json <<'PY'
+          import json, sys
+          e = json.load(open(sys.argv[1]))["explanation"]
+          assert e["name"] == "tensorflow" and e["version"] == "2.15.0", e
+          assert e["requires_python"] == ">=3.9", e["requires_python"]
+          assert "3.11" in e["requires_python_allows"], e["requires_python_allows"]
+          PY
+          echo "::endgroup::"
+
+  report:
+    needs: smoke
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the data-drift issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Live PyPI smoke test failing"
+          body="The nightly live-upstream run failed: $RUN_URL
+
+          Run \`python scripts/check_data.py\` and the smoke commands in .github/workflows/live-pypi.yml locally. Stale tables go in their own \`data:\` commit (AGENTS.md). Close this issue once the run is green again."
+          # Match on the title, not the label, so a missing label cannot cause a
+          # new issue every night.
+          number="$(gh issue list --state open --search "in:title \"$title\"" --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")"
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "Still failing: $RUN_URL"
+          elif ! gh issue create --title "$title" --label data-drift --body "$body"; then
+            # The label may not exist yet (see .github/labels.yml).
+            gh issue create --title "$title" --body "$body"
+          fi
