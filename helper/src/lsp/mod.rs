@@ -1425,3 +1425,195 @@ mod tests {
         assert_eq!(string_args(&[json!("numpy"), json!(1)], 0), None);
     }
 }
+
+/// The server driven in-process over an in-memory pipe, as an editor would.
+#[cfg(test)]
+mod protocol_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    use serde_json::{json, Value};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+    struct FakeClient {
+        to_server: tokio::io::WriteHalf<tokio::io::DuplexStream>,
+        from_server: tokio::sync::mpsc::UnboundedReceiver<Value>,
+        next_id: i64,
+    }
+
+    impl FakeClient {
+        fn start() -> FakeClient {
+            let (client_end, server_end) = tokio::io::duplex(1 << 20);
+            let (server_read, server_write) = tokio::io::split(server_end);
+            let (client_read, to_server) = tokio::io::split(client_end);
+            let (service, socket) = service(PyPiClient::unreachable());
+            tokio::spawn(Server::new(server_read, server_write, socket).serve(service));
+
+            let (tx, from_server) = tokio::sync::mpsc::unbounded_channel();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(client_read);
+                loop {
+                    let mut length = 0usize;
+                    loop {
+                        let mut line = String::new();
+                        if reader.read_line(&mut line).await.unwrap_or(0) == 0 {
+                            return;
+                        }
+                        let line = line.trim();
+                        if line.is_empty() {
+                            break;
+                        }
+                        if let Some(n) = line.strip_prefix("Content-Length:") {
+                            length = n.trim().parse().unwrap();
+                        }
+                    }
+                    let mut body = vec![0; length];
+                    if reader.read_exact(&mut body).await.is_err() {
+                        return;
+                    }
+                    let _ = tx.send(serde_json::from_slice(&body).unwrap());
+                }
+            });
+            FakeClient {
+                to_server,
+                from_server,
+                next_id: 1,
+            }
+        }
+
+        async fn send(&mut self, message: Value) {
+            let body = message.to_string();
+            let frame = format!("Content-Length: {}\r\n\r\n{body}", body.len());
+            self.to_server.write_all(frame.as_bytes()).await.unwrap();
+        }
+
+        async fn request(&mut self, method: &str, params: Value) {
+            let id = self.next_id;
+            self.next_id += 1;
+            self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
+                .await;
+        }
+
+        async fn notify(&mut self, method: &str, params: Value) {
+            self.send(json!({"jsonrpc": "2.0", "method": method, "params": params}))
+                .await;
+        }
+
+        /// The next message from the server, answering its requests with null.
+        async fn next(&mut self) -> Option<Value> {
+            let message = tokio::time::timeout(Duration::from_secs(30), self.from_server.recv())
+                .await
+                .ok()??;
+            if let (Some(id), Some(_)) = (message.get("id"), message.get("method")) {
+                let id = id.clone();
+                self.send(json!({"jsonrpc": "2.0", "id": id, "result": null}))
+                    .await;
+            }
+            Some(message)
+        }
+
+        /// The next `publishDiagnostics`: file name and diagnostics.
+        async fn next_publish(&mut self) -> Option<(String, Vec<Value>)> {
+            loop {
+                let m = self.next().await?;
+                if m["method"] != "textDocument/publishDiagnostics" {
+                    continue;
+                }
+                let uri = m["params"]["uri"].as_str().unwrap_or_default();
+                let name = uri.rsplit('/').next().unwrap_or_default().to_string();
+                let diagnostics = m["params"]["diagnostics"].as_array().cloned();
+                return Some((name, diagnostics.unwrap_or_default()));
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn workspace_scope_publishes_for_unopened_files_and_clears_on_switch_back() {
+        let root = std::env::temp_dir().join(format!("pypilot-lsp-ws-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let missing = "import pypilot_missing_pkg_xyz\n";
+        for f in ["a.py", "b.py", "sub/c.py", ".venv/lib/v.py", "opened.py"] {
+            let path = root.join(f);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, missing).unwrap();
+        }
+        let root_uri = Url::from_file_path(&root).unwrap();
+        let opened_uri = Url::from_file_path(root.join("opened.py")).unwrap();
+
+        let mut client = FakeClient::start();
+        client
+            .request(
+                "initialize",
+                json!({
+                    "capabilities": {},
+                    "rootUri": root_uri,
+                    "workspaceFolders": [{"uri": root_uri, "name": "p"}],
+                    "initializationOptions": {
+                        "diagnosticsScope": "workspace",
+                        "autoCheckOnOpen": false
+                    }
+                }),
+            )
+            .await;
+        // Like an editor, wait for the answer before anything else: the
+        // server drops notifications that arrive before it is initialized.
+        while client
+            .next()
+            .await
+            .is_some_and(|m| m.get("result").is_none())
+        {}
+        client.notify("initialized", json!({})).await;
+        // Opened before the scan's debounce ends, with the import fixed: the
+        // editor's text wins over the file on disk.
+        client
+            .notify(
+                "textDocument/didOpen",
+                json!({"textDocument": {
+                    "uri": opened_uri, "languageId": "python", "version": 1,
+                    "text": "import os\n"
+                }}),
+            )
+            .await;
+
+        let mut flagged = HashSet::new();
+        while flagged.len() < 3 {
+            let Some((name, diagnostics)) = client.next_publish().await else {
+                break;
+            };
+            assert_ne!(name, "v.py", "environments are not scanned");
+            if name == "opened.py" {
+                assert!(diagnostics.is_empty(), "the open buffer wins");
+                continue;
+            }
+            assert_eq!(diagnostics.len(), 1, "{name}: {diagnostics:?}");
+            assert_eq!(diagnostics[0]["source"], "pypilot");
+            let message = diagnostics[0]["message"].as_str().unwrap_or_default();
+            assert!(message.contains("pypilot"), "{message}");
+            flagged.insert(name);
+        }
+        let expected: HashSet<String> = ["a.py", "b.py", "c.py"].map(String::from).into();
+        assert_eq!(flagged, expected);
+
+        // Back to open files: what the scan published is cleared.
+        client
+            .notify(
+                "workspace/didChangeConfiguration",
+                json!({"settings": {"pypilot": {"diagnosticsScope": "openFiles"}}}),
+            )
+            .await;
+        let mut cleared = HashSet::new();
+        while cleared.len() < 3 {
+            let Some((name, diagnostics)) = client.next_publish().await else {
+                break;
+            };
+            assert!(diagnostics.is_empty(), "{name}: {diagnostics:?}");
+            if name != "opened.py" {
+                cleared.insert(name);
+            }
+        }
+        assert_eq!(cleared, expected);
+
+        crate::settings::set_editor_settings(&Value::Null);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
