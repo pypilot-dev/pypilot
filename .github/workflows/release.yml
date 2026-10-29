@@ -9,7 +9,8 @@ name: Release
 #   pypilot-darwin-arm64.tar.gz, pypilot-windows-x64.zip
 #   SHA256SUMS               one "<sha256>  <asset-name>" line per archive,
 #                            sorted by name, LF (`sha256sum -c` format)
-# Every archive and SHA256SUMS also get a GitHub build-provenance
+#   pypilot-helper.cdx.json  CycloneDX 1.5 SBOM of the helper crate
+# Every archive, SHA256SUMS and the SBOM also get a GitHub build-provenance
 # attestation: `gh attestation verify <file> -R pypilot-dev/pypilot`.
 #
 # Assets are only uploaded once all four builds succeed, so a release never
@@ -98,7 +99,7 @@ jobs:
           retention-days: 7
 
   publish:
-    name: checksums and upload
+    name: checksums, SBOM and upload
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -140,10 +141,31 @@ jobs:
           sha256sum -c SHA256SUMS
           cat SHA256SUMS
 
-      - name: Attest SHA256SUMS
+      - name: Install cargo-cyclonedx
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cyclonedx
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          # --target all: one SBOM covering the dependencies of every
+          # platform archive (e.g. windows-sys only exists on one of them).
+          cargo cyclonedx --manifest-path helper/Cargo.toml --format json \
+            --spec-version 1.5 --target all --override-filename pypilot-helper.cdx
+          mv helper/pypilot-helper.cdx.json dist/pypilot-helper.cdx.json
+          python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d['metadata']['component']['name']=='pypilot-helper'; print(len(d['components']), 'components')" dist/pypilot-helper.cdx.json
+
+      - name: Attest SHA256SUMS and SBOM
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: dist/SHA256SUMS
+          subject-path: |
+            dist/SHA256SUMS
+            dist/pypilot-helper.cdx.json
 
       - name: Upload assets
         uses: softprops/action-gh-release@v2
@@ -155,4 +177,5 @@ jobs:
             dist/pypilot-darwin-arm64.tar.gz
             dist/pypilot-windows-x64.zip
             dist/SHA256SUMS
+            dist/pypilot-helper.cdx.json
           fail_on_unmatched_files: true
