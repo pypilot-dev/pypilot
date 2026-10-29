@@ -237,7 +237,7 @@ fn combine_python_specs(specs: &[String]) -> Option<String> {
 }
 
 /// One environment, as doctor lists it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct EnvReport {
     pub name: String,
     pub features: Vec<String>,
@@ -497,8 +497,10 @@ pub fn platform_findings(
     findings
 }
 
-/// Whether `pixi.lock` matches the manifest.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Whether `pixi.lock` matches the manifest. Serialized as
+/// `{"status": "stale", "changes": [...]}`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
 pub enum LockStatus {
     /// No `pixi.lock` yet.
     Missing,

@@ -20,7 +20,7 @@ use crate::pypi::pyversion::PyVersion;
 use crate::settings::{PackageManager, Settings};
 
 /// A usable uv binary.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct UvInfo {
     pub path: PathBuf,
     pub version: String,

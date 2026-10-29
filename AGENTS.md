@@ -73,7 +73,72 @@ cargo build -p pypilot-zed --target wasm32-wasip2
 1. **Engine** (this repo): bump `Cargo.toml` and `extension/extension.toml`,
    tag `vX.Y.Z`, wait for the Release workflow to upload the binaries.
 2. **pip package** (`pypilot-pip`): only after step 1's binaries exist, bump
-   `DEFAULT_TAG` in `src/pypilot/binary.py` to the new engine tag, then release.
+   `DEFAULT_TAG` and `ENGINE_SHA256` in `src/pypilot/binary.py` to the new
+   engine tag (the ecosystem-bump PR does this, section 4), then release.
 3. **VS Code extension** (`pypilot-vscode`): independent of the engine version.
 
 Data-only changes need none of this: merge to `main` and they ship.
+
+## 4. Release integrity
+
+The Release workflow (`.github/workflows/release.yml`) builds the four
+archives, then a single publish job uploads everything at once, so a failed
+platform leaves no partial release. Asset names and formats are contracts
+with the Zed shim, the wrappers and `scripts/bump_engine_pins.py`; do not
+rename them.
+
+| Asset | What |
+| --- | --- |
+| `pypilot-{linux-x64,darwin-x64,darwin-arm64}.tar.gz`, `pypilot-windows-x64.zip` | the engine |
+| `SHA256SUMS` | one `<64 lowercase hex>  <asset-name>` line (two spaces) per archive, sorted by name, LF; `sha256sum -c SHA256SUMS` verifies it |
+| `pypilot-helper.cdx.json` | CycloneDX 1.5 SBOM of the helper, all targets |
+
+Every archive, `SHA256SUMS` and the SBOM carry a GitHub build-provenance
+attestation: `gh attestation verify <file> -R pypilot-dev/pypilot`.
+
+**Wrapper pins.** Each wrapper pins one engine release and the hash of each
+archive, and verifies downloads against them (against the release's
+`SHA256SUMS` when the user overrides the version):
+
+- `pypilot-vscode/package.json`:
+  `"pypilotEngine": { "version": "X.Y.Z", "sha256": { "<asset>": "<hex>" } }`
+- `pypilot-pip/src/pypilot/binary.py`:
+  `DEFAULT_TAG = "vX.Y.Z"` and `ENGINE_SHA256 = { "<asset>": "<hex>", ... }`
+
+After a tag's Release run succeeds, `.github/workflows/ecosystem-bump.yml`
+runs `scripts/bump_engine_pins.py` and opens a pin PR in each wrapper repo
+(re-run by hand with `workflow_dispatch` and a tag, e.g. after a manual
+Release run). It needs the `ECOSYSTEM_TOKEN` secret: a fine-grained PAT or
+app token with Contents and Pull requests read/write on `pypilot-vscode` and
+`pypilot-pip`. Without it the workflow only logs the manual command:
+
+```bash
+gh release download vX.Y.Z -p SHA256SUMS
+python scripts/bump_engine_pins.py --tag vX.Y.Z --sums SHA256SUMS \
+  --vscode ../pypilot-vscode/package.json \
+  --pip ../pypilot-pip/src/pypilot/binary.py --dry-run   # drop --dry-run to write
+python scripts/bump_engine_pins.py --self-test
+```
+
+Merging a pin PR does not release the wrapper; that stays manual (section 3).
+
+**Reproducible builds.** Release and CI build with `--locked`, so they use
+exactly `Cargo.lock`; update it deliberately (`cargo update -p <crate>`) in
+its own commit. The release builds from a clean target dir and logs
+`rustc -Vv`. `rust-toolchain.toml` tracks `stable` rather than a pinned
+version on purpose: the Zed registry builds the shim from this repo with its
+own toolchain, and rustup applies this file there too, so a pinned channel
+could force that build onto a toolchain it does not have.
+To reproduce a release binary, check out the tag and build with the rustc
+version shown in that run's log.
+
+**Dependency policy.** `cargo deny check` (`deny.toml`, run by
+`.github/workflows/supply-chain.yml` on every push/PR and daily) covers
+RustSec advisories, licenses (permissive, plus MPL-2.0 per crate; AGPL only
+for `pypilot-helper`), banned crates (OpenSSL) and sources (crates.io
+only). An ignored advisory needs a comment explaining why it does not apply.
+
+**Upstream drift.** `.github/workflows/live-pypi.yml` runs nightly against
+the real PyPI, PyTorch, NVIDIA and conda-forge and opens or updates an issue
+labelled `data-drift` on failure. Labels the workflows rely on are listed in
+`.github/labels.yml`.

@@ -17,8 +17,10 @@ use crate::core::project::normalize_name;
 use crate::core::{pip, pixi, pixi_envs, probe};
 use crate::pypi::pyversion::PyVersion;
 
-/// What kind of environment a project uses.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// What kind of environment a project uses. Serialized as
+/// `{"type": "venv"}` or `{"type": "pixi", "name": "default"}`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum EnvKind {
     /// A virtual environment with a `pyvenv.cfg`.
     #[default]
