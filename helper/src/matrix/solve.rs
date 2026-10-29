@@ -54,15 +54,40 @@ pub async fn solve_framework(
     let table = FrameworkTable::load(&frameworks_json)?;
     let accelerator = gpu::detect().await;
 
-    let version = resolve_version(&table, framework, requirement)?;
+    solve_on(
+        &table,
+        framework,
+        requirement,
+        accelerator,
+        Platform::current().os,
+        || {
+            refresh::read(
+                "nvidia.json",
+                crate::matrix::NVIDIA_JSON,
+                settings.data_refresh_days,
+            )
+        },
+    )
+}
+
+/// [`solve_framework`] for a given accelerator and OS, without probing the
+/// machine, so every platform's answer can be checked from any one of them.
+/// `nvidia_json` is only read when the accelerator is an NVIDIA GPU.
+pub fn solve_on(
+    table: &FrameworkTable,
+    framework: Framework,
+    requirement: Option<&Requirement>,
+    accelerator: Accelerator,
+    os: Os,
+    nvidia_json: impl FnOnce() -> String,
+) -> Option<FrameworkSolve> {
+    let version = resolve_version(table, framework, requirement)?;
 
     // Checked before the release lookup: native Windows is CPU-only for every
     // tensorflow past 2.10 no matter what the driver supports, and 2.10 itself
     // predates the bundled table, so neither branch below would say so.
-    if let Some(gpu_name) =
-        native_windows_tensorflow_gpu(framework, Platform::current().os, &accelerator)
-    {
-        let mut solved = tensorflow_native_windows(&table, requirement, &version, gpu_name);
+    if let Some(gpu_name) = native_windows_tensorflow_gpu(framework, os, &accelerator) {
+        let mut solved = tensorflow_native_windows(table, requirement, &version, gpu_name);
         solved.resolved_version = Some(version);
         return Some(solved);
     }
@@ -79,13 +104,8 @@ pub async fn solve_framework(
             driver_version,
             compute_cap,
         } => {
-            let nvidia_json = refresh::read(
-                "nvidia.json",
-                crate::matrix::NVIDIA_JSON,
-                settings.data_refresh_days,
-            );
+            let nvidia_json = nvidia_json();
             let driver_table = DriverTable::load(&nvidia_json);
-            let os = Platform::current().os;
             let support = driver_table
                 .as_ref()
                 .and_then(|t| t.support_for(&driver_version, os));
@@ -93,7 +113,7 @@ pub async fn solve_framework(
                 arch_context(
                     &nvidia_json,
                     cap,
-                    &table,
+                    table,
                     driver_table.as_ref(),
                     support.as_ref(),
                     os,

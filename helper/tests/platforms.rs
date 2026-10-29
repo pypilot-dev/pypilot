@@ -474,3 +474,111 @@ fn musllinux_wheels_do_not_count_on_glibc() {
         assert_wheels(&meta.analyze_with(&p, Libc::Musl), p, "3.8–3.15");
     }
 }
+
+// ---------------------------------------------------------------------------
+// torch / tensorflow accelerator solve per platform (bundled data tables).
+// ---------------------------------------------------------------------------
+
+mod accelerator {
+    use super::*;
+    use pypilot::core::gpu::Accelerator;
+    use pypilot::core::Severity;
+    use pypilot::matrix::frameworks::{Framework, FrameworkTable};
+    use pypilot::matrix::solve::{solve_on, FrameworkSolve};
+    use pypilot::matrix::{FRAMEWORKS_JSON, NVIDIA_JSON};
+
+    /// 570.30 is past Linux's CUDA 12.8 floor (570.26) but short of
+    /// Windows' (570.65), so the two OSes get different builds.
+    fn nvidia() -> Accelerator {
+        Accelerator::Nvidia {
+            name: "NVIDIA GeForce RTX 4090".into(),
+            driver_version: "570.30".into(),
+            compute_cap: Some("8.9".into()),
+        }
+    }
+
+    fn solve(framework: Framework, spec: &str, acc: Accelerator, os: Os) -> FrameworkSolve {
+        let table = FrameworkTable::load(FRAMEWORKS_JSON).unwrap();
+        let req = Requirement {
+            name: "torch".into(),
+            spec: spec.into(),
+        };
+        let pinned = (!spec.is_empty()).then_some(&req);
+        let needs_driver_table = matches!(acc, Accelerator::Nvidia { .. });
+        solve_on(&table, framework, pinned, acc, os, || {
+            assert!(
+                needs_driver_table,
+                "the driver table is read only for NVIDIA"
+            );
+            NVIDIA_JSON.to_string()
+        })
+        .unwrap()
+    }
+
+    /// The minimum driver per CUDA release differs between Linux and Windows.
+    #[test]
+    fn torch_cuda_build_follows_the_os_driver_table() {
+        let linux = solve(Framework::Torch, "==2.7.1", nvidia(), Os::Linux);
+        assert_eq!(
+            linux.index_url.as_deref(),
+            Some("https://download.pytorch.org/whl/cu128")
+        );
+        let windows = solve(Framework::Torch, "==2.7.1", nvidia(), Os::Windows);
+        assert_eq!(
+            windows.index_url.as_deref(),
+            Some("https://download.pytorch.org/whl/cu126")
+        );
+    }
+
+    /// Apple Silicon uses MPS from the default wheel: no index, an info note.
+    #[test]
+    fn torch_on_apple_silicon_uses_mps() {
+        let s = solve(Framework::Torch, "", Accelerator::AppleSilicon, Os::Macos);
+        assert_eq!(s.index_url, None);
+        let f = s.finding.unwrap();
+        assert_eq!(f.severity, Severity::Info);
+        assert!(f.title.contains("MPS"), "{}", f.title);
+    }
+
+    /// No accelerator (Intel Mac, Windows arm64, a GPU-less Linux box): the
+    /// CPU index, silently.
+    #[test]
+    fn torch_without_a_gpu_takes_the_cpu_index() {
+        for os in [Os::Macos, Os::Windows, Os::Linux] {
+            let s = solve(Framework::Torch, "", Accelerator::None, os);
+            assert_eq!(
+                s.index_url.as_deref(),
+                Some("https://download.pytorch.org/whl/cpu"),
+                "{os:?}"
+            );
+            assert_eq!(s.finding, None, "{os:?}");
+        }
+    }
+
+    /// tensorflow has had no GPU build on native Windows since 2.11; on
+    /// Linux the same GPU and driver are fine for 2.21 (CUDA 12.5).
+    #[test]
+    fn tensorflow_gpu_is_linux_only() {
+        let win = solve(Framework::TensorFlow, "", nvidia(), Os::Windows);
+        assert_eq!(win.index_url, None);
+        let f = win.finding.unwrap();
+        assert_eq!(f.severity, Severity::Warning);
+        assert!(f.title.contains("CPU on native Windows"), "{}", f.title);
+
+        let linux = solve(Framework::TensorFlow, "", nvidia(), Os::Linux);
+        assert_eq!(linux.index_url, None);
+        assert_eq!(linux.finding, None);
+    }
+
+    #[test]
+    fn tensorflow_on_apple_silicon_uses_mps() {
+        let s = solve(
+            Framework::TensorFlow,
+            "",
+            Accelerator::AppleSilicon,
+            Os::Macos,
+        );
+        assert_eq!(s.index_url, None);
+        assert!(s.finding.unwrap().title.contains("MPS"));
+    }
+}
