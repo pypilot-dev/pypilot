@@ -1,0 +1,8 @@
+i Dry-run: lock file would be updated (not written to disk)
+Environment: default              
+  ~ (pypi) requests   2.34.2  ->  2.32.5
+                                  
+Environment: test                 
+  ~ (pypi) requests   2.34.2  ->  2.32.5
+Error:   × lock file not up-to-date with the workspace
+

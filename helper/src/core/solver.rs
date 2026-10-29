@@ -146,10 +146,12 @@ pub async fn assess<S: MetadataSource>(
         findings.extend(crate::core::depcheck::check(&venv.path, venv.python));
     }
 
-    // pixi: PyPI dependencies that exclude the environment's Python, named
-    // with the `pixi add python=…` that fixes them (core::pixi_compat).
+    // pixi: PyPI dependencies that exclude the selected environment's
+    // Python, named with the `pixi add python=…` that fixes them
+    // (core::pixi_compat), plus the other environments and the other
+    // declared platforms (core::pixi_envs).
     if let Some(pixi) = crate::core::pixi::detect(workspace) {
-        let pixi_findings = crate::core::pixi_compat::assess_default_env(&pixi, source).await;
+        let pixi_findings = crate::core::pixi_envs::assess(&pixi, workspace, source).await;
         merge_pixi_findings(&mut findings, pixi_findings);
     }
 
