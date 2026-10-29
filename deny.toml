@@ -1,0 +1,88 @@
+# cargo-deny policy for the whole workspace (helper + Zed shim).
+# Run locally with `cargo deny check`; CI runs it on every push and PR
+# (.github/workflows/supply-chain.yml).
+
+[graph]
+# Every target a release or the Zed registry builds. Without this list
+# cargo-deny checks all targets, including ones we never ship.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "wasm32-wasip2",
+]
+all-features = false
+
+[advisories]
+# RustSec advisory DB. Vulnerabilities, unsound and unmaintained crates fail
+# the check. Any entry added to `ignore` must carry a comment saying why it
+# does not affect PyPilot and when to revisit it.
+unmaintained = "all"
+yanked = "deny"
+ignore = [
+    # zip 2.x: all three are in `ZipArchive::extract()` / the stream
+    # extraction API (SUID/SGID bits kept, symlinks outside the target,
+    # permissions applied through symlinks). PyPilot never calls those:
+    # helper/src/core/uv.rs `extract_zip` walks entries itself, skips any
+    # without an `enclosed_name()`, writes plain files with File::create and
+    # applies no mode bits or symlinks from the archive. It only opens the
+    # uv release archives that are .zip (the Windows builds). Fixed in
+    # zip >= 9; drop these entries when helper/Cargo.toml moves off zip 2.
+    { id = "RUSTSEC-2026-0367", reason = "only ZipArchive::extract is affected; uv.rs extracts entries manually" },
+    { id = "RUSTSEC-2026-0368", reason = "only ZipArchive::extract is affected; uv.rs never creates symlinks" },
+    { id = "RUSTSEC-2026-0369", reason = "only ZipArchive::extract is affected; uv.rs applies no archive permissions" },
+]
+
+[licenses]
+# Permissive licenses only for third-party code. Every helper dependency is
+# linked into the engine binary (AGPL-3.0-or-later), so each license here
+# must be AGPL-compatible. The shim (Apache-2.0) only pulls in
+# zed_extension_api and its wit-bindgen tree, all Apache-2.0/MIT.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-3-Clause",
+    "ISC",
+    "0BSD",
+    "Zlib",
+    "BSL-1.0",
+    "Unlicense",
+    "Unicode-3.0",
+    # webpki-roots: the Mozilla root store data. Permissive data license.
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.93
+exceptions = [
+    # Our own engine.
+    { name = "pypilot-helper", allow = ["AGPL-3.0-or-later"] },
+    # MPL-2.0 is file-level copyleft and compatible with the AGPL; it is
+    # allowed per crate rather than globally so a new MPL dependency gets a
+    # conscious review. colored: terminal colors in the CLI. option-ext:
+    # pulled in by directories -> dirs-sys.
+    { name = "colored", allow = ["MPL-2.0"] },
+    { name = "option-ext", allow = ["MPL-2.0"] },
+]
+
+[bans]
+# Duplicate versions (hashbrown, bitflags, ...) come from upstream crates
+# and are not worth blocking on; they still show up as warnings.
+multiple-versions = "warn"
+wildcards = "deny"
+# Path dependencies inside the workspace are not wildcards.
+allow-wildcard-paths = true
+# OpenSSL would break the "rustls only, no system libraries" promise in
+# helper/Cargo.toml and the static Linux build.
+deny = [
+    { name = "openssl" },
+    { name = "openssl-sys" },
+    { name = "native-tls" },
+]
+
+[sources]
+# Only crates.io; a git or third-party registry dependency must be added
+# here deliberately.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
