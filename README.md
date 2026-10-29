@@ -155,7 +155,7 @@ rustup target add wasm32-wasip2
 cargo build -p pypilot-zed --target wasm32-wasip2 --release
 ```
 
-Tests run offline against recorded PyPI fixtures and fixed Linux x86-64 target tags.
+Tests run offline against recorded PyPI fixtures. The platform is always passed in, never read from the host, so Linux (x64, arm64, glibc and musl), macOS (x64, arm64) and Windows (x64, arm64) are all checked on any machine; `helper/tests/platforms.rs` covers the cases where they differ.
 
 `python scripts/check_data.py` reports whether the bundled tables in `helper/data/` have fallen behind PyPI, the PyTorch wheel indexes and NVIDIA's driver table. Run it before changing code and see [AGENTS.md](AGENTS.md) for how to update them.
 
