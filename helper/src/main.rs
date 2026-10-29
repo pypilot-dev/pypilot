@@ -88,7 +88,9 @@ fn print_help() {
          \x20   migrate-conda     Translate environment.yml into a pyproject.toml\n\
          \x20   lsp               Run as an LSP server over stdio, used by the Zed extension\n\n\
          OPTIONS:\n\
-         \x20   --path <dir>   Workspace directory to analyze (default: current dir)\n",
+         \x20   --path <dir>   Workspace directory to analyze (default: current dir)\n\
+         \x20   --suggest-alternatives\n\
+         \x20                  check: show conda-forge alternatives even when it passes\n",
         ver = env!("CARGO_PKG_VERSION")
     );
 }

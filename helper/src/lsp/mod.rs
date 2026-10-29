@@ -1193,6 +1193,26 @@ async fn package_check_markdown(source: &PyPiClient, a: &Assessment, package: &s
         }
     };
     s.push_str(&format!("\n{verdict}\n"));
+
+    // Why it fails here, and the conda-forge build pixi could use instead.
+    let venv_python = a.probes.venv.as_ref().and_then(|v| v.python);
+    let machine = crate::core::pixi_advice::Machine {
+        platform: Platform::current(),
+        venv_python,
+        python: venv_python.or_else(|| analysis.supported.max()),
+        nvcc: crate::core::pixi_advice::nvcc_available(),
+    };
+    let advice =
+        crate::core::pixi_advice::check_advice(&analysis, crate::matrix::conda_forge(), &machine);
+    if !advice.reasons.is_empty() {
+        s.push('\n');
+        for reason in &advice.reasons {
+            s.push_str(&format!("- Why: {reason}\n"));
+        }
+        if let Some(alt) = advice.alternative.filter(|_| !a.project.is_pixi()) {
+            s.push_str(&format!("- Alternative: {alt}\n"));
+        }
+    }
     s
 }
 

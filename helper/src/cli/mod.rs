@@ -30,9 +30,10 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
 
         "check" => {
             let Some(package) = positional(args) else {
-                anyhow::bail!("usage: pypilot check <package>");
+                anyhow::bail!("usage: pypilot check <package> [--suggest-alternatives]");
             };
-            check::run(&workspace, &settings, &source, &package).await
+            let suggest = args.iter().any(|a| a == "--suggest-alternatives");
+            check::run(&workspace, &settings, &source, &package, suggest).await
         }
 
         "fix" => {

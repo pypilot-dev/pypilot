@@ -4,13 +4,20 @@
 //! install fails. Takes anything a requirements file would: `numpy`,
 //! `mediapipe==0.10.14`, `torch<2.6`. A specifier is judged on the release
 //! it selects, whose wheels can support different Pythons than the newest.
+//!
+//! When the verdict is a failure (no files here, no wheel for this Python,
+//! a source build), it also says why and names the conda-forge build pixi
+//! could install instead. That costs nothing (the table is bundled), and a
+//! failure is exactly when the user needs it, so it is not hidden behind a
+//! flag; `--suggest-alternatives` shows the section for a passing verdict
+//! too.
 
 use std::path::Path;
 
 use colored::Colorize;
 
 use crate::core::platform::Platform;
-use crate::core::{probe, project};
+use crate::core::{pixi_advice, probe, project};
 use crate::pypi::MetadataSource;
 use crate::settings::Settings;
 
@@ -19,6 +26,7 @@ pub async fn run<S: MetadataSource>(
     settings: &Settings,
     source: &S,
     package: &str,
+    suggest_alternatives: bool,
 ) -> crate::Result<()> {
     let Some(req) = project::parse_requirement(package) else {
         anyhow::bail!("`{package}` is not a package name or requirement");
@@ -86,7 +94,11 @@ pub async fn run<S: MetadataSource>(
             .bold()
             .cyan()
     );
-    match probes.venv.as_ref().and_then(|v| v.python) {
+    let venv_python = probes.venv.as_ref().and_then(|v| v.python);
+    let failed = no_files.is_some()
+        || analysis.sdist_only
+        || venv_python.is_some_and(|py| !analysis.supported.contains(py));
+    match venv_python {
         // No Python helps, so don't suggest one.
         _ if no_files.is_some() => {
             println!(
@@ -133,5 +145,40 @@ pub async fn run<S: MetadataSource>(
         }
     }
 
+    if failed || suggest_alternatives {
+        print_alternatives(workspace, &analysis, venv_python);
+    }
+
     Ok(())
+}
+
+/// The "why" and "alternatives" lines (see [`pixi_advice::check_advice`]).
+fn print_alternatives(
+    workspace: &Path,
+    analysis: &crate::pypi::PackageAnalysis,
+    venv_python: Option<crate::pypi::PyVersion>,
+) {
+    let machine = pixi_advice::Machine {
+        platform: Platform::current(),
+        venv_python,
+        python: venv_python.or_else(|| analysis.supported.max()),
+        nvcc: pixi_advice::nvcc_available(),
+    };
+    let advice = pixi_advice::check_advice(analysis, crate::matrix::conda_forge(), &machine);
+    for reason in &advice.reasons {
+        println!("  {:<18}: {}", "why", reason);
+    }
+    // A pixi project already installs from conda-forge.
+    if crate::core::pixi::detect(workspace).is_some() {
+        return;
+    }
+    match advice.alternative {
+        Some(alt) => println!("  {:<18}: {}", "alternatives", alt.cyan()),
+        None => println!(
+            "  {:<18}: {}",
+            "alternatives",
+            "none known (PyPilot's conda-forge table has no build of it for this platform)"
+                .yellow()
+        ),
+    }
 }

@@ -348,6 +348,86 @@ fn join_and(items: &[&str]) -> String {
     }
 }
 
+// --- `pypilot check` -------------------------------------------------------
+
+/// Why one package will not install from a wheel here, and the conda-forge
+/// way around it, for `pypilot check`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CheckAdvice {
+    /// One line per reason: no wheel for cpXY, misleading requires-python,
+    /// what the source build needs.
+    pub reasons: Vec<String>,
+    /// "conda-forge: gdal 3.13.3 available for linux-64/python 3.13 →
+    /// pypilot migrate-to-pixi", when conda-forge builds it here.
+    pub alternative: Option<String>,
+}
+
+/// [`CheckAdvice`] for `p` on `machine.platform`, judged against
+/// `machine.venv_python` when there is one.
+pub fn check_advice(
+    p: &PackageAnalysis,
+    table: &CondaForgeTable,
+    machine: &Machine,
+) -> CheckAdvice {
+    let here = machine.platform.label();
+    let row = table.get(&p.name);
+    let mut reasons = Vec::new();
+    if let Some(msg) = p.no_files_message(here) {
+        reasons.push(msg);
+    } else if p.sdist_only {
+        reasons.push(format!(
+            "no wheel for {here}: pip and uv build it from source"
+        ));
+    }
+    if let Some(py) = machine.venv_python {
+        let rp = p.requires_python.as_deref().unwrap_or("(none)");
+        if p.lacks_wheel_for(py) {
+            reasons.push(format!(
+                "no {} wheel for {here}: requires-python {rp} admits Python {py}, but the release ships no wheel for it, so pip and uv would build it from source",
+                py.cp_tag()
+            ));
+        } else if !p.declared().contains(py) {
+            reasons.push(format!("requires-python {rp} excludes Python {py}"));
+        }
+    }
+    let wall = !reasons.is_empty();
+    if let Some(row) = row.filter(|_| wall) {
+        if !row.why.is_empty() {
+            reasons.push(format!(
+                "source build: {}",
+                capitalize_it(&row.why, &p.name)
+            ));
+        }
+        let nvcc = nvcc_sentence(row, machine);
+        if !nvcc.is_empty() {
+            reasons.push(nvcc);
+        }
+    }
+
+    let alternative = row.and_then(|row| {
+        let subdir = conda_subdir(machine.platform)?;
+        let pythons = match row.availability(machine.platform, machine.python) {
+            Availability::No => return None,
+            Availability::Yes => match machine.python {
+                Some(py) if !row.pythons(machine.platform).is_empty() => format!("/python {py}"),
+                _ => String::new(),
+            },
+            Availability::OtherPythons(pys) => format!(
+                "/python {}",
+                PyVersionSet::from_versions(pys).to_range_string()
+            ),
+        };
+        Some(format!(
+            "conda-forge: {} {} available for {subdir}{pythons} → {MIGRATE_COMMAND}",
+            row.conda, row.version
+        ))
+    });
+    CheckAdvice {
+        reasons,
+        alternative,
+    }
+}
+
 // --- the machine and the repo ----------------------------------------------
 
 /// Is nvcc installed? Looks under `CUDA_HOME` / `CUDA_PATH` and on PATH.
@@ -1043,6 +1123,43 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn check_explains_the_wall_and_names_the_conda_forge_build() {
+        let mut p = analysis("gdal", "3.8.0");
+        p.supported = PyVersionSet::from_versions((10..=12).map(PyVersion::py3));
+        p.requires_python = Some(">=3.9".into());
+        let advice = check_advice(&p, table(), &machine(Some(13)));
+        assert!(
+            advice.reasons[0].starts_with(
+                "no cp313 wheel for Linux x64: requires-python >=3.9 admits Python 3.13"
+            ),
+            "{advice:#?}"
+        );
+        assert!(
+            advice.reasons[1].starts_with("source build: gdal's Python bindings")
+                || advice.reasons[1].starts_with("source build: gdal"),
+            "{advice:#?}"
+        );
+        let alt = advice.alternative.unwrap();
+        assert!(alt.starts_with("conda-forge: gdal "), "{alt}");
+        assert!(
+            alt.ends_with(" available for linux-64/python 3.13 → pypilot migrate-to-pixi"),
+            "{alt}"
+        );
+
+        // A package that installs fine has no reasons, but the table still
+        // knows the conda-forge build when asked.
+        let ok = check_advice(&analysis("gdal", "3.8.0"), table(), &machine(Some(12)));
+        assert!(ok.reasons.is_empty());
+        assert!(ok.alternative.is_some());
+        let unknown = check_advice(&sdist("left-pad", "1.0"), table(), &machine(None));
+        assert_eq!(
+            unknown.reasons,
+            vec!["no wheel for Linux x64: pip and uv build it from source"]
+        );
+        assert_eq!(unknown.alternative, None);
     }
 
     // --- build failures (recorded installer output) --------------------------
