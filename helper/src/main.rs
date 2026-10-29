@@ -12,7 +12,7 @@
 //!   * `doctor` — read-only probe report (nothing is executed/installed).
 //!   * `setup`  — full F1 bootstrap, honoring the `package_manager` setting.
 //!   * `lsp`    — stdio LSP server (the mode Zed launches).
-//!   * `check`, `install`, `fix`, `update-data`, `migrate-conda` — see `--help`.
+//!   * `check`, `explain`, `install`, `fix`, `update-data`, `migrate-conda` — see `--help`.
 //!
 //! Arg parsing is hand-rolled (no shell involvement anywhere) so every downstream
 //! spawned command uses arg vectors, never a shell string.
@@ -32,7 +32,8 @@ fn main() -> ExitCode {
             lsp::run_stdio();
             ExitCode::SUCCESS
         }
-        "doctor" | "setup" | "check" | "fix" | "install" | "update-data" | "migrate-conda" => {
+        "doctor" | "setup" | "check" | "explain" | "fix" | "install" | "update-data"
+        | "migrate-conda" => {
             // Consoles that predate Windows Terminal print ANSI escapes as
             // literal text unless the process opts in to VT processing.
             #[cfg(windows)]
@@ -81,6 +82,8 @@ fn print_help() {
          \x20   doctor            Read-only environment and compatibility report\n\
          \x20   setup             Build the environment (uv by default, pip if configured)\n\
          \x20   check <package>   Can this package run on this project's Python?\n\
+         \x20   explain [package] Why these Pythons: requires_python vs wheels per platform;\n\
+         \x20                     without a package, what blocks each Python in the project\n\
          \x20   install <package> Install one package and record it in the manifest\n\
          \x20   fix python        Rebuild the environment on the right Python version\n\
          \x20   fix cuda          Re-pin torch/tensorflow to the build matching the driver\n\
@@ -88,7 +91,8 @@ fn print_help() {
          \x20   migrate-conda     Translate environment.yml into a pyproject.toml\n\
          \x20   lsp               Run as an LSP server over stdio, used by the Zed extension\n\n\
          OPTIONS:\n\
-         \x20   --path <dir>   Workspace directory to analyze (default: current dir)\n",
+         \x20   --path <dir>   Workspace directory to analyze (default: current dir)\n\
+         \x20   --json         explain: print the explanation as JSON\n",
         ver = env!("CARGO_PKG_VERSION")
     );
 }
