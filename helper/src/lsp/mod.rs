@@ -40,6 +40,7 @@ use crate::pypi::pyversion::PyVersion;
 use crate::pypi::PyPiClient;
 use crate::settings::{Notifications, PackageManager, ResolvedMode, Settings};
 
+use crate::report::markdown::{details_markdown, package_check_markdown};
 use diagnostics::{Scope, CMD_INSTALL, CMD_RECREATE};
 
 // F5 commands.
@@ -974,7 +975,7 @@ async fn show_details(client: &Client, source: &PyPiClient, root: &Path, package
     let assessment = solver::assess(root, &settings, source).await;
     let mut report = details_markdown(&assessment);
     if let Some(package) = package {
-        report.push_str(&package_check_markdown(source, &assessment, package).await);
+        report.push_str(&package_check_markdown(source, root, &assessment, package).await);
     }
 
     let path = std::env::temp_dir().join("pypilot-report.md");
@@ -1051,187 +1052,6 @@ fn toast_summary(a: &Assessment) -> String {
         Some(f) => format!("PyPilot: {}. {}", f.title, f.detail),
         None => "PyPilot: this project needs attention.".to_string(),
     }
-}
-
-/// The report behind "Show details".
-fn details_markdown(a: &Assessment) -> String {
-    let mut s = String::new();
-    s.push_str("# PyPilot report\n\n");
-
-    s.push_str("## Environment\n");
-    s.push_str(&format!(
-        "- uv: {}\n",
-        a.probes
-            .uv
-            .as_ref()
-            .map(|u| format!("v{}", u.version))
-            .unwrap_or_else(|| "not detected".into())
-    ));
-    s.push_str(&format!(
-        "- {}: {}\n",
-        if a.project.is_pixi() {
-            "pixi environment"
-        } else {
-            "virtualenv"
-        },
-        a.probes
-            .venv
-            .as_ref()
-            .map(|v| v.path.display().to_string())
-            .unwrap_or_else(|| "none".into())
-    ));
-    s.push_str(&format!(
-        "- interpreters: {}\n\n",
-        if a.probes.interpreters.is_empty() {
-            "none".to_string()
-        } else {
-            a.probes
-                .interpreters
-                .iter()
-                .map(|i| i.version.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        }
-    ));
-
-    if let Some(compat) = &a.compat {
-        s.push_str("## Compatibility\n");
-        s.push_str(&format!(
-            "- Supported Python across dependencies: **{}**\n",
-            compat.intersection.to_range_string()
-        ));
-        if let Some(text) = crate::core::solver::recommendation(&a.project, compat, a.target_python)
-        {
-            s.push_str(&format!("- Recommended interpreter: **{text}**\n"));
-        }
-        s.push_str("\n| Package | Supported Python |\n|---|---|\n");
-        for p in &compat.per_package {
-            s.push_str(&format!(
-                "| {} | {} |\n",
-                p.name,
-                p.supported.to_range_string()
-            ));
-        }
-        s.push('\n');
-    }
-
-    s.push_str("## Findings\n");
-    if a.findings.is_empty() {
-        s.push_str("Everything looks good.\n");
-    } else {
-        for f in &a.findings {
-            let sev = match f.severity {
-                Severity::Error => "Error",
-                Severity::Warning => "Warning",
-                Severity::Info => "Note",
-            };
-            s.push_str(&format!("### {sev}: {}\n{}\n", f.title, f.detail));
-            if let FixKind::RecreateWithPython(v) = &f.fix {
-                s.push_str(&format!(
-                    "\n_Fix: rebuild the environment on Python {v}._\n"
-                ));
-            } else if f.fix == FixKind::SetupEnvironment {
-                s.push_str("\n_Fix: run \"Fix environment\", or `pypilot setup`._\n");
-            } else if f.fix == FixKind::MigrateConda {
-                s.push_str("\n_Fix: run `pypilot migrate-conda`._\n");
-            } else if f.fix == FixKind::MigrateToPixi {
-                s.push_str(
-                    "\n_Fix: run \"Initialize pixi project\", or `pypilot migrate-to-pixi`._\n",
-                );
-            }
-            s.push('\n');
-        }
-    }
-    s
-}
-
-/// The `pypilot check <package>` answer, as a report section.
-async fn package_check_markdown(source: &PyPiClient, a: &Assessment, package: &str) -> String {
-    let mut s = format!("\n## Check: {package}\n");
-    // Accept what a user would type into requirements.txt, e.g. `numpy>=2`,
-    // and judge it on the release that specifier selects.
-    let Some(req) = crate::core::project::parse_requirement(package) else {
-        s.push_str(&format!("`{package}` is not a package name.\n"));
-        return s;
-    };
-    let meta = match crate::pypi::resolve(source, &req).await {
-        Ok(meta) => meta,
-        Err(e) => {
-            s.push_str(&format!("{e}\n"));
-            return s;
-        }
-    };
-
-    let analysis = meta.analyze(&Platform::current());
-    if req.is_pinned() {
-        s.push_str(&format!(
-            "- Release matching `{}`: **{}**\n",
-            req.spec.trim(),
-            analysis.version
-        ));
-    } else {
-        s.push_str(&format!("- Latest release: **{}**\n", analysis.version));
-    }
-    s.push_str(&format!(
-        "- Supported Python: **{}**\n",
-        analysis.supported.to_range_string()
-    ));
-    if analysis.sdist_only {
-        s.push_str("- No wheel for this platform, so it will compile from source\n");
-    }
-    let no_files = analysis.no_files_message(Platform::current().label());
-
-    let verdict = match a.probes.venv.as_ref().and_then(|v| v.python) {
-        // No Python helps, so don't suggest one.
-        _ if no_files.is_some() => no_files.unwrap_or_default(),
-        Some(current) if analysis.supported.contains(current) => {
-            format!("This project's Python {current} can run {}.", analysis.name)
-        }
-        Some(current) => {
-            let suggestion = analysis
-                .supported
-                .max()
-                .map(|t| format!(" Use Python {t} instead."))
-                .unwrap_or_default();
-            format!(
-                "{} does not support this project's Python {current}.{suggestion}",
-                analysis.name
-            )
-        }
-        None => {
-            let suggestion = analysis
-                .supported
-                .max()
-                .map(|t| format!(" Python {t} would suit it."))
-                .unwrap_or_default();
-            format!(
-                "{}{suggestion}",
-                crate::core::env::no_env_sentence(a.project.is_pixi())
-            )
-        }
-    };
-    s.push_str(&format!("\n{verdict}\n"));
-
-    // Why it fails here, and the conda-forge build pixi could use instead.
-    let venv_python = a.probes.venv.as_ref().and_then(|v| v.python);
-    let machine = crate::core::pixi_advice::Machine {
-        platform: Platform::current(),
-        venv_python,
-        python: venv_python.or_else(|| analysis.supported.max()),
-        nvcc: crate::core::pixi_advice::nvcc_available(),
-    };
-    let advice =
-        crate::core::pixi_advice::check_advice(&analysis, crate::matrix::conda_forge(), &machine);
-    if !advice.reasons.is_empty() {
-        s.push('\n');
-        for reason in &advice.reasons {
-            s.push_str(&format!("- Why: {reason}\n"));
-        }
-        if let Some(alt) = advice.alternative.filter(|_| !a.project.is_pixi()) {
-            s.push_str(&format!("- Alternative: {alt}\n"));
-        }
-    }
-    s
 }
 
 /// Zed names itself after its release channel: `Zed`, `Zed Preview`,
@@ -1319,12 +1139,6 @@ mod tests {
             &assessment_with(Vec::new()),
             Notifications::All
         ));
-    }
-
-    #[test]
-    fn pixi_findings_name_the_migration_in_the_report() {
-        let report = details_markdown(&assessment_with(vec![pixi_finding(Severity::Warning)]));
-        assert!(report.contains("`pypilot migrate-to-pixi`"));
     }
 
     #[test]
