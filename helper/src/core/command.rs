@@ -73,11 +73,22 @@ where
     cmd.kill_on_drop(true);
     match tokio::time::timeout(limit, collect(cmd, program.as_ref())).await {
         Ok(result) => result,
-        Err(_) => anyhow::bail!(
-            "`{}` did not finish within {}s",
-            program.as_ref().to_string_lossy(),
-            limit.as_secs()
-        ),
+        Err(_) => {
+            crate::core::logs::record_step(
+                &program.as_ref().to_string_lossy(),
+                &args
+                    .iter()
+                    .map(|a| a.as_ref().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>(),
+                Err("timed out"),
+                limit,
+            );
+            anyhow::bail!(
+                "`{}` did not finish within {}s",
+                program.as_ref().to_string_lossy(),
+                limit.as_secs()
+            )
+        }
     }
 }
 
@@ -100,9 +111,10 @@ fn build<A: AsRef<OsStr>>(program: &OsStr, args: &[A], cwd: Option<&Path>) -> Co
 }
 
 async fn collect(mut cmd: Command, program: &OsStr) -> crate::Result<Output> {
-    let out = cmd
-        .output()
-        .await
+    let started = std::time::Instant::now();
+    let result = cmd.output().await;
+    record(&cmd, program, &result, started.elapsed());
+    let out = result
         .map_err(|e| anyhow::anyhow!("failed to spawn `{}`: {e}", program.to_string_lossy()))?;
 
     Ok(Output {
@@ -110,6 +122,38 @@ async fn collect(mut cmd: Command, program: &OsStr) -> crate::Result<Output> {
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
     })
+}
+
+/// Note the run in the current action's log entry ([`crate::core::logs`]).
+fn record(
+    cmd: &Command,
+    program: &OsStr,
+    result: &std::io::Result<std::process::Output>,
+    elapsed: Duration,
+) {
+    let args: Vec<String> = cmd
+        .as_std()
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let program = program.to_string_lossy();
+    match result {
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            crate::core::logs::record_step(
+                &program,
+                &args,
+                Ok((out.status.code(), &stderr)),
+                elapsed,
+            );
+        }
+        Err(e) => crate::core::logs::record_step(
+            &program,
+            &args,
+            Err(&format!("failed to spawn: {e}")),
+            elapsed,
+        ),
+    }
 }
 
 /// Convenience: run a probe and return the trimmed first stdout line on success.

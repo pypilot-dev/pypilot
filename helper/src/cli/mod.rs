@@ -8,6 +8,7 @@ mod check;
 mod doctor;
 mod explain;
 mod fix;
+pub mod logs;
 mod migrate_conda;
 mod pixi;
 mod setup;
@@ -29,6 +30,7 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
         crate::core::pixi_envs::set_override(Some(&env));
     }
     let settings = Settings::load(&workspace);
+    crate::core::logs::note_context(&workspace, &format!("{:?}", settings.package_manager));
     let source = PyPiClient::new();
 
     match mode {

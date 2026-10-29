@@ -14,6 +14,7 @@ pub mod imports;
 pub mod install;
 pub mod installed;
 pub mod interpreter;
+pub mod logs;
 pub mod modules;
 pub mod pip;
 pub mod pixi;

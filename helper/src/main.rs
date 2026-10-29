@@ -50,7 +50,13 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let code = rt.block_on(cli::dispatch(&mode, &rest));
+            // Every CLI run leaves one line in the local log (`pypilot logs`).
+            let action = pypilot::core::logs::Action::new("cli", &mode, &rest);
+            let code = rt.block_on(pypilot::core::logs::scope(
+                action,
+                cli::dispatch(&mode, &rest),
+                |r: &pypilot::Result<()>| (r.is_ok(), r.as_ref().err().map(|e| format!("{e:#}"))),
+            ));
             match code {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
@@ -59,6 +65,13 @@ fn main() -> ExitCode {
                 }
             }
         }
+        "logs" => match cli::logs::run(&rest) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("pypilot logs: {e}");
+                ExitCode::FAILURE
+            }
+        },
         "--version" | "-V" | "version" => {
             println!("pypilot {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -95,6 +108,8 @@ fn print_help() {
          \x20                     (--write creates it, --install then runs pixi install,\n\
          \x20                     --platform <p> adds a target platform)\n\
          \x20   install-pixi      Install pixi with its official installer\n\
+         \x20   logs              Print the local log's path (--tail [N]: the last N\n\
+         \x20                     entries, --json: raw JSON lines)\n\
          \x20   lsp               Run as an LSP server over stdio, used by the Zed extension\n\n\
          OPTIONS:\n\
          \x20   --path <dir>       Workspace directory to analyze (default: current dir)\n\

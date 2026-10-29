@@ -281,6 +281,36 @@ impl LanguageServer for Backend {
         &self,
         params: ExecuteCommandParams,
     ) -> RpcResult<Option<serde_json::Value>> {
+        // One log line per command (`pypilot logs`), steps included.
+        let root = self.shared.root.lock().await.clone();
+        let args: Vec<String> = params
+            .arguments
+            .iter()
+            .map(|a| a.as_str().map_or_else(|| a.to_string(), str::to_string))
+            .collect();
+        let action = crate::core::logs::Action::new("lsp", &params.command, &args)
+            .workspace(root.as_deref());
+        crate::core::logs::scope(action, self.execute_command_logged(params), |r| {
+            let ok = match r {
+                Ok(Some(v)) => v.get("ok").and_then(|ok| ok.as_bool()) != Some(false),
+                Ok(None) => true,
+                Err(e) => return (false, Some(e.to_string())),
+            };
+            (ok, None)
+        })
+        .await
+    }
+
+    async fn shutdown(&self) -> RpcResult<()> {
+        Ok(())
+    }
+}
+
+impl Backend {
+    async fn execute_command_logged(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> RpcResult<Option<serde_json::Value>> {
         let root = self.shared.root.lock().await.clone();
         let Some(root) = root else { return Ok(None) };
         let client = &self.shared.client;
@@ -338,10 +368,6 @@ impl LanguageServer for Backend {
             }
         };
         Ok(ok.map(|ok| serde_json::json!({ "ok": ok })))
-    }
-
-    async fn shutdown(&self) -> RpcResult<()> {
-        Ok(())
     }
 }
 
@@ -721,6 +747,17 @@ async fn watch_rescan_requests(shared: Arc<Shared>, root: PathBuf) {
 /// The workspace scan. `explicit` means the user asked, which lifts the silence
 /// rules and turns a clean result into a confirmation instead of nothing.
 async fn scan_and_notify(client: &Client, source: &PyPiClient, root: &Path, explicit: bool) {
+    let command = if explicit { "scan" } else { "scan (on open)" };
+    let action = crate::core::logs::Action::new("lsp", command, &[]).workspace(Some(root));
+    crate::core::logs::scope(
+        action,
+        scan_and_notify_logged(client, source, root, explicit),
+        |_| (true, None),
+    )
+    .await;
+}
+
+async fn scan_and_notify_logged(client: &Client, source: &PyPiClient, root: &Path, explicit: bool) {
     let settings = Settings::load(root);
 
     if !explicit

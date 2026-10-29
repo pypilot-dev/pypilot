@@ -170,7 +170,9 @@ impl Settings {
 
     /// Resolve the operational mode for the project at `workspace`.
     pub async fn resolve_mode(&self, workspace: &Path) -> ResolvedMode {
-        resolve_mode(self, workspace).await
+        let mode = resolve_mode(self, workspace).await;
+        crate::core::logs::note_resolved_mode(&format!("{mode:?}"));
+        mode
     }
 
     /// Persist the chosen package manager into `<workspace>/.zed/pypilot.toml`,
