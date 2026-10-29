@@ -27,7 +27,7 @@ Nothing here runs in a pixi project; its own checks cover it.
 
 ## In the editor
 
-With `notifications = "all"`, or when the finding is a warning, the workspace notification gains an **Initialize pixi project** button. In VS Code it opens the preview and asks before writing; in Zed it describes what would be written and offers **Write and install**, **Write pixi.toml** or **Cancel**.
+With `notifications = "all"`, or when the finding is a warning, the workspace notification gains an **Initialize pixi project** button. The engine handles it the same way in Zed and VS Code: it runs a dry run, shows one message with what `pixi.toml` would contain (Python, the number of conda-forge and PyPI dependencies; `pyproject.toml` and `requirements.txt` stay as they are) and offers **Write and install**, **Write pixi.toml** or **Cancel**. Nothing is written before you choose. The same message follows the button on the toast after a pip/uv build fails on a system library conda-forge ships. The VS Code palette command works differently (full preview first); see [From the editor](./migrate#from-the-editor).
 
 ## Where the data comes from
 

@@ -17,7 +17,7 @@
 | PyPilot: Check for Helper Updates | `pypilot.updateHelper` | Compares the engine against the latest GitHub release (next release: offers the pinned version when it is newer than the engine in use; with `pypilot.engineUpdates: "latest"` also newer releases). |
 | PyPilot: Use Project Environment (.venv / pixi) | `pypilot.useProjectVenv` | Makes the project environment the active interpreter. |
 | PyPilot: Install pixi <Badge type="tip" text="next" /> | `pypilot.installPixiCli` | Installs pixi with its official installer, through the engine; with an older engine it offers to run the installer in a terminal. |
-| PyPilot: Initialize pixi project <Badge type="tip" text="next" /> | `pypilot.initPixiProject` | Shows the `pixi.toml` PyPilot would write, then writes it (optionally running `pixi install`) only after you confirm. |
+| PyPilot: Initialize pixi project <Badge type="tip" text="next" /> | `pypilot.initPixiProject` | Opens the engine's full `pixi.toml` preview beside the editor, then asks *write pixi.toml as shown in the preview?* (**Write pixi.toml** or **Write and run pixi install**). Nothing is written before you choose. |
 
 Every command that changes the environment shows a progress notification and updates the status bar from the result; a failed setup is reported as a failure.
 
@@ -57,6 +57,6 @@ Project-specific commands are hidden from the palette where they cannot apply. T
 
 ## The notification
 
-On open, one notification at most. **Fix environment** runs the same code as `pypilot setup`; **Show details** opens the report; **Ignore** dismisses it; **Never for this project** is remembered in `.zed/pypilot.toml` as `[state] never = true`. With engine support for the pixi advisory, an **Initialize pixi project** button appears when pixi would help. How often you are notified is set by [`pypilot.notifications`](./settings).
+On open, one notification at most. **Fix environment** runs the same code as `pypilot setup`; **Show details** opens the report; **Ignore** dismisses it; **Never for this project** is remembered in `.zed/pypilot.toml` as `[state] never = true`. With engine support for the pixi advisory, an **Initialize pixi project** button appears when pixi would help. That button is handled by the engine, not by the palette command: it shows one message with what `pixi.toml` would contain and the buttons **Write and install**, **Write pixi.toml** and **Cancel** (see [From the editor](/pixi/migrate#from-the-editor)). How often you are notified is set by [`pypilot.notifications`](./settings).
 
 When uv is missing in `auto` mode, **Fix environment** first offers to install it (about 18 MB, once, globally) and asks whether to use a uv project (`pyproject.toml` + lockfile) or the pip-compatible mode (`requirements.txt`, faster through uv). **No thanks** continues with pip.
