@@ -1,0 +1,23 @@
+PyPilot explain — C:\src\demo
+  platform        : Windows x64
+  supported       : 3.12
+  recommended     : Python 3.12
+
+── Dependencies ────────────────────────────────────────
+  package    version      requires-python  supported
+  mediapipe  0.10.14      —                3.9–3.12
+  numpy      2.5.4        >=3.12           3.12–3.15
+
+── Python versions ─────────────────────────────────────
+  3.7    ✗ blocked by mediapipe (wheels start at cp39), numpy (requires_python >=3.12)
+  3.8    ✗ blocked by mediapipe (wheels start at cp39), numpy (requires_python >=3.12)
+  3.9    ✗ blocked by numpy (requires_python >=3.12)
+  3.10   ✗ blocked by numpy (requires_python >=3.12)
+  3.11   ✗ blocked by numpy (requires_python >=3.12)
+  3.12   ✓
+  3.13   ✗ blocked by mediapipe (wheels end at cp312)
+  3.14   ✗ blocked by mediapipe (wheels end at cp312)
+  3.15   ✗ blocked by mediapipe (wheels end at cp312)
+
+── Binding constraint ──────────────────────────────────
+  Python 3.12 is the newest that works: 3.13 is blocked by mediapipe 0.10.14 (wheels end at cp312).

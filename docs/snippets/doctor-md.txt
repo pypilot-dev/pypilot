@@ -1,0 +1,21 @@
+# PyPilot report
+
+## Environment
+- uv: v0.13.5
+- virtualenv: none
+- interpreters: 3.15, 3.14
+
+## Compatibility
+- Supported Python across dependencies: **3.12**
+- Recommended interpreter: **Python 3.12**
+
+| Package | Supported Python |
+|---|---|
+| mediapipe | 3.9–3.12 |
+| numpy | 3.12–3.15 |
+
+## Findings
+### Warning: No environment set up yet
+Dependencies support Python 3.12. Recommended: 3.12 (upper bound set by mediapipe, which supports 3.9–3.12).
+
+_Fix: run "Fix environment", or `pypilot setup`._

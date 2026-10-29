@@ -1,0 +1,96 @@
+{
+  "pypilot": "1.2.2",
+  "command": "doctor",
+  "ok": true,
+  "workspace": "C:\\src\\demo",
+  "package_manager": "auto",
+  "environment": {
+    "uv": {
+      "path": "uv",
+      "version": "0.13.5",
+      "managed": false
+    },
+    "venv": null,
+    "interpreters": [
+      {
+        "command": "python3",
+        "path": "C:\\Users\\me\\AppData\\Roaming\\uv\\python\\cpython-3.15-windows-x86_64-none\\python.exe",
+        "version": "3.15"
+      },
+      {
+        "command": "C:\\Python314\\python.exe",
+        "path": "C:\\Python314\\python.exe",
+        "version": "3.14"
+      }
+    ]
+  },
+  "project": {
+    "sources": [
+      "C:\\src\\demo\\requirements.txt"
+    ],
+    "requires_python": null,
+    "pixi_python": null,
+    "dependencies": [
+      "mediapipe==0.10.14",
+      "numpy"
+    ],
+    "conda_dependencies": [],
+    "has_conda_env": false
+  },
+  "pixi": null,
+  "compatibility": {
+    "platform": "Windows x64",
+    "supported": [
+      "3.12"
+    ],
+    "supported_range": "3.12",
+    "recommended": "Python 3.12",
+    "packages": [
+      {
+        "name": "mediapipe",
+        "version": "0.10.14",
+        "supported": [
+          "3.9",
+          "3.10",
+          "3.11",
+          "3.12"
+        ],
+        "has_platform_wheels": true,
+        "sdist_only": false,
+        "has_foreign_wheels": false,
+        "no_files_for_platform": false,
+        "wheel_platforms": [],
+        "requires_python": null
+      },
+      {
+        "name": "numpy",
+        "version": "2.5.4",
+        "supported": [
+          "3.12",
+          "3.13",
+          "3.14",
+          "3.15"
+        ],
+        "has_platform_wheels": true,
+        "sdist_only": false,
+        "has_foreign_wheels": false,
+        "no_files_for_platform": false,
+        "wheel_platforms": [],
+        "requires_python": ">=3.12"
+      }
+    ],
+    "unresolved": [],
+    "conflicts": []
+  },
+  "target_python": "3.12",
+  "findings": [
+    {
+      "severity": "warning",
+      "title": "No environment set up yet",
+      "detail": "Dependencies support Python 3.12. Recommended: 3.12 (upper bound set by mediapipe, which supports 3.9–3.12).",
+      "fix": {
+        "kind": "setup_environment"
+      }
+    }
+  ]
+}

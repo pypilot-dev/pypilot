@@ -1,0 +1,22 @@
+Dry run: nothing was written.
+
+--- /dev/null
++++ b/pixi.toml
+@@ -0,0 +1,13 @@
++# Written by `pypilot migrate-to-pixi` from requirements.txt (left untouched).
++# Review it, then run `pixi install`.
++
++[workspace]
++name = "geo"
++channels = ["conda-forge"]
++platforms = ["win-64", "linux-64"]
++
++[dependencies]
++python = "3.15.*"
++gdal = "*"
++numpy = "*"
++requests = "*"
+
+Would write C:\src\geo\pixi.toml: python 3.15.*, 3 conda-forge and 0 PyPI dependencies.
+
+Next: pypilot migrate-to-pixi --write

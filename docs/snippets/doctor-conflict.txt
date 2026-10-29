@@ -1,0 +1,22 @@
+PyPilot doctor — C:\src\conflict
+  package manager : Auto
+
+── Environment ──────────────────────────────────────────
+  uv              : present (v0.13.5, on PATH)
+  virtualenv      : none
+  interpreters    : 3.15 (python3), 3.14 (C:\Python314\python.exe)
+
+── Project ──────────────────────────────────────────────
+  files           : requirements.txt
+  dependencies    : numpy>=2.3, tensorflow==2.10.0
+
+── Compatibility ────────────────────────────────────────
+  supported Python: none
+    • numpy                3.12–3.15
+    • tensorflow           3.7–3.10
+
+── Findings ─────────────────────────────────────────────
+  [ERROR] Dependencies conflict on Python version
+          tensorflow supports up to Python 3.10 but numpy requires at least Python 3.12 — no single interpreter satisfies both.
+  [INFO ] tensorflow GPU on native Windows needs CUDA 11.2
+          tensorflow==2.10.0 predates the end of native-Windows GPU support, so it can use NVIDIA RTX A5000 Laptop GPU, but its wheel does not bundle CUDA: it needs Python 3.10 or older plus CUDA 11.2 and cuDNN 8.1 (conda install -c conda-forge cudatoolkit=11.2 cudnn=8.1.0). See tensorflow.org/install/pip.

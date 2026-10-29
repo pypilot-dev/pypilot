@@ -1,0 +1,35 @@
+{
+  "pypilot": "1.2.2",
+  "command": "check",
+  "ok": true,
+  "requirement": "mediapipe==0.10.14",
+  "analysis": {
+    "name": "mediapipe",
+    "version": "0.10.14",
+    "supported": [
+      "3.9",
+      "3.10",
+      "3.11",
+      "3.12"
+    ],
+    "has_platform_wheels": true,
+    "sdist_only": false,
+    "has_foreign_wheels": false,
+    "no_files_for_platform": false,
+    "wheel_platforms": [],
+    "requires_python": null
+  },
+  "supported_range": "3.9–3.12",
+  "platform": "Windows x64",
+  "installed": false,
+  "environment_python": null,
+  "pixi_project": false,
+  "verdict": {
+    "kind": "no_environment",
+    "status": "info",
+    "message": "This project has no virtual environment yet. Python 3.12 would suit it."
+  },
+  "conflict": null,
+  "why": [],
+  "alternative": null
+}

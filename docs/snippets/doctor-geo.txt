@@ -1,0 +1,24 @@
+PyPilot doctor — C:\src\geo
+  package manager : Auto
+
+── Environment ──────────────────────────────────────────
+  uv              : present (v0.13.5, on PATH)
+  virtualenv      : none
+  interpreters    : 3.15 (python3), 3.14 (C:\Python314\python.exe)
+
+── Project ──────────────────────────────────────────────
+  files           : requirements.txt
+  dependencies    : gdal, numpy, requests
+
+── Compatibility ────────────────────────────────────────
+  supported Python: 3.12–3.15
+  recommended     : Python 3.15
+    • GDAL                 3.8–3.15 (sdist only)
+    • numpy                3.12–3.15
+    • requests             3.10–3.15
+
+── Findings ─────────────────────────────────────────────
+  [WARN ] GDAL 3.13.3 needs native libraries pip cannot install
+          GDAL 3.13.3 has no wheel for Windows x64, so pip and uv build it from source. GDAL's Python bindings must be compiled against a system GDAL of exactly the same version (gdal-config), which pip cannot install. pixi installs gdal 3.13.3 from conda-forge with its native libraries (libgdal, proj, geos), built for win-64 and Python 3.15. Run `pypilot migrate-to-pixi` to set the project up with pixi.
+  [WARN ] No environment set up yet
+          Dependencies support Python 3.12–3.15. Recommended: 3.15 (upper bound set by numpy, which supports 3.12–3.15).

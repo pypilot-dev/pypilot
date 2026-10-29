@@ -1,0 +1,7 @@
+Wrote C:\src\px2\pixi.toml: python 3.15.*, 2 conda-forge and 0 PyPI dependencies.
+
+  ✓ pixi install             — environment installed
+
+The files it was made from were left untouched; CI and pip can keep using them.
+
+Next: pixi run python

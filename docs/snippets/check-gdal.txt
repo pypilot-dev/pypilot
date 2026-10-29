@@ -1,0 +1,11 @@
+PyPilot check — GDAL (v3.13.3)
+── Package Details ──────────────────────────────────────
+  supported Python  : 3.8–3.15
+  requires-python   : >=3.8.0
+  wheels            : none for this platform, will compile from source
+  installed         : no
+── Verdict ──────────────────────────────────────────────
+  [INFO ] This project has no virtual environment yet. Python 3.15 would suit it.
+  why               : no wheel for Windows x64: pip and uv build it from source
+  why               : source build: GDAL's Python bindings must be compiled against a system GDAL of exactly the same version (gdal-config), which pip cannot install.
+  alternatives      : conda-forge: gdal 3.13.3 available for win-64/python 3.15 → pypilot migrate-to-pixi

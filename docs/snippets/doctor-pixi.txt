@@ -1,0 +1,27 @@
+PyPilot doctor — C:\src\px
+  package manager : Auto
+
+── Environment ──────────────────────────────────────────
+  uv              : present (v0.13.5, on PATH)
+  pixi env        : C:\src\px\.pixi\envs\default (Python 3.15)
+  pixi project    : C:\src\px\pixi.toml
+  interpreters    : 3.15 (python3), 3.14 (C:\Python314\python.exe)
+
+── Project ──────────────────────────────────────────────
+  files           : requirements.txt, pixi.toml
+  pixi python     : python 3.15.*
+  dependencies    : conda: requests, rich · pypi: httpx>=0.28.1,<0.29
+
+── pixi ─────────────────────────────────────────────────
+  platforms       : win-64
+  pixi.lock       : up to date
+  environments    :
+    • default (selected)  Python 3.15  conda: requests, rich  pypi: httpx
+
+── Compatibility ────────────────────────────────────────
+  supported Python: 3.8–3.15
+  recommended     : Python 3.15 (newest the dependencies support within pixi's `python 3.15.*`)
+    • httpx                3.8–3.15
+
+── Findings ─────────────────────────────────────────────
+  ✓ Everything looks good.
