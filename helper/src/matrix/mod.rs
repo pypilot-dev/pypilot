@@ -18,12 +18,14 @@
 //! coupling rather than the driver.
 //!
 //! The bundled datasets (`data/nvidia.json`, `data/frameworks.json`,
-//! `data/import_map.json`, `data/cuda_extensions.json`) are embedded at compile time so an offline machine
+//! `data/import_map.json`, `data/cuda_extensions.json`,
+//! `data/conda_forge_packages.json`) are embedded at compile time so an offline machine
 //! always has a correct snapshot; [`refresh`] overlays newer copies fetched
 //! from the project repo, TTL-gated by F7's `data_refresh_days`, and falls
 //! back to the bundled snapshot silently on any failure.
 
 pub mod arch;
+pub mod conda_forge;
 pub mod cuda_ext;
 pub mod frameworks;
 pub mod nvidia;
@@ -53,6 +55,7 @@ pub const NVIDIA_JSON: &str = include_str!("../../data/nvidia.json");
 pub const FRAMEWORKS_JSON: &str = include_str!("../../data/frameworks.json");
 pub const IMPORT_MAP_JSON: &str = include_str!("../../data/import_map.json");
 pub const CUDA_EXTENSIONS_JSON: &str = include_str!("../../data/cuda_extensions.json");
+pub const CONDA_FORGE_JSON: &str = include_str!("../../data/conda_forge_packages.json");
 
 /// GPU / driver facts, for the report.
 #[derive(Debug, Clone, Default)]
@@ -213,6 +216,25 @@ pub fn cuda_extensions() -> &'static ExtensionTable {
     TABLE.get_or_init(|| cuda_extension_table(DEFAULT_TTL_DAYS))
 }
 
+/// The conda-forge table for the pixi advisory
+/// ([`crate::core::pixi_advice`]), parsed once per process like
+/// [`import_map`]. A refreshed copy that no longer parses falls back to the
+/// bundled one.
+pub fn conda_forge() -> &'static conda_forge::CondaForgeTable {
+    static TABLE: OnceLock<conda_forge::CondaForgeTable> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let json = refresh::read(
+            "conda_forge_packages.json",
+            CONDA_FORGE_JSON,
+            DEFAULT_TTL_DAYS,
+        );
+        conda_forge::CondaForgeTable::load(&json)
+            .filter(|t| !t.is_empty())
+            .or_else(|| conda_forge::CondaForgeTable::load(CONDA_FORGE_JSON))
+            .unwrap_or_else(conda_forge::CondaForgeTable::empty)
+    })
+}
+
 /// Resolve an import name to the PyPI package that provides it.
 ///
 /// Unlisted names resolve to themselves, which is usually right and occasionally
@@ -253,6 +275,8 @@ mod tests {
         serde_json::from_str::<serde_json::Value>(IMPORT_MAP_JSON).unwrap();
         ExtensionTable::load(CUDA_EXTENSIONS_JSON)
             .expect("cuda_extensions.json matches its schema");
+        conda_forge::CondaForgeTable::load(CONDA_FORGE_JSON)
+            .expect("conda_forge_packages.json matches its schema");
     }
 
     #[test]
