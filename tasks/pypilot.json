@@ -101,5 +101,33 @@
     "allow_concurrent_runs": false,
     "save": "all",
     "reveal": "always"
+  },
+  {
+    "label": "pypilot: preview migration to pixi (pixi.toml)",
+    "command": "pypilot",
+    "args": ["migrate-to-pixi"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "pypilot: migrate to pixi (write pixi.toml and install)",
+    "command": "pypilot",
+    "args": ["migrate-to-pixi", "--write", "--install"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "save": "all",
+    "reveal": "always"
+  },
+  {
+    "label": "pypilot: install pixi",
+    "command": "pypilot",
+    "args": ["install-pixi"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
   }
 ]

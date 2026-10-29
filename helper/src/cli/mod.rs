@@ -9,6 +9,7 @@ mod doctor;
 mod explain;
 mod fix;
 mod migrate_conda;
+mod pixi;
 mod setup;
 mod update_data;
 
@@ -65,7 +66,26 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
         }
 
         "update-data" => update_data::run().await,
-        "migrate-conda" => migrate_conda::run(&workspace).await,
+        "migrate-conda" => match flag_value(args, "--to").as_deref() {
+            None | Some("pyproject") => migrate_conda::run(&workspace).await,
+            Some("pixi") => {
+                let opts = pixi::options(
+                    args,
+                    crate::core::pixi_migrate::MigrationSource::CondaEnvironment,
+                );
+                pixi::migrate(&workspace, &settings, opts).await
+            }
+            Some(other) => {
+                anyhow::bail!(
+                    "unknown --to `{other}`; use `--to pyproject` (default) or `--to pixi`"
+                )
+            }
+        },
+        "migrate-to-pixi" => {
+            let opts = pixi::options(args, crate::core::pixi_migrate::MigrationSource::Auto);
+            pixi::migrate(&workspace, &settings, opts).await
+        }
+        "install-pixi" => pixi::install_pixi().await,
 
         other => anyhow::bail!("unknown CLI mode `{other}`"),
     }
@@ -135,6 +155,19 @@ mod tests {
             Some("mediapipe")
         );
         assert_eq!(positional(&v(&["--path", "/tmp/proj"])), None);
+    }
+
+    #[test]
+    fn flag_values() {
+        assert_eq!(
+            flag_value(&v(&["--to", "pixi"]), "--to").as_deref(),
+            Some("pixi")
+        );
+        assert_eq!(
+            flag_value(&v(&["--to=pixi"]), "--to").as_deref(),
+            Some("pixi")
+        );
+        assert_eq!(flag_value(&v(&["--write"]), "--to"), None);
     }
 
     #[test]

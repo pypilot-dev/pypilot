@@ -1,0 +1,11 @@
+{
+  "noarch": [
+    {
+      "name": "hypercorn-uvloop",
+      "version": "0.18.0",
+      "build": "h557ddc1_0",
+      "subdir": "noarch",
+      "depends": []
+    }
+  ]
+}

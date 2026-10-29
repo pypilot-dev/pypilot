@@ -56,7 +56,14 @@ Projects managed by [pixi](https://pixi.sh) (a `pixi.toml`, or `[tool.pixi.works
 - Setup runs `pixi install`; installing a package runs `pixi add --pypi <package>`; moving to another Python runs `pixi add python=X.Y`.
 - PyPI dependencies are checked against the environment's Python. When one has no wheel for it, PyPilot names the package and the fix (`pixi add python=3.11`), and turns pixi's own install errors into the same plain explanation.
 - The recommended Python respects the manifest's `python` spec, and doctor lists conda and PyPI dependencies separately.
-- If pixi is not installed, PyPilot says so and changes nothing.
+- If pixi is not installed, PyPilot says so, changes nothing, and offers to install it (`pypilot install-pixi`, or the editor's "Install pixi" button), using pixi's official installer.
+
+### Moving a project to pixi
+`pypilot migrate-to-pixi` previews the `pixi.toml` it would write for a pip or uv project (`requirements.txt` and `[project.dependencies]`); `--write` creates it, and `--write --install` then runs `pixi install`. `pypilot migrate-conda --to pixi` does the same from an `environment.yml` (channels, conda-only packages such as gdal or cudatoolkit, and the `pip:` section as `[pypi-dependencies]`).
+- It writes a separate `pixi.toml` and never edits or deletes `pyproject.toml`, `requirements.txt` or `environment.yml`, so CI and pip keep working. pixi prefers `pixi.toml` when both exist.
+- Each PyPI dependency packaged on conda-forge (per prefix.dev's PyPI-to-conda mapping, cached for `data_refresh_days`) and built for every target platform goes to `[dependencies]` under its conda name (`torch` becomes `pytorch`); the rest go to `[pypi-dependencies]`, with the reason as a comment. Version specifiers carry over only when conda can express them exactly; otherwise the dependency stays on PyPI. Offline, everything stays on PyPI.
+- `python` is the version PyPilot recommends, within what the conda-forge builds support. Platforms default to the current one; add more with `--platform linux-64` (repeatable).
+- Environment markers, editable installs and `-r` includes are listed in the file as comments to add by hand.
 
 ## Installation
 
@@ -114,6 +121,10 @@ pypilot fix python        Rebuild the virtual environment on a compatible Python
 pypilot fix cuda          Re-pin torch and tensorflow to the system driver build
 pypilot update-data       Update the bundled driver and framework data tables
 pypilot migrate-conda     Convert environment.yml into pyproject.toml
+                          (--to pixi: into pixi.toml; a preview unless --write)
+pypilot migrate-to-pixi   Preview a pixi.toml for this project (--write, --install,
+                          --platform <p>)
+pypilot install-pixi      Install pixi with its official installer
 pypilot lsp               Start the language server (launched automatically by Zed)
 ```
 
@@ -124,13 +135,13 @@ Running `pypilot doctor` or `pypilot setup` from a Zed task also writes a reques
 PyPilot stores default configuration in your platform config directory. Projects can override these options by creating a `.zed/pypilot.toml` or `pypilot.toml` file in the workspace root:
 
 ```toml
-package_manager    = "uv"             # "uv" or "pip". Pip mode does not invoke uv.
+package_manager    = "uv"             # "auto", "uv", "uv-pip", "pip" or "pixi". Pip mode does not invoke uv.
 notifications      = "problems-only"  # "all", "problems-only", or "off"
 auto_check_on_open = true
 data_refresh_days  = 7                # Set to 0 to disable network updates.
 ```
 
-- `package_manager`: Selects whether to manage packages using `uv` or `pip`. In pip mode, PyPilot cannot download new Python interpreter versions automatically; if an incompatible version is detected, it informs you which Python version to install manually.
+- `package_manager`: Selects how PyPilot manages the environment. `auto` (the default) uses uv when it is installed and pip otherwise; `uv` is a uv project (`pyproject.toml` + `uv.lock`); `uv-pip` is uv's pip interface on `requirements.txt`; `pip` is `python -m venv` + pip; `pixi` manages the project with pixi. In pip mode, PyPilot cannot download new Python interpreter versions automatically; if an incompatible version is detected, it informs you which Python version to install manually. A pixi project (a `pixi.toml` or `[tool.pixi.workspace]`) is always managed with pixi, whatever this says; with `pixi` on a project without a pixi manifest, setup first writes `pixi.toml` from the project's dependencies (as `pypilot migrate-to-pixi --write` does), then runs `pixi install`.
 - `notifications`: Controls alert frequency. `problems-only` warns about errors and version mismatches. `all` includes informational alerts like selected CUDA builds. `off` suppresses editor notifications. Diagnostics and code actions in active editor buffers remain enabled unless set to `off`.
 - `data_refresh_days`: The refresh interval for the bundled driver and framework matrices. PyPilot ships with embedded JSON tables for offline use. If a background check fails, it falls back to the embedded data.
 

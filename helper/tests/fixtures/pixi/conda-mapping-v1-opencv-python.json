@@ -1,0 +1,18 @@
+{
+ "format_version": "1.0",
+ "channel": "conda-forge",
+ "pypi_name": "opencv-python",
+ "conda_versions": {
+  "4.5.5": "libopencv",
+  "4.6.0": "libopencv",
+  "4.7.0": "libopencv",
+  "4.8.0": "libopencv",
+  "4.8.1": "libopencv",
+  "4.9.0": "libopencv",
+  "4.10.0": "libopencv",
+  "4.11.0": "libopencv",
+  "4.12.0": "libopencv",
+  "4.13.0": "libopencv",
+  "5.0.0": "py-opencv"
+ }
+}

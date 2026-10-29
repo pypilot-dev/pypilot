@@ -19,6 +19,7 @@
 //! which is how a terminal command surfaces in the editor.
 
 mod diagnostics;
+mod pixi;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -47,9 +48,7 @@ const CMD_DETAILS: &str = "pypilot.showDetails";
 const CMD_IGNORE: &str = "pypilot.ignore";
 const CMD_NEVER: &str = "pypilot.neverForProject";
 const CMD_INSTALL_UV: &str = "pypilot.installUvGlobally";
-/// Set the project up with pixi. Arguments: `[{ "write"?: bool, "install"?:
-/// bool }]`; none means a dry run that previews the manifest.
-pub const CMD_MIGRATE_PIXI: &str = "pypilot.migrateToPixi";
+// pixi's commands (installPixi, migrateToPixi) live in `pixi.rs`.
 
 // Notification button labels.
 const BTN_FIX: &str = "Fix environment";
@@ -143,8 +142,10 @@ impl LanguageServer for Backend {
                         CMD_INSTALL.into(),
                         CMD_RECREATE.into(),
                         CMD_INSTALL_UV.into(),
-                        CMD_MIGRATE_PIXI.into(),
-                    ],
+                    ]
+                    .into_iter()
+                    .chain(pixi::COMMANDS.iter().map(|c| c.to_string()))
+                    .collect(),
                     work_done_progress_options: Default::default(),
                 }),
                 ..Default::default()
@@ -284,6 +285,12 @@ impl LanguageServer for Backend {
         let Some(root) = root else { return Ok(None) };
         let client = &self.shared.client;
 
+        // pixi commands answer with their own JSON (see `pixi`).
+        if let Some(result) = pixi::execute(&params.command, client, &root, &params.arguments).await
+        {
+            return Ok(Some(result));
+        }
+
         // Commands that change the environment answer `{"ok": bool}`. Zed
         // ignores the result; the VS Code extension reads it so that a failed
         // setup is not reported as a success.
@@ -322,11 +329,6 @@ impl LanguageServer for Backend {
             }
 
             CMD_INSTALL_UV | "pypilot.installUv" => Some(run_install_uv(client).await),
-
-            CMD_MIGRATE_PIXI => {
-                run_migrate_to_pixi(client, &root, &params.arguments).await;
-                None
-            }
 
             other => {
                 client
@@ -625,6 +627,14 @@ fn spawn_pyright_pin_offer(client: &Client, root: &Path) {
 }
 
 async fn report_failed_step(client: &Client, root: &Path, summary: &setup::SetupSummary) {
+    if let Some(step) = summary
+        .steps
+        .iter()
+        .find(|s| !s.ok && s.name == crate::core::pixi_manage::LOCATE_STEP)
+    {
+        pixi::offer_install_pixi(client, &format!("PyPilot: {}", step.detail));
+        return;
+    }
     let failed = summary.steps.iter().rev().find(|s| !s.ok);
     let detail = failed
         .map(|s| format!("{}: {}", s.name, s.detail))
@@ -670,15 +680,10 @@ fn spawn_pixi_build_offer(client: &Client, root: &Path, stderr: &str) {
     });
 }
 
-/// `pypilot.migrateToPixi`. Until the migration is wired in here, point at
-/// the CLI that performs it.
-async fn run_migrate_to_pixi(client: &Client, _root: &Path, _args: &[serde_json::Value]) {
-    client
-        .show_message(
-            MessageType::INFO,
-            "PyPilot: to set this project up with pixi, run `pypilot migrate-to-pixi` in a terminal in the project folder.",
-        )
-        .await;
+/// The advisory's "Initialize pixi project" button: show what the
+/// migration would write, and write it only once the user says so.
+async fn run_migrate_to_pixi(client: &Client, root: &Path, _args: &[serde_json::Value]) {
+    pixi::offer_migration(client, root).await;
 }
 
 fn string_arg(args: &[serde_json::Value], index: usize) -> Option<String> {
