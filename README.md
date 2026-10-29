@@ -114,6 +114,8 @@ pypilot doctor            Inspect the environment and print a status report
 pypilot setup             Configure the virtual environment and install dependencies
 pypilot check <package>   Check whether a package runs on the current Python version
                           (accepts a requirement, e.g. mediapipe==0.10.14)
+pypilot explain [pkg]     Show why: requires_python vs the wheels per platform for a
+                          package, or what blocks each Python in the project (--json)
 pypilot install <pkg>     Install a package and update the project manifest
 pypilot fix python        Rebuild the virtual environment on a compatible Python version
 pypilot fix cuda          Re-pin torch and tensorflow to the system driver build

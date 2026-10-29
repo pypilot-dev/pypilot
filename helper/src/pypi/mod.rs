@@ -10,6 +10,7 @@
 
 pub mod cache;
 pub mod client;
+pub mod explain;
 pub mod metadata;
 pub mod pyversion;
 pub mod version;

@@ -1,0 +1,37 @@
+Error:   × failed to solve the pypi requirements of environment 'test' for platform
+  │ 'linux-64'
+  ├─▶ failed to resolve pypi dependencies
+  ╰─▶ Because only the following versions of pywin32 are available:
+          pywin32==222
+          pywin32==223
+          pywin32==224
+          pywin32==225
+          pywin32==226
+          pywin32==227
+          pywin32==228
+          pywin32==300
+          pywin32==301
+          pywin32==302
+          pywin32==303
+          pywin32==304
+          pywin32==305
+          pywin32==306
+          pywin32==307
+          pywin32==308
+          pywin32==309
+          pywin32==310
+          pywin32==311
+          pywin32==312
+      and pywin32<=302 has no wheels with a matching Python ABI tag (e.g.,
+      `[36mcp311[39m`), we can conclude that pywin32<=302 cannot be used.
+      And because pywin32>=303 has no wheels with a matching platform tag
+      (e.g., `[36mmanylinux_2_28_x86_64[39m`) and you require pywin32, we can conclude
+      that your requirements are unsatisfiable.
+      
+      [36m[1mhint[0m[39m[1m:[0m You require [36mCPython 3.11[39m (`[36mcp311[39m`), but we only found wheels for
+      `[36mpywin32[39m` ([36mv302[39m) with the following Python ABI tags: `[36mcp36m[39m`, `[36mcp37m[39m`,
+      `[36mcp38[39m`, `[36mcp39[39m`, `[36mcp310[39m`
+      
+      [36m[1mhint[0m[39m[1m:[0m Wheels are available for `[36mpywin32[39m` ([36mv312[39m) on the following
+      platforms: `[36mwin32[39m`, `[36mwin_amd64[39m`, `[36mwin_arm64[39m`
+
