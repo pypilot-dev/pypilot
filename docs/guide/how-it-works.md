@@ -21,6 +21,16 @@ When you open a project (with `auto_check_on_open = true`, the default) or run `
 
 <TerminalDemo src="explain-project" cmd="pypilot explain" title="~/src/demo" />
 
+### Which wheels count
+
+A wheel counts for a Python only if pip would install it into the interpreter uv or python.org gives you on this machine:
+
+- **Platform.** Linux x86-64 and arm64, macOS Intel and Apple Silicon, Windows x64 and arm64 each match their own tags, plus `any`. On Linux, <Badge type="tip" text="next" /> manylinux and musllinux are kept apart (a glibc system never counts a musllinux wheel); on Windows x64, <Badge type="tip" text="next" /> `win32` (32-bit) wheels do not count.
+- **Build.** <Badge type="tip" text="next" /> Free-threaded wheels (`cp314t`, `abi3t`) do not count for the default, GIL build.
+- **`requires_python`.** A minor counts when any of its patch releases is allowed, so `>=3.8.1` <Badge type="tip" text="next" /> still allows 3.8, and `!=3.9.0,!=3.9.1,>=3.9` still allows 3.9.
+
+The engine's tests run every platform on any machine, from recorded PyPI releases whose wheel sets differ by platform.
+
 ## Caching and the network
 
 - PyPI metadata is cached on disk in the platform cache directory. A specific release's file list never changes, so it is cached forever; "what is the newest release" is cached for 24 hours.
