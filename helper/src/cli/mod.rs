@@ -5,15 +5,18 @@
 //! the terminal and the editor cannot disagree about what a command does.
 
 mod check;
+pub mod completions;
 mod doctor;
 mod explain;
 mod fix;
+pub mod logs;
 mod migrate_conda;
 pub mod output;
 mod pixi;
 mod plan;
 mod setup;
 mod update_data;
+pub mod version;
 
 use std::path::PathBuf;
 
@@ -51,6 +54,7 @@ async fn dispatch_mode(mode: &str, args: &[String]) -> crate::Result<()> {
         crate::core::pixi_envs::set_override(Some(&env));
     }
     let settings = Settings::load(&workspace);
+    crate::core::logs::note_context(&workspace, &format!("{:?}", settings.package_manager));
     let source = PyPiClient::new();
     // setup, fix, install and `doctor --fix`: print the plan, change nothing.
     let dry_run = plan::dry_run(args);
@@ -108,6 +112,9 @@ async fn dispatch_mode(mode: &str, args: &[String]) -> crate::Result<()> {
             explain::run(&workspace, &source, package.as_deref(), format.is_json()).await
         }
 
+        "update-data" if args.iter().any(|a| a == "--check") => {
+            update_data::check(&settings, format.is_json()).await
+        }
         "update-data" => update_data::run(format).await,
         "migrate-conda" => match flag_value(args, "--to").as_deref() {
             None | Some("pyproject") => migrate_conda::run(&workspace, format).await,
@@ -133,6 +140,19 @@ async fn dispatch_mode(mode: &str, args: &[String]) -> crate::Result<()> {
         other => anyhow::bail!("unknown CLI mode `{other}`"),
     }
 }
+
+/// A command finished and wants this exit code, having already printed its
+/// result (`update-data --check`'s 1 = stale, 2 = network error).
+#[derive(Debug)]
+pub struct Exit(pub u8);
+
+impl std::fmt::Display for Exit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "exit code {}", self.0)
+    }
+}
+
+impl std::error::Error for Exit {}
 
 /// First argument that is not a flag or a flag's value.
 fn positional(args: &[String]) -> Option<String> {

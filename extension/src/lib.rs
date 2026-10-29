@@ -205,9 +205,11 @@ fn check_helper_version(path: &str) -> Result<(u32, u32, u32), String> {
 }
 
 /// Parses the `pypilot --version` output (`"pypilot X.Y.Z"`) into its numeric
-/// parts.
+/// parts. Only the first line counts, so a helper that prints more details
+/// after it still parses.
 fn parse_helper_version(stdout: &str) -> Option<(u32, u32, u32)> {
-    let version = stdout.strip_prefix("pypilot ")?;
+    let first = stdout.lines().next()?.trim();
+    let version = first.strip_prefix("pypilot ")?;
     let mut parts = version.split('.');
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next()?.parse().ok()?;
@@ -318,6 +320,10 @@ mod tests {
     fn parses_the_helpers_own_version_output() {
         assert_eq!(parse_helper_version("pypilot 0.1.0"), Some((0, 1, 0)));
         assert_eq!(parse_helper_version("pypilot 1.12.3"), Some((1, 12, 3)));
+        assert_eq!(
+            parse_helper_version("pypilot 1.3.0\ncommit   abc123\ntarget   x86_64"),
+            Some((1, 3, 0))
+        );
     }
 
     #[test]

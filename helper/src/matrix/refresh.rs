@@ -26,7 +26,7 @@ pub const DATASETS: &[(&str, &str)] = &[
     ("conda_forge_packages.json", crate::matrix::CONDA_FORGE_JSON),
 ];
 
-fn cache_path(name: &str) -> PathBuf {
+pub(crate) fn cache_path(name: &str) -> PathBuf {
     platform::cache_dir().join("data").join(name)
 }
 
@@ -89,19 +89,7 @@ pub async fn refresh_if_stale(settings: Settings) {
 }
 
 async fn refresh_one(client: &reqwest::Client, name: &str) -> Result<(), String> {
-    let url = format!("{BASE_URL}/{name}");
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| e.to_string())?;
-    let text = resp.text().await.map_err(|e| e.to_string())?;
-
-    // Never let a corrupt or truncated download poison the cache.
-    serde_json::from_str::<serde_json::Value>(&text).map_err(|e| format!("invalid JSON: {e}"))?;
-
+    let text = fetch(client, name).await?;
     let path = cache_path(name);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -110,7 +98,27 @@ async fn refresh_one(client: &reqwest::Client, name: &str) -> Result<(), String>
     Ok(())
 }
 
-fn client() -> reqwest::Client {
+/// [`fetch`]'s error when `main` has no such table (a 404, not a network
+/// failure): a table newer than what is pushed, or one `main` dropped.
+pub(crate) const NOT_ON_MAIN: &str = "not on main";
+
+/// Download `name` from `main` and check that it parses, without touching
+/// the cache (`pypilot update-data --check` compares with this).
+pub(crate) async fn fetch(client: &reqwest::Client, name: &str) -> Result<String, String> {
+    let url = format!("{BASE_URL}/{name}");
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(NOT_ON_MAIN.to_string());
+    }
+    let resp = resp.error_for_status().map_err(|e| e.to_string())?;
+    let text = resp.text().await.map_err(|e| e.to_string())?;
+
+    // Never let a corrupt or truncated download poison the cache.
+    serde_json::from_str::<serde_json::Value>(&text).map_err(|e| format!("invalid JSON: {e}"))?;
+    Ok(text)
+}
+
+pub(crate) fn client() -> reqwest::Client {
     reqwest::Client::builder()
         .user_agent(concat!("pypilot/", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(10))

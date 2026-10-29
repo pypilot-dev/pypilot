@@ -50,17 +50,42 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let code = rt.block_on(cli::dispatch(&mode, &rest));
+            // Every CLI run leaves one line in the local log (`pypilot logs`).
+            let action = pypilot::core::logs::Action::new("cli", &mode, &rest);
+            let code = rt.block_on(pypilot::core::logs::scope(
+                action,
+                cli::dispatch(&mode, &rest),
+                |r: &pypilot::Result<()>| (r.is_ok(), r.as_ref().err().map(|e| format!("{e:#}"))),
+            ));
             match code {
                 Ok(()) => ExitCode::SUCCESS,
+                // The command printed its result and chose the exit code.
+                Err(e) if e.downcast_ref::<cli::Exit>().is_some() => {
+                    ExitCode::from(e.downcast_ref::<cli::Exit>().map_or(1, |x| x.0))
+                }
                 Err(e) => {
                     eprintln!("pypilot {mode}: {e:#}");
                     ExitCode::FAILURE
                 }
             }
         }
+        "logs" => match cli::logs::run(&rest) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("pypilot logs: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        "completions" => match cli::completions::run(&rest) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("pypilot completions: {e}");
+                ExitCode::FAILURE
+            }
+        },
         "--version" | "-V" | "version" => {
-            println!("pypilot {}", env!("CARGO_PKG_VERSION"));
+            // Bare `--version` stays one line; see `cli::version`.
+            cli::version::run(&mode, &rest);
             ExitCode::SUCCESS
         }
         "--help" | "-h" | "help" => {
@@ -90,12 +115,20 @@ fn print_help() {
          \x20   fix python        Rebuild the environment on the right Python version\n\
          \x20   fix cuda          Re-pin torch/tensorflow to the build matching the driver\n\
          \x20   update-data       Force-refresh the bundled driver/framework/import tables\n\
+         \x20                     (--check: compare with main without writing; exit\n\
+         \x20                     0 current, 1 stale, 2 network error; --json)\n\
          \x20   migrate-conda     Translate environment.yml into a pyproject.toml\n\
          \x20                     (--to pixi: into a pixi.toml; a preview unless --write)\n\
          \x20   migrate-to-pixi   Preview a pixi.toml for this project's dependencies\n\
          \x20                     (--write creates it, --install then runs pixi install,\n\
          \x20                     --platform <p> adds a target platform)\n\
          \x20   install-pixi      Install pixi with its official installer\n\
+         \x20   logs              Print the local log's path (--tail [N]: the last N\n\
+         \x20                     entries, --json: raw JSON lines)\n\
+         \x20   completions <sh>  Print a completion script (bash, zsh, fish, powershell)\n\
+         \x20   version           Engine version, commit, target and data tables\n\
+         \x20                     (--version alone prints only `pypilot X.Y.Z`;\n\
+         \x20                     --version --verbose or --json for the details)\n\
          \x20   lsp               Run as an LSP server over stdio, used by the Zed extension\n\n\
          OPTIONS:\n\
          \x20   --path <dir>       Workspace directory to analyze (default: current dir)\n\
