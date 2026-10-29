@@ -8,7 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::core::command::{self, Output};
+use crate::core::command::Output;
+use crate::core::exec::{self, Effect};
 use crate::core::interpreter::{self, Interpreter};
 use crate::pypi::pyversion::PyVersion;
 
@@ -28,7 +29,21 @@ pub async fn create_venv(
     cwd: &Path,
 ) -> crate::Result<Output> {
     let venv = venv_path.to_string_lossy().into_owned();
-    command::run(&interpreter.command, &["-m", "venv", &venv], Some(cwd)).await
+    let effect = Effect::new(
+        "python -m venv",
+        format!(
+            "create the project environment with the installed Python {} ({})",
+            interpreter.version, interpreter.command
+        ),
+    )
+    .writes(venv_path);
+    exec::run(
+        &interpreter.command,
+        &["-m", "venv", &venv],
+        Some(cwd),
+        effect,
+    )
+    .await
 }
 
 /// `python -m pip install -r requirements.txt` inside the venv.
@@ -39,7 +54,18 @@ pub async fn install_requirements(
 ) -> crate::Result<Output> {
     let py = venv_python(venv);
     let req = requirements.to_string_lossy().into_owned();
-    command::run(&py, &["-m", "pip", "install", "-r", &req], Some(cwd)).await
+    let effect = Effect::new(
+        "pip install -r requirements.txt",
+        "install requirements.txt into the venv",
+    )
+    .writes(venv);
+    exec::run(
+        &py,
+        &["-m", "pip", "install", "-r", &req],
+        Some(cwd),
+        effect,
+    )
+    .await
 }
 
 /// `python -m pip install <pkgs...>` inside the venv.
@@ -60,7 +86,12 @@ pub async fn install_packages(
         args.push(url.to_string());
     }
     args.extend(packages.iter().cloned());
-    command::run(&py, &args, Some(cwd)).await
+    let why = match index_url {
+        Some(url) => format!("install into the venv from {url}, the build matched to this machine"),
+        None => "install into the venv".to_string(),
+    };
+    let effect = Effect::new(format!("pip install {}", packages.join(" ")), why).writes(venv);
+    exec::run(&py, &args, Some(cwd), effect).await
 }
 
 /// Pick an installed interpreter for the target version, preferring an exact
@@ -84,9 +115,14 @@ pub async fn freeze_requirements(
     workspace: &Path,
 ) -> crate::Result<crate::core::command::Output> {
     let py = venv_python(venv);
-    let out = command::run(&py, &["-m", "pip", "freeze"], Some(workspace)).await?;
-    if out.success() {
-        let req_path = workspace.join("requirements.txt");
+    let req_path = workspace.join("requirements.txt");
+    let effect = Effect::new(
+        "pip freeze > requirements.txt",
+        "replace requirements.txt with the exact versions now installed",
+    )
+    .writes(&req_path);
+    let out = exec::run(&py, &["-m", "pip", "freeze"], Some(workspace), effect).await?;
+    if out.success() && !exec::is_dry_run() {
         std::fs::write(&req_path, &out.stdout)
             .map_err(|e| anyhow::anyhow!("writing requirements.txt: {e}"))?;
     }

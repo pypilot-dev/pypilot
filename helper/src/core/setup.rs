@@ -14,6 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::core::command::Output;
+use crate::core::exec::{self, Effect};
 use crate::core::solver;
 use crate::core::{env, installed, pip, pixi, pixi_manage, project, uv};
 use crate::pypi::pyversion::PyVersion;
@@ -198,11 +199,15 @@ async fn ensure_pixi_ipykernel(workspace: &Path, pixi: Option<&Path>, summary: &
     if summary.failed() || !project::has_notebooks(workspace) {
         return;
     }
-    let Some(env) = env::project_env(workspace) else {
-        return;
-    };
-    if installed::has_usable_ipykernel(&installed::scan(&env.path), env.python) {
-        return;
+    // A dry run that planned `pixi install` has no environment to look in
+    // yet; plan the kernel as a fresh environment would need it.
+    if !exec::is_fresh(&pixi_manage::default_env_path(workspace)) {
+        let Some(env) = env::project_env(workspace) else {
+            return;
+        };
+        if installed::has_usable_ipykernel(&installed::scan(&env.path), env.python) {
+            return;
+        }
     }
     pixi_manage::add_ipykernel(pixi, workspace, summary).await;
 }
@@ -220,6 +225,14 @@ const GPU_CHECK_STEP: &str = "GPU check";
 /// an NVIDIA GPU.
 pub(crate) async fn verify_gpu(workspace: &Path, summary: &mut SetupSummary) {
     if summary.failed() {
+        return;
+    }
+    // The self-test imports torch from the environment, which a dry run has
+    // not built. It only reads, so the plan just says it will happen.
+    if exec::note(Effect::new(
+        GPU_CHECK_STEP,
+        "after the install, import torch in the environment and confirm it can use the NVIDIA GPU (skipped on machines without one)",
+    )) {
         return;
     }
     let Some(env) = crate::core::env::project_env(workspace) else {
@@ -263,9 +276,12 @@ pub(crate) async fn ensure_ipykernel(
         return;
     }
     let venv = workspace.join(".venv");
+    // In a dry run, a venv the plan (re)creates is treated as empty.
+    let has_ipykernel = !exec::is_fresh(&venv)
+        && installed::has_usable_ipykernel(&installed::scan(&venv), venv_python(&venv));
     if summary.failed()
-        || !venv.is_dir()
-        || installed::has_usable_ipykernel(&installed::scan(&venv), venv_python(&venv))
+        || !exec::exists(&venv)
+        || has_ipykernel
         || !project::has_notebooks(workspace)
     {
         return;
@@ -286,16 +302,15 @@ pub(crate) async fn ensure_ipykernel(
             // A dev dependency keeps it out of the runtime requirements. Without
             // a pyproject.toml (uv init was skipped), there is nowhere to record
             // a group, so fall back to a plain install into the venv.
-            if mode == ResolvedMode::UvFull && workspace.join("pyproject.toml").is_file() {
+            if mode == ResolvedMode::UvFull && exec::exists(&workspace.join("pyproject.toml")) {
                 outcome(uv::add_dev(&uv_info, &packages, workspace).await)
                     .map(|_| "added to the dev dependency group".to_string())
             } else {
                 match outcome(uv::pip_install(&uv_info, &packages, None, workspace).await) {
                     Ok(_) if mode == ResolvedMode::UvPipCompat => {
-                        match outcome(uv::pip_freeze(&uv_info, workspace).await).and_then(|out| {
-                            std::fs::write(workspace.join("requirements.txt"), out)
-                                .map_err(|e| e.to_string())
-                        }) {
+                        match outcome(uv::freeze_into_requirements(&uv_info, workspace).await)
+                            .map(|_| ())
+                        {
                             Ok(()) => Ok("installed; requirements.txt updated".to_string()),
                             Err(e) => Ok(format!(
                                 "installed, but updating requirements.txt failed: {e}"
@@ -453,7 +468,7 @@ async fn install_deps_uv(
     summary: &mut SetupSummary,
 ) {
     // After run_uv may have called `uv init`, re-check for pyproject.toml.
-    let has_pyproject = workspace.join("pyproject.toml").is_file();
+    let has_pyproject = exec::exists(&workspace.join("pyproject.toml"));
     let requirements = workspace.join("requirements.txt");
 
     if has_pyproject && requirements.is_file() {
@@ -606,19 +621,12 @@ pub(crate) async fn freeze_into_requirements_uv(
     workspace: &Path,
     summary: &mut SetupSummary,
 ) {
-    match uv::pip_freeze(uv, workspace).await {
-        Ok(out) if out.success() => {
-            let path = workspace.join("requirements.txt");
-            if let Err(e) = std::fs::write(&path, &out.stdout) {
-                fail(summary, "uv pip freeze > requirements.txt", &e.to_string());
-            } else {
-                step_ok(
-                    summary,
-                    "uv pip freeze > requirements.txt",
-                    "requirements.txt updated with exact pins",
-                );
-            }
-        }
+    match uv::freeze_into_requirements(uv, workspace).await {
+        Ok(out) if out.success() => step_ok(
+            summary,
+            "uv pip freeze > requirements.txt",
+            "requirements.txt updated with exact pins",
+        ),
         Ok(out) => fail(
             summary,
             "uv pip freeze > requirements.txt",
@@ -675,7 +683,11 @@ async fn run_pip(
     // keeping the dead interpreter's links and site-packages (and failing on a
     // dangling `bin/python`). Start a broken venv from scratch.
     if broken_venv(assessment, venv_path).is_some() {
-        match std::fs::remove_dir_all(venv_path) {
+        let effect = Effect::new(
+            "remove broken venv",
+            "its Python is gone, and `python -m venv` would keep the dead links",
+        );
+        match exec::remove_dir_all(venv_path, effect) {
             Ok(()) => step_ok(
                 summary,
                 "remove broken venv",
@@ -746,7 +758,7 @@ async fn freeze_into_requirements(venv: &Path, workspace: &Path, summary: &mut S
     }
 }
 
-fn derive_why(assessment: &crate::core::Assessment) -> String {
+pub(crate) fn derive_why(assessment: &crate::core::Assessment) -> String {
     match (&assessment.compat, assessment.target_python) {
         (Some(compat), Some(py)) => {
             let range = compat.intersection.to_range_string();

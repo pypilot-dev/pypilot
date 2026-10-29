@@ -15,6 +15,7 @@ use anyhow::{bail, Context};
 use serde::Deserialize;
 
 use crate::core::command::{self, Output};
+use crate::core::exec::{self, Effect};
 use crate::core::platform::{self, Platform};
 use crate::pypi::pyversion::PyVersion;
 use crate::settings::{PackageManager, Settings};
@@ -181,6 +182,22 @@ pub async fn ensure(settings: &Settings) -> crate::Result<UvInfo> {
             if let Some(info) = detect(settings).await {
                 return Ok(info);
             }
+            let managed = managed_uv_path();
+            let effect = Effect::new(
+                "download uv",
+                format!(
+                    "uv is not installed; fetch {} from astral-sh/uv's latest GitHub release",
+                    uv_asset_name(Platform::current())
+                ),
+            )
+            .writes(&managed);
+            if exec::note(effect) {
+                return Ok(UvInfo {
+                    path: managed,
+                    version: "(not yet downloaded)".into(),
+                    managed: true,
+                });
+            }
             download_managed(Platform::current()).await
         }
     }
@@ -249,10 +266,17 @@ fn uv_asset_name(platform: Platform) -> String {
 
 /// `uv python install <X.Y>` — fetch a CPython if the machine lacks it.
 pub async fn python_install(uv: &UvInfo, version: PyVersion, cwd: &Path) -> crate::Result<Output> {
-    command::run(
+    let effect = Effect::new(
+        format!("uv python install {version}"),
+        format!(
+            "make CPython {version} available (uv downloads it into its own Python store if missing)"
+        ),
+    );
+    exec::run(
         &uv.path,
         &["python", "install", &version.to_string()],
         Some(cwd),
+        effect,
     )
     .await
 }
@@ -269,7 +293,12 @@ pub async fn create_venv(
     venv_path: &Path,
     cwd: &Path,
 ) -> crate::Result<Output> {
-    command::run(&uv.path, &venv_args(version, venv_path), Some(cwd)).await
+    let effect = Effect::new(
+        "uv venv",
+        format!("create the project environment on Python {version}, replacing any existing one"),
+    )
+    .writes(venv_path);
+    exec::run(&uv.path, &venv_args(version, venv_path), Some(cwd), effect).await
 }
 
 /// The argument vector for [`create_venv`], split out so a test can assert on it
@@ -286,7 +315,13 @@ fn venv_args(version: PyVersion, venv_path: &Path) -> Vec<String> {
 
 /// `uv sync` (pyproject/lockfile projects).
 pub async fn sync(uv: &UvInfo, cwd: &Path) -> crate::Result<Output> {
-    command::run(&uv.path, &["sync"], Some(cwd)).await
+    let effect = Effect::new(
+        "uv sync",
+        "install the dependencies pyproject.toml (and uv.lock) declare",
+    )
+    .writes(cwd.join("uv.lock"))
+    .writes(cwd.join(".venv"));
+    exec::run(&uv.path, &["sync"], Some(cwd), effect).await
 }
 
 /// `uv init` — scaffold a new pyproject.toml in the current directory.
@@ -308,9 +343,22 @@ pub async fn sync(uv: &UvInfo, cwd: &Path) -> crate::Result<Output> {
 ///
 /// uv releases older than `--bare` reject it; they get the old invocation.
 pub async fn init(uv: &UvInfo, python: Option<PyVersion>, cwd: &Path) -> crate::Result<Output> {
-    let out = command::run(&uv.path, &init_args(python, true), Some(cwd)).await?;
+    let effect = || {
+        let why = match python {
+            Some(py) => format!(
+                "the project has no pyproject.toml; create a bare one pinned to Python {py} so `uv add` has a manifest to record dependencies in"
+            ),
+            None => "the project has no pyproject.toml; create a bare one so `uv add` has a manifest to record dependencies in".to_string(),
+        };
+        let mut e = Effect::new("uv init", why).writes(cwd.join("pyproject.toml"));
+        if python.is_some() {
+            e = e.writes(cwd.join(".python-version"));
+        }
+        e
+    };
+    let out = exec::run(&uv.path, &init_args(python, true), Some(cwd), effect()).await?;
     if !out.success() && out.stderr.contains("unexpected argument") {
-        return command::run(&uv.path, &init_args(python, false), Some(cwd)).await;
+        return exec::run(&uv.path, &init_args(python, false), Some(cwd), effect()).await;
     }
     Ok(out)
 }
@@ -339,10 +387,18 @@ fn init_args(python: Option<PyVersion>, bare: bool) -> Vec<String> {
 /// pin file, or failing that a global `uv python pin`, asks for. Pinning the
 /// version PyPilot just built the environment on keeps them from replacing it.
 pub async fn pin(uv: &UvInfo, version: PyVersion, cwd: &Path) -> crate::Result<Output> {
-    command::run(
+    let effect = Effect::new(
+        format!("uv python pin {version}"),
+        format!(
+            "record Python {version} in .python-version so `uv sync` and `uv add` keep the environment on it"
+        ),
+    )
+    .writes(cwd.join(".python-version"));
+    exec::run(
         &uv.path,
         &["python", "pin", &version.to_string()],
         Some(cwd),
+        effect,
     )
     .await
 }
@@ -373,7 +429,19 @@ pub async fn add_requirements(
         args.push("--index".into());
         args.push(url.to_string());
     }
-    command::run(&uv.path, &args, Some(cwd)).await
+    let effect = Effect::new(
+        "uv add -r requirements.txt",
+        "move requirements.txt's dependencies into pyproject.toml and install them",
+    );
+    exec::run(&uv.path, &args, Some(cwd), add_writes(effect, cwd)).await
+}
+
+/// What every `uv add` changes: the manifest, the lock and the environment.
+fn add_writes(effect: Effect, cwd: &Path) -> Effect {
+    effect
+        .writes(cwd.join("pyproject.toml"))
+        .writes(cwd.join("uv.lock"))
+        .writes(cwd.join(".venv"))
 }
 
 /// `uv add -r requirements.txt <pkgs...>`: records dependencies from requirements.txt
@@ -392,7 +460,11 @@ pub async fn add_with_requirements_migration(
             args.push(url.to_string());
         }
         args.extend(packages.iter().cloned());
-        command::run(&uv.path, &args, Some(cwd)).await
+        let effect = Effect::new(
+            format!("uv add -r requirements.txt {}", packages.join(" ")),
+            "record requirements.txt's dependencies and the new packages in pyproject.toml, and install them",
+        );
+        exec::run(&uv.path, &args, Some(cwd), add_writes(effect, cwd)).await
     } else {
         add(uv, packages, index_url, cwd).await
     }
@@ -413,7 +485,11 @@ pub async fn add(
         args.push(url.to_string());
     }
     args.extend(packages.iter().cloned());
-    command::run(&uv.path, &args, Some(cwd)).await
+    let effect = Effect::new(
+        format!("uv add {}", packages.join(" ")),
+        "record the packages in pyproject.toml and install them",
+    );
+    exec::run(&uv.path, &args, Some(cwd), add_writes(effect, cwd)).await
 }
 
 /// `uv add --dev <pkgs...>` — records the packages in the `dev` dependency group
@@ -423,7 +499,17 @@ pub async fn add(
 /// `ipykernel` for notebooks: it must never become a runtime dependency that
 /// ships with the user's package.
 pub async fn add_dev(uv: &UvInfo, packages: &[String], cwd: &Path) -> crate::Result<Output> {
-    command::run(&uv.path, &add_dev_args(packages), Some(cwd)).await
+    let effect = Effect::new(
+        format!("uv add --dev {}", packages.join(" ")),
+        "record the packages in the dev dependency group and install them",
+    );
+    exec::run(
+        &uv.path,
+        &add_dev_args(packages),
+        Some(cwd),
+        add_writes(effect, cwd),
+    )
+    .await
 }
 
 /// The argument vector for [`add_dev`], split out so a test can assert on it
@@ -451,7 +537,13 @@ pub async fn pip_install(
         args.push(url.to_string());
     }
     args.extend(packages.iter().cloned());
-    command::run(&uv.path, &args, Some(cwd)).await
+    let why = match index_url {
+        Some(url) => format!("install into .venv from {url}, the build matched to this machine"),
+        None => "install into .venv".to_string(),
+    };
+    let effect = Effect::new(format!("uv pip install {}", packages.join(" ")), why)
+        .writes(cwd.join(".venv"));
+    exec::run(&uv.path, &args, Some(cwd), effect).await
 }
 
 /// `uv pip install -r requirements.txt`.
@@ -461,12 +553,34 @@ pub async fn pip_install_requirements(
     cwd: &Path,
 ) -> crate::Result<Output> {
     let req = requirements.to_string_lossy().into_owned();
-    command::run(&uv.path, &["pip", "install", "-r", &req], Some(cwd)).await
+    let effect = Effect::new(
+        "uv pip install -r requirements.txt",
+        "install requirements.txt into .venv",
+    )
+    .writes(cwd.join(".venv"));
+    exec::run(&uv.path, &["pip", "install", "-r", &req], Some(cwd), effect).await
 }
 
 /// `uv pip freeze` — snapshot installed packages into requirements format.
 pub async fn pip_freeze(uv: &UvInfo, cwd: &Path) -> crate::Result<Output> {
     command::run(&uv.path, &["pip", "freeze"], Some(cwd)).await
+}
+
+/// `uv pip freeze > requirements.txt`: replace `cwd/requirements.txt` with
+/// the environment's exact pins. A failed write comes back as an `Err`.
+pub async fn freeze_into_requirements(uv: &UvInfo, cwd: &Path) -> crate::Result<Output> {
+    let path = cwd.join("requirements.txt");
+    let effect = Effect::new(
+        "uv pip freeze > requirements.txt",
+        "replace requirements.txt with the exact versions now installed",
+    )
+    .writes(&path);
+    let out = exec::run(&uv.path, &["pip", "freeze"], Some(cwd), effect).await?;
+    if out.success() && !exec::is_dry_run() {
+        std::fs::write(&path, &out.stdout)
+            .map_err(|e| anyhow::anyhow!("writing requirements.txt: {e}"))?;
+    }
+    Ok(out)
 }
 
 /// `uv pip install --dry-run --system --python <X.Y> <pkgs...>` — fast

@@ -16,7 +16,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::core::command;
+use crate::core::exec::{self, Effect};
 use crate::core::installed;
 use crate::core::pixi;
 use crate::core::pixi_compat;
@@ -103,7 +103,17 @@ pub async fn install(pixi: Option<&Path>, root: &Path, summary: &mut SetupSummar
     let Some(pixi) = located(pixi, root, summary) else {
         return;
     };
-    let result = run(pixi, &install_args(root), root).await;
+    let effect = Effect::new(
+        "pixi install",
+        "install the project's environment from its pixi manifest",
+    );
+    let result = run(
+        pixi,
+        &install_args(root),
+        root,
+        env_writes(effect, root, false),
+    )
+    .await;
     record(
         summary,
         "pixi install",
@@ -126,7 +136,17 @@ pub async fn add_pypi(
         return;
     };
     let step = format!("pixi add --pypi {}", packages.join(" "));
-    let result = run(pixi, &add_pypi_args(root, packages), root).await;
+    let effect = Effect::new(
+        step.clone(),
+        "record the PyPI packages in the pixi manifest and install them",
+    );
+    let result = run(
+        pixi,
+        &add_pypi_args(root, packages),
+        root,
+        env_writes(effect, root, true),
+    )
+    .await;
     record(
         summary,
         &step,
@@ -146,10 +166,15 @@ pub async fn set_python(
         return;
     };
     let spec = python_spec(version);
+    let effect = Effect::new(
+        format!("pixi add {spec}"),
+        format!("change the manifest's python spec to {version}.* so pixi rebuilds the environment on it"),
+    );
     let result = run(
         pixi,
         &add_conda_args(root, std::slice::from_ref(&spec)),
         root,
+        env_writes(effect, root, true),
     )
     .await;
     record(
@@ -170,12 +195,17 @@ pub async fn add_ipykernel(pixi: Option<&Path>, root: &Path, summary: &mut Setup
         summary.steps.push(failed_step(step, MISSING_PIXI));
         return;
     };
-    if pixi::detect(root).is_none() {
+    if !has_manifest(root) {
         summary.steps.push(failed_step(step, NO_MANIFEST));
         return;
     }
     let spec = installed::IPYKERNEL_REQUIREMENT.to_string();
-    let detail = match run(pixi, &add_conda_args(root, &[spec]), root).await {
+    let effect = Effect::new(
+        format!("pixi add {spec}"),
+        "the project has notebooks; add ipykernel so Jupyter can use this environment as a kernel",
+    );
+    let args = add_conda_args(root, &[spec]);
+    let detail = match run(pixi, &args, root, env_writes(effect, root, true)).await {
         Ok(_) => Step {
             name: step.to_string(),
             ok: true,
@@ -201,7 +231,7 @@ fn located<'a>(
         summary.steps.push(failed_step(LOCATE_STEP, MISSING_PIXI));
         return None;
     }
-    if pixi::detect(root).is_none() {
+    if !has_manifest(root) {
         summary.ok = false;
         summary
             .steps
@@ -211,8 +241,29 @@ fn located<'a>(
     pixi
 }
 
-async fn run(pixi: &Path, args: &[String], root: &Path) -> Result<(), String> {
-    match command::run(pixi, args, Some(root)).await {
+/// Whether `root` has a pixi manifest, or a dry run so far plans to write
+/// one (setup creating it for `package_manager = "pixi"`).
+fn has_manifest(root: &Path) -> bool {
+    pixi::detect(root).is_some() || exec::is_fresh(&root.join(crate::core::pixi_migrate::MANIFEST))
+}
+
+/// What a pixi command changes: the lock and the selected environment, and
+/// for `pixi add` the manifest too.
+fn env_writes(effect: Effect, root: &Path, manifest: bool) -> Effect {
+    let mut effect = effect;
+    if manifest {
+        let path = pixi::detect(root)
+            .map(|p| p.manifest)
+            .unwrap_or_else(|| root.join(crate::core::pixi_migrate::MANIFEST));
+        effect = effect.writes(path);
+    }
+    effect
+        .writes(root.join("pixi.lock"))
+        .writes(default_env_path(root))
+}
+
+async fn run(pixi: &Path, args: &[String], root: &Path, effect: Effect) -> Result<(), String> {
+    match exec::run(pixi, args, Some(root), effect).await {
         Ok(out) if out.success() => Ok(()),
         Ok(out) => Err(explain_failure(&out.stderr, root)),
         Err(e) => Err(e.to_string()),
