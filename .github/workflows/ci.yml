@@ -61,3 +61,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build extension (wasm)
         run: cargo build -p pypilot-zed --target wasm32-wasip2 --release --locked
+
+  scripts:
+    name: release scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Self-test bump_engine_pins.py
+        # Oldest and newest Python the pip wrapper supports (uv ships 3.8
+        # builds that setup-python no longer has for ubuntu-latest).
+        run: |
+          uv run --no-project --python 3.8 python scripts/bump_engine_pins.py --self-test
+          uv run --no-project --python 3.15 python scripts/bump_engine_pins.py --self-test

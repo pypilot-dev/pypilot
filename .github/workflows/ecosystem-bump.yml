@@ -1,0 +1,133 @@
+name: Ecosystem bump
+
+# After a successful Release run for a tag, open a PR in each wrapper repo
+# that points its engine pin at the new release, with the SHA-256 of every
+# archive taken from the release's SHA256SUMS (scripts/bump_engine_pins.py):
+#
+#   pypilot-dev/pypilot-vscode  package.json  "pypilotEngine": {version, sha256}
+#   pypilot-dev/pypilot-pip     src/pypilot/binary.py  DEFAULT_TAG, ENGINE_SHA256
+#
+# Needs the ECOSYSTEM_TOKEN secret: a fine-grained PAT (or GitHub App token)
+# with Contents and Pull requests read/write on both wrapper repos. Without
+# it the job logs a notice and succeeds, so forks and first setups stay green.
+# The PRs only change the pin; releasing a wrapper is still a manual step.
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Engine tag whose release to pin (e.g. v1.3.0)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecosystem-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: bump ${{ matrix.repo }}
+    # A Release run from a tag push has the tag as head_branch. A manual
+    # Release run (workflow_dispatch) does not say which tag it published,
+    # so for those, dispatch this workflow by hand with the tag.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { repo: pypilot-dev/pypilot-vscode, flag: --vscode, file: package.json }
+          - { repo: pypilot-dev/pypilot-pip, flag: --pip, file: src/pypilot/binary.py }
+    env:
+      TAG: ${{ github.event.inputs.tag || github.event.workflow_run.head_branch }}
+      HAS_TOKEN: ${{ secrets.ECOSYSTEM_TOKEN != '' }}
+    steps:
+      - name: Check for ECOSYSTEM_TOKEN
+        if: env.HAS_TOKEN != 'true'
+        run: |
+          echo "::notice title=Ecosystem bump skipped::ECOSYSTEM_TOKEN is not set, so no PR was opened in ${{ matrix.repo }} for $TAG. Bump it by hand: python scripts/bump_engine_pins.py --tag $TAG --sums SHA256SUMS ${{ matrix.flag }} ${{ matrix.file }}"
+
+      - name: Validate tag
+        if: env.HAS_TOKEN == 'true'
+        run: |
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$TAG' is not a vX.Y.Z tag"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          path: engine
+          sparse-checkout: scripts
+
+      - name: Self-test the bump script
+        if: env.HAS_TOKEN == 'true'
+        run: python3 engine/scripts/bump_engine_pins.py --self-test > /dev/null
+
+      - name: Download SHA256SUMS
+        if: env.HAS_TOKEN == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$TAG" -R "${{ github.repository }}" -p SHA256SUMS -D sums
+
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          repository: ${{ matrix.repo }}
+          token: ${{ secrets.ECOSYSTEM_TOKEN }}
+          path: wrapper
+
+      - name: Rewrite the pin
+        if: env.HAS_TOKEN == 'true'
+        run: >-
+          python3 engine/scripts/bump_engine_pins.py --tag "$TAG"
+          --sums sums/SHA256SUMS ${{ matrix.flag }} "wrapper/${{ matrix.file }}"
+
+      - name: Open or update the PR
+        if: env.HAS_TOKEN == 'true'
+        working-directory: wrapper
+        env:
+          GH_TOKEN: ${{ secrets.ECOSYSTEM_TOKEN }}
+          REPO: ${{ matrix.repo }}
+          FILE: ${{ matrix.file }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "::notice::$REPO already pins $TAG"
+            exit 0
+          fi
+          base="$(git rev-parse --abbrev-ref HEAD)"
+          branch="pypilot-engine/$TAG"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -- "$FILE"
+          git commit -q -F - <<MSG
+          chore: pin PyPilot engine $TAG
+
+          Points the bundled engine at $TAG and records the SHA-256 of each
+          release archive from its SHA256SUMS:
+          https://github.com/${{ github.repository }}/releases/tag/$TAG
+
+          Opened by the ecosystem-bump workflow in ${{ github.repository }}.
+          MSG
+          # The branch belongs to this workflow; a re-run replaces it.
+          git push --force origin "HEAD:refs/heads/$branch"
+          if [ -n "$(gh pr list -R "$REPO" --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            echo "::notice::PR for $branch already open in $REPO; branch updated"
+            exit 0
+          fi
+          gh pr create -R "$REPO" --base "$base" --head "$branch" \
+            --title "chore: pin PyPilot engine $TAG" \
+            --body "Automated pin bump to the [$TAG engine release](https://github.com/${{ github.repository }}/releases/tag/$TAG). Hashes come from its \`SHA256SUMS\` (provenance: \`gh attestation verify SHA256SUMS -R ${{ github.repository }}\`). Merging this does not release the wrapper; bump its own version and tag when ready."
