@@ -177,8 +177,8 @@ Every document starts with the same three keys, then the command's own:
 | Key | Meaning |
 |---|---|
 | `pypilot` | engine version that wrote it |
-| `command` | `doctor`, `check`, `setup`, `install`, `fix python`, `fix cuda`, `update-data`, `migrate-conda`, `migrate-to-pixi`, `install-pixi` |
-| `ok` | the command's own verdict (see each command); a failed command also exits non-zero, except `doctor`, `check` and `update-data`, which only report |
+| `command` | `doctor`, `check`, `setup`, `install`, `fix python`, `fix cuda`, `update-data`, `migrate-conda`, `migrate-to-pixi`, `install-pixi`, `version` |
+| `ok` | the command's own verdict (see each command); a failed command also exits non-zero, except `doctor`, `check` and `update-data`, which only report (`update-data --check` exits 1 when stale, 2 when a fetch failed) |
 | `error` | only when the command failed before it had a report: `{ "pypilot", "command", "ok": false, "error": "..." }` |
 
 Field names are stable: new fields may be added, existing ones are never
@@ -202,19 +202,65 @@ Per command:
 
 | Command | `ok` | Fields |
 |---|---|---|
-| `doctor` | no finding has severity `error` | `workspace`, `package_manager`, `environment` (`uv`: `{path, version, managed}`, `venv`: `{path, python, broken, kind: {type: "venv"} \| {type: "pixi", name}}`, `interpreters`: `[{command, path, version}]`), `project` (`sources`, `requires_python`, `pixi_python`, `dependencies`, `conda_dependencies`: `[{name, spec}]`, `has_conda_env`), `pixi` (`null`, or `{manifest, platforms, lock: {status: "missing"\|"up_to_date"\|"stale"\|"unsolvable"\|"unknown", changes?, reason?}, environments: [{name, features, selected, installed, python, python_spec, conda, pypi}]}`), `compatibility` (`null` without dependencies, else `{platform, supported, supported_range, recommended, packages: [analysis], unresolved: [{name, error}], conflicts: [conflict]}`), `target_python`, `findings` |
+| `doctor` | no finding has severity `error` | `workspace`, `package_manager`, `environment` (`uv`: `{path, version, managed}`, `venv`: `{path, python, broken, kind: {type: "venv"} \| {type: "pixi", name}}`, `interpreters`: `[{command, path, version}]`), `project` (`sources`, `requires_python`, `pixi_python`, `dependencies`, `conda_dependencies`: `[{name, spec}]`, `has_conda_env`), `pixi` (`null`, or `{manifest, platforms, lock: {status: "missing"\|"up_to_date"\|"stale"\|"unsolvable"\|"unknown", changes?, reason?}, environments: [{name, features, selected, installed, python, python_spec, conda, pypi}]}`), `compatibility` (`null` without dependencies, else `{platform, supported, supported_range, recommended, packages: [analysis], unresolved: [{name, error}], conflicts: [conflict]}`), `target_python`, `findings`, `data_tables` (the text report's one-line refresh state) |
 | `check` | the package installs and runs here: not `no_files`, `conflict`, `unsupported`, nor a source build | `requirement`, `analysis`, `supported_range`, `platform`, `installed`, `environment_python`, `pixi_project`, `verdict` (`{kind: "supported"\|"unsupported"\|"no_environment"\|"no_files"\|"conflict", status: "ok"\|"error"\|"info", message}`), `conflict` (the project dependency it shares no Python with, or `null`), `why` (reasons it fails here), `alternative` (conda-forge build, or `null`) |
 | `setup` | `summary.ok` | `workspace`, `summary`, `pixi_advice` (a failed build's conda-forge hint, or `null`) |
 | `install` | `summary.ok` | `workspace`, `package`, `summary`, `pixi_advice` |
 | `fix python` | `summary.ok` | `workspace`, `target_python`, `summary` (`null` with a `message` when already on it), `pixi_advice` |
 | `fix cuda` | every framework re-pinned | `message` (why nothing was tried, or `null`), `frameworks`: `[{package, finding, spec, index_url, action: "pinned_in_pyproject"\|"installed"\|"skipped", ok, detail}]`, `error` |
 | `update-data` | every dataset refreshed | `datasets`: `[{name, ok, error}]` |
+| `update-data --check` | the tables in use match `main` | `check`: `true`, `status`: `"current"\|"stale"\|"error"`, `refresh_days`, `summary`, `cache_dir`, `tables`: `[{name, bundled_schema, cache_age_days, cache_schema, in_use: "bundled"\|"cache", main: "same"\|"differs"\|"missing"\|"error", main_schema, main_matches_bundled, error}]` |
+| `version` (`--version --json`) | always | `version`, `commit`, `commit_date`, `target` (each `null` when not recorded at build time), `data`: `{bundled_date, refresh_days, summary, tables: [{name, bundled_schema, cache_age_days, cache_schema, in_use}]}` |
 | `migrate-conda` | written | `written`, `dependencies`, `environment_file`; with `--to pixi`, as `migrate-to-pixi` |
 | `migrate-to-pixi` | the requested `pixi install` succeeded (always for a preview) | `summary`: `{manifest_path, manifest, preview, written, sources, python, platforms, channels, deps: [{name, value, kind: "conda"\|"pypi", from, reason}], skipped: [{line, reason}], notes, install: summary \| null, next_command}` |
 | `install-pixi` | installed | `path`, `version`, `already_installed`, `refresh_path` |
 
 `explain --json` predates this and keeps its own top level:
 `{ "pypilot", "kind": "package"|"project", "explanation": {...} }`.
+
+## Logs, version, completions
+
+**Local log.** Every CLI command and every LSP command or workspace scan
+appends one JSON line to `pypilot.log` in the platform cache dir
+(`%LOCALAPPDATA%\PyPilot\pypilot\cache\logs` on Windows,
+`~/Library/Caches/dev.PyPilot.pypilot/logs` on macOS,
+`~/.cache/pypilot/logs` on Linux). It rotates at 1 MB and keeps three files.
+Nothing is sent anywhere.
+
+```bash
+pypilot logs              # the log's path
+pypilot logs --tail 5     # the last 5 entries, summarized
+pypilot logs --tail --json  # the last 10 entries as raw JSON lines
+```
+
+Each line holds `ts` (UTC), `pypilot` (engine version), `source` (`cli` or
+`lsp`), `command`, `args`, `workspace`, `mode` (the `package_manager`
+setting), `resolved_mode`, `ok`, `duration_ms`, `steps` (every subprocess:
+`{cmd, args, ok, exit, duration_ms, stderr}`, with the last 2000 characters
+of stderr only for failures) and `error`. Credentials in URLs, `NAME=value`
+pairs whose name looks secret and well-known token formats are masked; the
+environment is never recorded. `PYPILOT_NO_LOG=1` turns the log off and
+`PYPILOT_LOG_DIR` moves it.
+
+**Version.** `pypilot --version` prints only `pypilot X.Y.Z` (wrappers parse
+it). `pypilot version` (or `--version --verbose`) adds the git commit, the
+target triple, and each data table's schema and whether the bundled copy or
+a refreshed one is in use; `--json` prints all of it.
+
+**Data freshness.** `pypilot update-data --check` fetches the tables from
+`main` and compares them with the copies in use, writing nothing. Exit `0`
+current, `1` stale (`pypilot update-data` refreshes them), `2` a fetch
+failed. `pypilot doctor` shows the same state offline as `data tables :
+refreshed 3 days ago (next in 4 days)`.
+
+**Shell completion.**
+
+```bash
+source <(pypilot completions bash)                                  # ~/.bashrc
+source <(pypilot completions zsh)                                   # ~/.zshrc
+pypilot completions fish > ~/.config/fish/completions/pypilot.fish
+pypilot completions powershell | Out-String | Invoke-Expression     # $PROFILE
+```
 
 ## Settings
 
