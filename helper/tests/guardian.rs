@@ -272,3 +272,52 @@ fn uninstalled_packages_are_not_attribute_checked() {
     let buffer = "import mediapipe as mp\n\nx = mp.solutions\n";
     assert!(check_attributes(buffer, &venv, &Installed::default()).is_empty());
 }
+
+/// A source whose every lookup fails as an unreachable PyPI would.
+struct Offline;
+
+impl pypilot::pypi::MetadataSource for Offline {
+    async fn fetch(&self, name: &str) -> pypilot::Result<pypilot::pypi::metadata::PackageMetadata> {
+        anyhow::bail!("requesting metadata for `{name}`: connection refused")
+    }
+
+    async fn fetch_version(
+        &self,
+        name: &str,
+        _version: &str,
+    ) -> pypilot::Result<pypilot::pypi::metadata::PackageMetadata> {
+        anyhow::bail!("requesting metadata for `{name}`: connection refused")
+    }
+}
+
+/// Offline, nothing is known about the package, so the editor must not claim
+/// that PyPI has no such project (it used to say "check the spelling").
+#[tokio::test]
+async fn an_unreachable_pypi_is_not_reported_as_a_missing_project() {
+    let findings = analyze_buffer(
+        "import requests\n",
+        &empty_workspace(),
+        linux(),
+        Some(PyVersion::py3(12)),
+        &Installed::default(),
+        &Offline,
+    )
+    .await;
+    assert!(findings.is_empty(), "got {findings:?}");
+}
+
+/// A name PyPI really does not know still gets the spelling warning.
+#[tokio::test]
+async fn a_project_pypi_does_not_know_is_still_reported() {
+    let findings = analyze_buffer(
+        "import nmupy\n",
+        &empty_workspace(),
+        linux(),
+        Some(PyVersion::py3(12)),
+        &Installed::default(),
+        &source(),
+    )
+    .await;
+    assert_eq!(findings.len(), 1);
+    assert!(matches!(findings[0].problem, Problem::NotOnPyPi));
+}

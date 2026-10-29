@@ -102,7 +102,16 @@ pub async fn diagnose<S: MetadataSource>(
 /// that imports it.
 pub struct Memo<'a, S> {
     inner: &'a S,
-    latest: Mutex<HashMap<String, Option<PackageMetadata>>>,
+    latest: Mutex<HashMap<String, Lookup>>,
+}
+
+/// One remembered answer. A 404 and an unreachable index stay distinct: the
+/// guardian reports the first ("not on PyPI") and says nothing on the second.
+#[derive(Clone)]
+enum Lookup {
+    Found(PackageMetadata),
+    NotOnPyPi,
+    Failed,
 }
 
 impl<'a, S: MetadataSource> Memo<'a, S> {
@@ -120,14 +129,22 @@ impl<S: MetadataSource> MetadataSource for Memo<'_, S> {
         let answer = match known {
             Some(answer) => answer,
             None => {
-                let answer = self.inner.fetch(name).await.ok();
+                let answer = match self.inner.fetch(name).await {
+                    Ok(meta) => Lookup::Found(meta),
+                    Err(e) if crate::pypi::client::is_not_on_pypi(&e) => Lookup::NotOnPyPi,
+                    Err(_) => Lookup::Failed,
+                };
                 if let Ok(mut m) = self.latest.lock() {
                     m.insert(name.to_string(), answer.clone());
                 }
                 answer
             }
         };
-        answer.ok_or_else(|| anyhow::anyhow!("no metadata for {name}"))
+        match answer {
+            Lookup::Found(meta) => Ok(meta),
+            Lookup::NotOnPyPi => Err(crate::pypi::client::NotOnPyPi(name.to_string()).into()),
+            Lookup::Failed => Err(anyhow::anyhow!("no metadata for {name}")),
+        }
     }
 
     async fn fetch_version(&self, name: &str, version: &str) -> crate::Result<PackageMetadata> {

@@ -207,17 +207,24 @@ pub async fn analyze_buffer_in<S: MetadataSource>(
 
     let unique: BTreeSet<String> = candidates.iter().map(|(_, p, _)| p.clone()).collect();
 
+    // `Some(None)`: PyPI has no such project. Absent: the lookup failed for
+    // another reason (offline, a proxy, PyPI down), which says nothing about
+    // the package, so those imports get no diagnostic rather than a false
+    // "check the spelling".
     let fetched = join_all(unique.into_iter().map(|name| async move {
-        let analysis = metadata
-            .fetch(&name)
-            .await
-            .ok()
-            .map(|meta| meta.analyze(&platform));
+        let analysis = match metadata.fetch(&name).await {
+            Ok(meta) => Some(Some(meta.analyze(&platform))),
+            Err(e) if crate::pypi::client::is_not_on_pypi(&e) => Some(None),
+            Err(_) => None,
+        };
         (name, analysis)
     }))
     .await;
 
-    let analyses: HashMap<String, Option<PackageAnalysis>> = fetched.into_iter().collect();
+    let analyses: HashMap<String, Option<PackageAnalysis>> = fetched
+        .into_iter()
+        .filter_map(|(name, analysis)| analysis.map(|a| (name, a)))
+        .collect();
 
     // With no venv, the first environment should suit every import in the file,
     // so intersect them all rather than sizing for whichever one is on screen.
@@ -243,6 +250,7 @@ pub async fn analyze_buffer_in<S: MetadataSource>(
 
     candidates
         .into_iter()
+        .filter(|(_, package, _)| analyses.contains_key(package))
         .map(|(import, package, renamed)| {
             let analysis = analyses.get(&package).and_then(|a| a.as_ref());
             let finding = classify(import, package, renamed, analysis, &ctx);

@@ -12,6 +12,27 @@ use anyhow::Context;
 use crate::pypi::cache::Cache;
 use crate::pypi::metadata::PackageMetadata;
 
+/// PyPI answered that it has no project by this name (HTTP 404).
+///
+/// Kept apart from every other lookup failure: "no such project" is worth
+/// telling the user (a typo, or a private index), while a network error says
+/// nothing about the package and must not be reported as if it did.
+#[derive(Debug)]
+pub struct NotOnPyPi(pub String);
+
+impl std::fmt::Display for NotOnPyPi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "`{}` is not on PyPI; check the spelling", self.0)
+    }
+}
+
+impl std::error::Error for NotOnPyPi {}
+
+/// True when `err` is PyPI saying the project does not exist.
+pub fn is_not_on_pypi(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<NotOnPyPi>().is_some()
+}
+
 /// Anything that can resolve a package name to its latest-release metadata.
 ///
 /// Uses native `async fn` in traits (stable), so the engine is generic over the
@@ -65,6 +86,15 @@ impl PyPiClient {
             ..PyPiClient::with_cache(Cache::disabled())
         }
     }
+
+    /// A client for a stand-in index at `base_url`, with no disk cache.
+    #[cfg(test)]
+    pub fn at(base_url: &str) -> PyPiClient {
+        PyPiClient {
+            base_url: base_url.to_string(),
+            ..PyPiClient::with_cache(Cache::disabled())
+        }
+    }
 }
 
 impl Default for PyPiClient {
@@ -100,7 +130,7 @@ impl MetadataSource for PyPiClient {
                 }
             }
             if resp.status() == reqwest::StatusCode::NOT_FOUND {
-                anyhow::bail!("`{name}` is not on PyPI; check the spelling");
+                return Err(NotOnPyPi(name.to_string()).into());
             }
             anyhow::bail!("PyPI returned {} for `{name}`", resp.status());
         }
@@ -181,7 +211,7 @@ impl MetadataSource for FixtureSource {
         self.by_name
             .get(&name.to_lowercase())
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("no fixture registered for `{name}`"))
+            .ok_or_else(|| NotOnPyPi(name.to_string()).into())
     }
 
     async fn fetch_version(&self, name: &str, version: &str) -> crate::Result<PackageMetadata> {

@@ -1249,6 +1249,28 @@ mod protocol_tests {
     use serde_json::{json, Value};
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
+    /// A local stand-in for PyPI that knows no project at all: every request
+    /// gets a 404, which is what makes an import "not on PyPI". (An index that
+    /// cannot be reached says nothing about a package, so it reports nothing.)
+    fn not_found_index() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                std::thread::spawn(move || {
+                    use std::io::{Read, Write};
+                    let mut request = [0u8; 4096];
+                    let _ = stream.read(&mut request);
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    );
+                });
+            }
+        });
+        format!("http://{address}")
+    }
+
     struct FakeClient {
         to_server: tokio::io::WriteHalf<tokio::io::DuplexStream>,
         from_server: tokio::sync::mpsc::UnboundedReceiver<Value>,
@@ -1260,7 +1282,7 @@ mod protocol_tests {
             let (client_end, server_end) = tokio::io::duplex(1 << 20);
             let (server_read, server_write) = tokio::io::split(server_end);
             let (client_read, to_server) = tokio::io::split(client_end);
-            let (service, socket) = service(PyPiClient::unreachable());
+            let (service, socket) = service(PyPiClient::at(&not_found_index()));
             tokio::spawn(Server::new(server_read, server_write, socket).serve(service));
 
             let (tx, from_server) = tokio::sync::mpsc::unbounded_channel();
