@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use crate::core::installed::{self, Installed};
 use crate::core::project::normalize_name;
-use crate::core::{pip, pixi, probe};
+use crate::core::{pip, pixi, pixi_envs, probe};
 use crate::pypi::pyversion::PyVersion;
 
 /// What kind of environment a project uses.
@@ -77,12 +77,17 @@ const VENV_DIRS: [&str; 3] = [".venv", "venv", "env"];
 
 /// The environment of the project at `workspace`, read off disk only.
 ///
-/// A pixi project gets its default pixi environment, or `None` when pixi has
+/// A pixi project gets its selected pixi environment (`default` unless the
+/// `pixi_environment` setting or `--pixi-env` names another one; see
+/// [`pixi_envs::selected`]), or `None` when pixi has
 /// not installed it yet (a `.venv` beside it is not the project's environment).
 /// Other projects get the first venv with a `pyvenv.cfg`.
 pub fn project_env(workspace: &Path) -> Option<ProjectEnv> {
     match pixi::detect(workspace) {
-        Some(project) => pixi::env(&project, pixi::DEFAULT_ENV).map(|e| from_pixi(&project, e)),
+        Some(project) => {
+            let name = pixi_envs::selected(&project, workspace);
+            pixi::env(&project, &name).map(|e| from_pixi(&project, e))
+        }
         None => venv_env(workspace),
     }
 }
@@ -95,7 +100,8 @@ pub async fn project_env_resolved(workspace: &Path) -> Option<ProjectEnv> {
     let Some(project) = pixi::detect(workspace) else {
         return venv_env(workspace);
     };
-    if let Some(env) = pixi::env(&project, pixi::DEFAULT_ENV) {
+    let selected = pixi_envs::selected(&project, workspace);
+    if let Some(env) = pixi::env(&project, &selected) {
         return Some(from_pixi(&project, env));
     }
     if !project.root.join("pixi.lock").is_file() {
@@ -104,7 +110,7 @@ pub async fn project_env_resolved(workspace: &Path) -> Option<ProjectEnv> {
     pixi::info_envs(&project.root)
         .await
         .into_iter()
-        .find(|(name, prefix)| name == pixi::DEFAULT_ENV && prefix.is_dir())
+        .find(|(name, prefix)| *name == selected && prefix.is_dir())
         .map(|(name, prefix)| from_pixi(&project, pixi::env_at(&name, &prefix)))
 }
 
@@ -151,7 +157,14 @@ pub fn importable(workspace: &Path, env: Option<&ProjectEnv>) -> Installed {
     let Some(project) = pixi::detect(workspace) else {
         return installed;
     };
-    let mut names: Vec<String> = project.conda_deps.iter().map(|d| d.name.clone()).collect();
+    // The conda packages of the selected environment: its features' too.
+    let selected = pixi_envs::selected(&project, workspace);
+    let view = pixi_envs::compositions(&project)
+        .into_iter()
+        .find(|c| c.name == selected)
+        .map(|c| pixi_envs::effective(&project, &c))
+        .unwrap_or(project);
+    let mut names: Vec<String> = view.conda_deps.iter().map(|d| d.name.clone()).collect();
     if let Some(env) = env.filter(|e| e.kind.is_pixi()) {
         names.extend(conda_meta_names(&env.path));
     }

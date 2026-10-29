@@ -1,0 +1,21 @@
+[workspace]
+name = "pp-multi"
+channels = ["conda-forge"]
+platforms = ["win-64", "linux-64"]
+
+[dependencies]
+python = ">=3.11,<3.13"
+
+[pypi-dependencies]
+requests = ">=2.31"
+
+[feature.py312.dependencies]
+python = "3.12.*"
+
+[feature.test.dependencies]
+python = "3.11.*"
+pytest = "*"
+
+[environments]
+default = ["py312"]
+test = ["test"]

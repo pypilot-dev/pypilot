@@ -91,8 +91,9 @@ fn print_help() {
          \x20   migrate-conda     Translate environment.yml into a pyproject.toml\n\
          \x20   lsp               Run as an LSP server over stdio, used by the Zed extension\n\n\
          OPTIONS:\n\
-         \x20   --path <dir>   Workspace directory to analyze (default: current dir)\n\
-         \x20   --json         explain: print the explanation as JSON\n",
+         \x20   --path <dir>       Workspace directory to analyze (default: current dir)\n\
+         \x20   --json             explain: print the explanation as JSON\n\
+         \x20   --pixi-env <name>  pixi environment to use (default: the pixi_environment setting)\n",
         ver = env!("CARGO_PKG_VERSION")
     );
 }

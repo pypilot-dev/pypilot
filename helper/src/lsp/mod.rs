@@ -114,6 +114,11 @@ impl LanguageServer for Backend {
             .as_ref()
             .is_some_and(|c| is_zed_client(&c.name));
         CLIENT_IS_ZED.store(zed, std::sync::atomic::Ordering::Relaxed);
+        // Editor settings (`pixiEnvironment`, ...) layer between the global
+        // and the project config file; see `crate::settings`.
+        if let Some(options) = &params.initialization_options {
+            crate::settings::set_editor_settings(options);
+        }
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -218,6 +223,14 @@ impl LanguageServer for Backend {
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         // A save is an explicit checkpoint; do not make the user wait a second.
         run_guardian(self.shared.clone(), params.text_document.uri).await;
+    }
+
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        // VS Code sends `{ pypilot: { pixiEnvironment, packageManager, ... } }`
+        // once after startup and on every change. A new pixi environment
+        // changes what is installed, so re-check the open buffers.
+        crate::settings::set_editor_settings(&params.settings);
+        tokio::spawn(refresh_all_buffers(self.shared.clone()));
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {

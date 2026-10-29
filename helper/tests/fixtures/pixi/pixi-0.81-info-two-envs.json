@@ -1,0 +1,124 @@
+{
+  "platform": "win-64",
+  "virtual_packages": [
+    "__win=10.0.26100=0",
+    "__cuda=13.2=0",
+    "__cuda_arch=8.6=0",
+    "__archspec=1=icelake"
+  ],
+  "version": "0.81.0",
+  "tls_backend": "rustls",
+  "cache_dir": "<HOME>\\AppData\\Local\\rattler\\cache",
+  "cache_size": null,
+  "auth_dir": "<HOME>\\.rattler\\credentials.json",
+  "global_info": {
+    "bin_dir": "<HOME>\\.pixi\\bin",
+    "env_dir": "<HOME>\\.pixi\\envs",
+    "manifest": "<HOME>\\.pixi\\manifests\\pixi-global.toml"
+  },
+  "project_info": {
+    "name": "pp-multi",
+    "manifest_path": "<HOME>\\AppData\\Local\\Temp\\pp-multi\\pixi.toml",
+    "last_updated": "29-10-2026 17:09:36",
+    "pixi_folder_size": null,
+    "version": null
+  },
+  "environments_info": [
+    {
+      "name": "default",
+      "features": [
+        "py312",
+        "default"
+      ],
+      "solve_group": null,
+      "environment_size": null,
+      "dependencies": [
+        "python"
+      ],
+      "pypi_dependencies": [
+        "requests"
+      ],
+      "platforms": [
+        {
+          "name": "linux-64",
+          "subdir": "linux-64",
+          "virtual_packages": []
+        },
+        {
+          "name": "win-64",
+          "subdir": "win-64",
+          "virtual_packages": []
+        }
+      ],
+      "resolved_platform": {
+        "name": "win-64",
+        "subdir": "win-64",
+        "virtual_packages": [
+          "archspec=x86_64",
+          "windows=10.0"
+        ]
+      },
+      "minimum_supported_platform": {
+        "name": "win-64",
+        "subdir": "win-64",
+        "virtual_packages": [
+          "__win"
+        ]
+      },
+      "tasks": [],
+      "channels": [
+        "conda-forge"
+      ],
+      "prefix": "<HOME>\\AppData\\Local\\Temp\\pp-multi\\.pixi\\envs\\default"
+    },
+    {
+      "name": "test",
+      "features": [
+        "test",
+        "default"
+      ],
+      "solve_group": null,
+      "environment_size": null,
+      "dependencies": [
+        "python",
+        "pytest"
+      ],
+      "pypi_dependencies": [
+        "requests"
+      ],
+      "platforms": [
+        {
+          "name": "linux-64",
+          "subdir": "linux-64",
+          "virtual_packages": []
+        },
+        {
+          "name": "win-64",
+          "subdir": "win-64",
+          "virtual_packages": []
+        }
+      ],
+      "resolved_platform": {
+        "name": "win-64",
+        "subdir": "win-64",
+        "virtual_packages": [
+          "archspec=x86_64",
+          "windows=10.0"
+        ]
+      },
+      "minimum_supported_platform": {
+        "name": "win-64",
+        "subdir": "win-64",
+        "virtual_packages": [
+          "__win"
+        ]
+      },
+      "tasks": [],
+      "channels": [
+        "conda-forge"
+      ],
+      "prefix": "<HOME>\\AppData\\Local\\Temp\\pp-multi\\.pixi\\envs\\test"
+    }
+  ],
+  "config_locations": []
+}

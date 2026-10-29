@@ -128,6 +128,12 @@ pub async fn run<S: MetadataSource>(
     }
     println!();
 
+    // --- pixi: environments, platforms, lock ---
+    let mut extra_findings = Vec::new();
+    if let Some(pixi) = crate::core::pixi::detect(workspace) {
+        extra_findings.extend(print_pixi(&pixi, workspace).await);
+    }
+
     // --- Compatibility ---
     if let Some(compat) = &a.compat {
         println!(
@@ -176,10 +182,12 @@ pub async fn run<S: MetadataSource>(
             .bold()
             .cyan()
     );
-    if a.findings.is_empty() {
+    let findings: Vec<&crate::core::Finding> =
+        a.findings.iter().chain(extra_findings.iter()).collect();
+    if findings.is_empty() {
         println!("  {} Everything looks good.", "✓".green().bold());
     } else {
-        for f in &a.findings {
+        for f in findings {
             let tag = match f.severity {
                 Severity::Error => "[ERROR]".red().bold(),
                 Severity::Warning => "[WARN ]".yellow().bold(),
@@ -195,6 +203,88 @@ pub async fn run<S: MetadataSource>(
     crate::core::rescan::notify(workspace, crate::core::rescan::Kind::Doctor);
 
     Ok(())
+}
+
+/// The pixi section: each environment with its Python and key packages, the
+/// declared platforms, and whether `pixi.lock` is current. The lock check
+/// runs `pixi lock --check --dry-run`, which writes nothing; its finding is
+/// returned for the Findings list (the rest come from the assessment).
+async fn print_pixi(
+    project: &crate::core::pixi::PixiProject,
+    workspace: &Path,
+) -> Option<crate::core::Finding> {
+    use crate::core::pixi_envs::{self, LockStatus};
+
+    println!(
+        "{}",
+        "── pixi ─────────────────────────────────────────────────"
+            .bold()
+            .cyan()
+    );
+    if !project.platforms.is_empty() {
+        println!("  {:<16}: {}", "platforms", project.platforms.join(", "));
+    }
+    let status = pixi_envs::lock_status(&project.root).await;
+    let lock = match &status {
+        LockStatus::Missing => "missing".yellow().to_string(),
+        LockStatus::UpToDate => "up to date".green().to_string(),
+        LockStatus::Stale { changes } => format!("out of date ({} changes)", changes.len())
+            .yellow()
+            .bold()
+            .to_string(),
+        LockStatus::Unsolvable { .. } => "out of date, manifest does not solve"
+            .red()
+            .bold()
+            .to_string(),
+        LockStatus::Unknown => "not checked (pixi not found)".to_string(),
+    };
+    println!("  {:<16}: {lock}", "pixi.lock");
+
+    let selected = pixi_envs::selected(project, workspace);
+    println!("  {:<16}:", "environments");
+    for env in pixi_envs::reports(project, &selected) {
+        println!("    {} {}", "•".cyan(), env_line(&env));
+    }
+    println!();
+    pixi_envs::lock_finding(project, &status)
+}
+
+/// `default (selected)  Python 3.12 (installed)  conda: numpy · pypi: requests`.
+fn env_line(env: &crate::core::pixi_envs::EnvReport) -> String {
+    const KEY_PACKAGES: usize = 6;
+    let short = |names: &[String]| {
+        let mut list = names
+            .iter()
+            .take(KEY_PACKAGES)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        if names.len() > KEY_PACKAGES {
+            list.push_str(&format!(" +{}", names.len() - KEY_PACKAGES));
+        }
+        list
+    };
+    let mut name = env.name.bold().to_string();
+    if env.selected {
+        name.push_str(&" (selected)".cyan().to_string());
+    }
+    let python = match (env.python, env.installed) {
+        (Some(py), true) => format!("Python {py}").green().bold().to_string(),
+        (Some(py), false) => format!("Python {py} (not installed)").yellow().to_string(),
+        (None, true) => "no Python".yellow().to_string(),
+        (None, false) => "not installed".yellow().to_string(),
+    };
+    let mut parts = vec![name, python];
+    if !env.features.is_empty() {
+        parts.push(format!("features: {}", env.features.join(", ")));
+    }
+    if !env.conda.is_empty() {
+        parts.push(format!("conda: {}", short(&env.conda)));
+    }
+    if !env.pypi.is_empty() {
+        parts.push(format!("pypi: {}", short(&env.pypi)));
+    }
+    parts.join("  ")
 }
 
 /// The project's dependencies for the report. A pixi project has two kinds,
