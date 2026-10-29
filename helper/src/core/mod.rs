@@ -40,7 +40,9 @@ pub mod uv;
 use crate::pypi::{CompatReport, PyVersion};
 
 /// Severity of a finding — drives toast styling and doctor output ordering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Serialized as `"error"`, `"warning"`, `"info"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     /// Blocks installation entirely (empty intersection, incompatible interpreter).
     Error,
@@ -52,7 +54,11 @@ pub enum Severity {
 
 /// A machine-actionable fix a finding can carry. Both the CLI and the LSP
 /// `executeCommand` map onto these — they call the exact same code.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Serialized as `{"kind": "setup_environment"}`, or
+/// `{"kind": "recreate_with_python", "python": "3.12"}`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", content = "python", rename_all = "snake_case")]
 pub enum FixKind {
     /// Run the full F1 bootstrap (install uv → Python → venv → deps).
     SetupEnvironment,
@@ -72,7 +78,7 @@ pub enum FixKind {
 
 /// One finding: a problem plus the *why* and an optional fix. Every user-facing
 /// message states which package constrained the decision.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Finding {
     pub severity: Severity,
     pub title: String,
@@ -113,5 +119,50 @@ impl Assessment {
                 Severity::Warning => 1,
                 Severity::Info => 2,
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `--json` contract: these names are what scripts and bug reports read.
+    #[test]
+    fn findings_serialize_with_stable_names() {
+        let f = Finding {
+            severity: Severity::Error,
+            title: "t".into(),
+            detail: "d".into(),
+            fix: FixKind::RecreateWithPython(PyVersion::py3(12)),
+        };
+        assert_eq!(
+            serde_json::to_value(&f).unwrap(),
+            serde_json::json!({
+                "severity": "error",
+                "title": "t",
+                "detail": "d",
+                "fix": {"kind": "recreate_with_python", "python": "3.12"},
+            })
+        );
+        let kinds = [
+            FixKind::SetupEnvironment,
+            FixKind::MigrateConda,
+            FixKind::MigrateToPixi,
+            FixKind::Manual,
+        ]
+        .map(|k| serde_json::to_value(k).unwrap()["kind"].clone());
+        assert_eq!(
+            kinds,
+            [
+                "setup_environment",
+                "migrate_conda",
+                "migrate_to_pixi",
+                "manual"
+            ]
+        );
+        assert_eq!(
+            serde_json::to_value(Severity::Warning).unwrap(),
+            serde_json::json!("warning")
+        );
     }
 }

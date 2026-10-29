@@ -47,8 +47,10 @@ pub enum PackageManager {
     Pixi,
 }
 
-/// Resolved operational mode for PyPilot operations.
+/// Resolved operational mode for PyPilot operations. Never read from a
+/// settings file; serialized (`"uv_full"`) only for `--json` reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ResolvedMode {
     /// Full uv project mode (pyproject.toml + uv.lock + uv init/add/sync).
     UvFull,

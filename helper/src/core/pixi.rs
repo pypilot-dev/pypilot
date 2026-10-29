@@ -34,7 +34,7 @@ pub enum ManifestFormat {
 }
 
 /// A conda dependency as declared: a package name and its raw match spec.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct CondaDep {
     pub name: String,
     /// The conda match spec as written (`"3.12.*"`, `">=1.26,<2"`, `"*"`).

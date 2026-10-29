@@ -32,6 +32,7 @@ pub mod core;
 pub mod lsp;
 pub mod matrix;
 pub mod pypi;
+pub mod report;
 pub mod settings;
 
 /// Crate-wide result alias.
