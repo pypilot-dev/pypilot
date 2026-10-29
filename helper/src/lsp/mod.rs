@@ -18,8 +18,10 @@
 //! [`crate::core::rescan`]); a watcher polls it and re-raises the notification,
 //! which is how a terminal command surfaces in the editor.
 
+mod analysis;
 mod diagnostics;
 mod pixi;
+mod workspace_scan;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -33,8 +35,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use crate::core::platform::Platform;
 use crate::core::{
-    env, guardian, imports, install, project, pyright, rescan, setup, solver, Assessment, FixKind,
-    Severity,
+    imports, install, project, pyright, rescan, setup, solver, Assessment, FixKind, Severity,
 };
 use crate::pypi::pyversion::PyVersion;
 use crate::pypi::PyPiClient;
@@ -101,6 +102,8 @@ struct Shared {
     /// what is selected, and a notebook selection never spans cells, so the
     /// whole-file and whole-notebook actions are built from this instead.
     published: Mutex<HashMap<Url, Vec<Diagnostic>>>,
+    /// The workspace-wide diagnostics (`diagnosticsScope = "workspace"`).
+    workspace: Mutex<workspace_scan::State>,
     source: PyPiClient,
 }
 
@@ -122,6 +125,13 @@ impl LanguageServer for Backend {
         if let Some(options) = &params.initialization_options {
             crate::settings::set_editor_settings(options);
         }
+        self.shared.workspace.lock().await.can_watch = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|w| w.did_change_watched_files.as_ref())
+            .and_then(|w| w.dynamic_registration)
+            .unwrap_or(false);
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -163,8 +173,11 @@ impl LanguageServer for Backend {
         // one of those slots for as long as the toast stays unanswered.
         let shared = self.shared.clone();
         tokio::spawn(async move {
-            scan_and_notify(&shared.client, &shared.source, &root, false).await;
+            if scan_and_notify(&shared.client, &shared.source, &root, false).await {
+                refresh_all_buffers(shared).await;
+            }
         });
+        tokio::spawn(workspace_scan::apply_scope(self.shared.clone()));
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -179,6 +192,7 @@ impl LanguageServer for Backend {
             .lock()
             .await
             .insert(uri.clone(), document);
+        workspace_scan::on_open(&self.shared, &uri).await;
         run_guardian(self.shared.clone(), uri).await;
     }
 
@@ -234,7 +248,9 @@ impl LanguageServer for Backend {
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         // VS Code sends `{ pypilot: { pixiEnvironment, packageManager, ... } }`
         // once after startup and on every change. A new pixi environment
-        // changes what is installed, so re-check the open buffers.
+        // changes what is installed, so re-check the open buffers (and, in
+        // workspace mode, the rest; a new `diagnosticsScope` starts or clears
+        // that scan).
         crate::settings::set_editor_settings(&params.settings);
         tokio::spawn(refresh_all_buffers(self.shared.clone()));
     }
@@ -247,8 +263,19 @@ impl LanguageServer for Backend {
         // Clear our squiggles so they do not outlive the buffer.
         self.shared
             .client
-            .publish_diagnostics(uri, vec![], None)
+            .publish_diagnostics(uri.clone(), vec![], None)
             .await;
+        // In workspace mode the file on disk speaks for it again.
+        workspace_scan::on_close(self.shared.clone(), &uri).await;
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        let paths = params
+            .changes
+            .into_iter()
+            .filter_map(|c| c.uri.to_file_path().ok())
+            .collect();
+        workspace_scan::schedule_paths(self.shared.clone(), paths).await;
     }
 
     async fn code_action(&self, params: CodeActionParams) -> RpcResult<Option<CodeActionResponse>> {
@@ -295,7 +322,11 @@ impl LanguageServer for Backend {
         // ignores the result; the VS Code extension reads it so that a failed
         // setup is not reported as a success.
         let ok = match params.command.as_str() {
-            CMD_FIX => Some(run_fix(client, &self.shared.source, &root).await),
+            CMD_FIX => {
+                let ok = run_fix(client, &self.shared.source, &root).await;
+                tokio::spawn(refresh_all_buffers(self.shared.clone()));
+                Some(ok)
+            }
             CMD_DETAILS => {
                 // An optional package argument adds a `pypilot check` section,
                 // which is how the VS Code "check package" command uses this.
@@ -383,43 +414,14 @@ async fn run_guardian(shared: Arc<Shared>, uri: Url) {
         return;
     }
 
-    // Everything here is local except the PyPI lookups, which are cached and
-    // only happen for imports that are neither stdlib, local, nor installed.
-    // The project's environment: its `.venv`, or its pixi prefix.
-    let env = env::project_env(&root);
-    // An environment whose Python is gone can't import anything, so
-    // per-import verdicts against it would be wrong either way. The
-    // workspace scan reports it once, with the rebuild fix; until then, stay
-    // quiet here.
-    let findings = if env.as_ref().is_some_and(|e| e.broken.is_some()) {
-        Vec::new()
-    } else {
-        let installed = env::importable(&root, env.as_ref());
-        let venv_python = env.as_ref().and_then(|e| e.python);
-        let venv = env.map(|e| e.path).unwrap_or_else(|| root.join(".venv"));
-
-        let mut findings = guardian::analyze_buffer_in(
-            &text,
-            &root,
-            path.as_deref().and_then(Path::parent),
-            Platform::current(),
-            venv_python,
-            &installed,
-            &shared.source,
-        )
-        .await;
-
-        // Packages that are installed still have to expose what the file uses.
-        // Purely local, so this costs a directory listing rather than a request.
-        findings.extend(guardian::check_attributes(&text, &venv, &installed));
-        findings
-    };
-
-    let pixi = crate::core::pixi::detect(&root).is_some();
-    let published: Vec<Diagnostic> = findings
-        .iter()
-        .map(|f| diagnostics::to_diagnostic_in(f, pixi))
-        .collect();
+    let snapshot = analysis::EnvSnapshot::read(&root);
+    let published = analysis::diagnose(
+        &snapshot,
+        &text,
+        path.as_deref().and_then(Path::parent),
+        &shared.source,
+    )
+    .await;
     {
         // Closed while the analysis ran: storing would leak the entry and
         // publishing would bring back squiggles did_close just cleared.
@@ -459,6 +461,7 @@ async fn refresh_all_buffers(shared: Arc<Shared>) {
     for uri in uris {
         run_guardian(shared.clone(), uri).await;
     }
+    workspace_scan::apply_scope(shared).await;
 }
 
 /// Validate the requested names, telling the user which one was refused.
@@ -720,7 +723,13 @@ async fn watch_rescan_requests(shared: Arc<Shared>, root: PathBuf) {
 
 /// The workspace scan. `explicit` means the user asked, which lifts the silence
 /// rules and turns a clean result into a confirmation instead of nothing.
-async fn scan_and_notify(client: &Client, source: &PyPiClient, root: &Path, explicit: bool) {
+/// Returns whether the user's answer changed the environment.
+async fn scan_and_notify(
+    client: &Client,
+    source: &PyPiClient,
+    root: &Path,
+    explicit: bool,
+) -> bool {
     let settings = Settings::load(root);
 
     if !explicit
@@ -728,7 +737,7 @@ async fn scan_and_notify(client: &Client, source: &PyPiClient, root: &Path, expl
             || settings.dismissed
             || !settings.auto_check_on_open)
     {
-        return;
+        return false;
     }
 
     let assessment = solver::assess(root, &settings, source).await;
@@ -742,7 +751,7 @@ async fn scan_and_notify(client: &Client, source: &PyPiClient, root: &Path, expl
                 )
                 .await;
         }
-        return;
+        return false;
     }
 
     // "problems-only" (the default) only raises a toast for Warning/Error, per
@@ -762,7 +771,7 @@ async fn scan_and_notify(client: &Client, source: &PyPiClient, root: &Path, expl
                 .show_message(MessageType::INFO, all_good_summary(&assessment))
                 .await;
         }
-        return;
+        return false;
     }
 
     let mut actions = vec![
@@ -791,12 +800,15 @@ async fn scan_and_notify(client: &Client, source: &PyPiClient, root: &Path, expl
     match chosen.as_ref().map(|a| a.title.as_str()) {
         Some(BTN_FIX) => {
             run_fix(client, source, root).await;
+            return true;
         }
         Some(BTN_DETAILS) => show_details(client, source, root, None).await,
         Some(BTN_NEVER) => mark_never(client, root).await,
+        // The migration's own install leaves a rescan request behind.
         Some(BTN_PIXI) => run_migrate_to_pixi(client, root, &[]).await,
         _ => {}
     }
+    false
 }
 
 /// Does the toast offer "Initialize pixi project"? Only for a pixi finding
@@ -1270,18 +1282,23 @@ pub fn run_stdio() {
     rt.block_on(async {
         let stdin = tokio::io::stdin();
         let stdout = tokio::io::stdout();
-        let (service, socket) = LspService::new(|client| Backend {
-            shared: Arc::new(Shared {
-                client,
-                root: Mutex::new(None),
-                documents: Mutex::new(HashMap::new()),
-                revisions: Mutex::new(HashMap::new()),
-                published: Mutex::new(HashMap::new()),
-                source: PyPiClient::new(),
-            }),
-        });
+        let (service, socket) = service(PyPiClient::new());
         Server::new(stdin, stdout, socket).serve(service).await;
     });
+}
+
+fn service(source: PyPiClient) -> (LspService<Backend>, tower_lsp::ClientSocket) {
+    LspService::new(|client| Backend {
+        shared: Arc::new(Shared {
+            client,
+            root: Mutex::new(None),
+            documents: Mutex::new(HashMap::new()),
+            revisions: Mutex::new(HashMap::new()),
+            published: Mutex::new(HashMap::new()),
+            workspace: Mutex::new(Default::default()),
+            source,
+        }),
+    })
 }
 
 #[cfg(test)]
