@@ -41,13 +41,13 @@ jobs:
         run: cargo fmt --manifest-path helper/Cargo.toml -- --check
 
       - name: Clippy
-        run: cargo clippy -p pypilot-helper --target ${{ matrix.target }} -- -D warnings
+        run: cargo clippy -p pypilot-helper --locked --target ${{ matrix.target }} -- -D warnings
 
       - name: Build helper
-        run: cargo build -p pypilot-helper --release --target ${{ matrix.target }}
+        run: cargo build -p pypilot-helper --release --locked --target ${{ matrix.target }}
 
       - name: Test helper
-        run: cargo test -p pypilot-helper --target ${{ matrix.target }}
+        run: cargo test -p pypilot-helper --locked --target ${{ matrix.target }}
 
   extension:
     name: WASM shim
@@ -60,4 +60,4 @@ jobs:
           targets: wasm32-wasip2
       - uses: Swatinem/rust-cache@v2
       - name: Build extension (wasm)
-        run: cargo build -p pypilot-zed --target wasm32-wasip2 --release
+        run: cargo build -p pypilot-zed --target wasm32-wasip2 --release --locked
