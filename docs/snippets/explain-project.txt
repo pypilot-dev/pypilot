@@ -1,11 +1,11 @@
-PyPilot explain — C:\src\demo
+PyPilot explain: C:\src\demo
   platform        : Windows x64
   supported       : 3.12
   recommended     : Python 3.12
 
 ── Dependencies ────────────────────────────────────────
   package    version      requires-python  supported
-  mediapipe  0.10.14      —                3.9–3.12
+  mediapipe  0.10.14      not declared     3.9–3.12
   numpy      2.5.4        >=3.12           3.12–3.15
 
 ── Python versions ─────────────────────────────────────

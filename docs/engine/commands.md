@@ -1,6 +1,6 @@
 # Command reference
 
-Every mode and flag of engine 1.3.0. Items marked <Badge type="tip" text="1.3" /> are new in 1.3.0; 1.2.2 and older have the rest. Output below was captured on Windows x64, with a build of `main` from just before the 1.3.0 version bump (so it still reports 1.2.2), an NVIDIA RTX A5000 laptop GPU and uv 0.13.5; project paths are shortened to `C:\src\…`. On your machine the versions PyPI reports will differ.
+Every mode and flag of engine 1.3.0. Items marked <Badge type="tip" text="1.3" /> are new in 1.3.0; 1.2.2 and older have the rest. Output below was captured with engine 1.3.0 on Windows x64, with an NVIDIA RTX A5000 laptop GPU and uv 0.13.5; project paths are shortened to `C:\src\…`. On your machine the versions PyPI reports will differ.
 
 ```text
 pypilot <MODE> [ARG] [--path <dir>]

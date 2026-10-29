@@ -1,4 +1,4 @@
-PyPilot explain — mediapipe (v0.10.14)
+PyPilot explain: mediapipe (v0.10.14)
   requirement     : mediapipe==0.10.14
   release         : 0.10.14, newest release matching `==0.10.14` (latest is 1.2.0)
   requires-python : not declared (allows 3.7–3.15)
@@ -11,7 +11,7 @@ PyPilot explain — mediapipe (v0.10.14)
   macOS x64       3.9–3.12    3.9–3.12    cp39 cp310 cp311 cp312
   macOS arm64     3.9–3.12    3.9–3.12    cp39 cp310 cp311 cp312
 ▸ Windows x64     3.9–3.12    3.9–3.12    cp39 cp310 cp311 cp312
-  Windows arm64   none        none        —
+  Windows arm64   none        none        none
 
 ── Python versions on Windows x64 ──────────────────────
   Python  3.7   3.8   3.9   3.10  3.11  3.12  3.13  3.14  3.15

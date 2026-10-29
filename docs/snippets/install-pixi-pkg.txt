@@ -1,5 +1,5 @@
-PyPilot install — Installing httpx...
+PyPilot install: installing httpx...
 ── Steps ────────────────────────────────────────────────
-  ✓ pixi add --pypi httpx    — added to the pixi manifest and installed
+  ✓ pixi add --pypi httpx:    added to the pixi manifest and installed
 
   ✓ Done. Successfully installed httpx.

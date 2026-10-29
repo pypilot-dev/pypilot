@@ -80,7 +80,7 @@ fn print_text(r: &CheckReport, suggest_alternatives: bool) {
     let analysis = &r.analysis;
     println!(
         "{} {} ({})",
-        "PyPilot check —".bold().cyan(),
+        "PyPilot check:".bold().cyan(),
         analysis.name.bold(),
         format!("v{}", analysis.version).cyan()
     );

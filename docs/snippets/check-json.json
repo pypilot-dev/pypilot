@@ -1,5 +1,5 @@
 {
-  "pypilot": "1.2.2",
+  "pypilot": "1.3.0",
   "command": "check",
   "ok": true,
   "requirement": "mediapipe==0.10.14",

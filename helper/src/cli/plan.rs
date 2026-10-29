@@ -54,7 +54,7 @@ pub fn finish(
 
 fn print_text(command: &str, workspace: &Path, plan: &Plan) {
     println!(
-        "{} — {} ({} mode, {})",
+        "{}: {} ({} mode, {})",
         format!("PyPilot {command} --dry-run").bold().cyan(),
         workspace.display(),
         exec::mode_name(plan.mode).bold(),

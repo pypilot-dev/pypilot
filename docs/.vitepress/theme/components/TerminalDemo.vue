@@ -119,7 +119,7 @@ const caretOnCmd = computed(() => typed.value < props.cmd.length || (running.val
 </script>
 
 <template>
-  <figure ref="root" class="term" :aria-label="`${cmd} — example output`">
+  <figure ref="root" class="term" :aria-label="`${cmd}: example output`">
     <div class="bar">
       <span class="dots"><i /><i /><i /></span>
       <span class="title">{{ title }}</span>

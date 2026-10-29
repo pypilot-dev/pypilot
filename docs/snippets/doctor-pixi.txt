@@ -1,4 +1,4 @@
-PyPilot doctor — C:\src\px
+PyPilot doctor: C:\src\px
   package manager : Auto
 
 ── Environment ──────────────────────────────────────────
@@ -6,6 +6,7 @@ PyPilot doctor — C:\src\px
   pixi env        : C:\src\px\.pixi\envs\default (Python 3.15)
   pixi project    : C:\src\px\pixi.toml
   interpreters    : 3.15 (python3), 3.14 (C:\Python314\python.exe)
+  data tables     : refreshed 3 hours ago (next in 6 days); 1 of 5 bundled
 
 ── Project ──────────────────────────────────────────────
   files           : requirements.txt, pixi.toml

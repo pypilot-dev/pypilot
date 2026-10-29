@@ -35,7 +35,7 @@ In uv mode PyPilot installs it with `uv python install`. In pip mode it never do
 
 ```text
   [ERROR] Dependencies conflict on Python version
-          tensorflow supports up to Python 3.10 but numpy requires at least Python 3.12 — no single interpreter satisfies both.
+          tensorflow supports up to Python 3.10 but numpy requires at least Python 3.12. No single interpreter satisfies both.
 ```
 
 There is no single Python to fix this with, so there is no auto-fix button. Run `pypilot explain` to see what blocks each version, then relax or change one pin (here `numpy<2.3`, or a newer tensorflow).

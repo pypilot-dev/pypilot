@@ -1,5 +1,5 @@
 {
-  "pypilot": "1.2.2",
+  "pypilot": "1.3.0",
   "command": "setup",
   "ok": true,
   "dry_run": true,
