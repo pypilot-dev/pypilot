@@ -176,6 +176,7 @@ The helper binary also runs directly in any shell:
 
 ```
 pypilot doctor            Inspect the environment and print a status report
+                          (--fix then runs setup, like the editor's Fix environment)
 pypilot setup             Configure the virtual environment and install dependencies
 pypilot check <package>   Check whether a package runs on the current Python version
                           (accepts a requirement, e.g. mediapipe==0.10.14)
@@ -185,15 +186,29 @@ pypilot install <pkg>     Install a package and update the project manifest
 pypilot fix python        Rebuild the virtual environment on a compatible Python version
 pypilot fix cuda          Re-pin torch and tensorflow to the system driver build
 pypilot update-data       Update the bundled driver and framework data tables
+                          (--check: compare with main without writing; exit 0 current,
+                          1 stale, 2 network error)
 pypilot migrate-conda     Convert environment.yml into pyproject.toml
                           (--to pixi: into pixi.toml; a preview unless --write)
 pypilot migrate-to-pixi   Preview a pixi.toml for this project (--write, --install,
                           --platform <p>)
 pypilot install-pixi      Install pixi with its official installer
+pypilot logs              Print the local log's path (--tail [N]: the last N entries)
+pypilot completions <sh>  Print a completion script (bash, zsh, fish, powershell)
+pypilot version           Engine version, commit, target and data tables
 pypilot lsp               Start the language server (launched automatically by Zed)
 ```
 
-Every mode but `lsp` takes `--json` (one stable JSON document on stdout, for scripts and bug reports) and `doctor` and `check` take `--markdown` (the editor's report, ready to paste into an issue). The JSON fields are listed in [USAGE.md](USAGE.md#json-output).
+Release 1.2.2 has `doctor`, `setup`, `check`, `install`, `fix`, `update-data`, `migrate-conda` and `lsp`. The rest, and the options below, come in the next release.
+
+- `--json` on every mode but `lsp`: one stable JSON document on stdout, for scripts and bug reports. Fields are only ever added, never renamed or removed; they are listed in [USAGE.md](USAGE.md#json-output).
+- `--markdown` on `doctor` and `check`: the editor's report, ready to paste into an issue.
+- `--dry-run` on `setup`, `install`, `fix python`, `fix cuda` and `doctor --fix`: prints every command it would run and every file it would change, with the reason, and changes nothing. The plan comes from the same code path as the real run.
+- `explain` shows why a package or the project is limited to the Pythons it is.
+- `logs`: every CLI command and editor action appends one JSON line to a local log (rotated at 1 MB, secrets masked, nothing sent anywhere; `PYPILOT_NO_LOG=1` turns it off).
+- `completions`, for example `source <(pypilot completions bash)`.
+
+More in [USAGE.md](USAGE.md) and the [command reference](https://pypilot-dev.github.io/pypilot/engine/commands).
 
 Running `pypilot doctor` or `pypilot setup` from a Zed task also writes a request file to the cache directory. The running language server reads this file and presents the results as interactive editor notifications.
 
@@ -206,11 +221,25 @@ package_manager    = "uv"             # "auto", "uv", "uv-pip", "pip" or "pixi".
 notifications      = "problems-only"  # "all", "problems-only", or "off"
 auto_check_on_open = true
 data_refresh_days  = 7                # Set to 0 to disable network updates.
+pixi_environment   = "default"        # pixi projects: which .pixi/envs/<name> (next release)
+diagnostics_scope  = "openFiles"      # or "workspace" (next release)
 ```
 
 - `package_manager`: Selects how PyPilot manages the environment. `auto` (the default) uses uv when it is installed and pip otherwise; `uv` is a uv project (`pyproject.toml` + `uv.lock`); `uv-pip` is uv's pip interface on `requirements.txt`; `pip` is `python -m venv` + pip; `pixi` manages the project with pixi. In pip mode, PyPilot cannot download new Python interpreter versions automatically; if an incompatible version is detected, it informs you which Python version to install manually. A pixi project (a `pixi.toml` or `[tool.pixi.workspace]`) is always managed with pixi, whatever this says; with `pixi` on a project without a pixi manifest, setup first writes `pixi.toml` from the project's dependencies (as `pypilot migrate-to-pixi --write` does), then runs `pixi install`.
 - `notifications`: Controls alert frequency. `problems-only` warns about errors and version mismatches. `all` includes informational alerts like selected CUDA builds. `off` suppresses editor notifications. Diagnostics and code actions in active editor buffers remain enabled unless set to `off`.
 - `data_refresh_days`: The refresh interval for the bundled driver and framework matrices. PyPilot ships with embedded JSON tables for offline use. If a background check fails, it falls back to the embedded data.
+- `pixi_environment`: The pixi environment PyPilot treats as the project's (`--pixi-env <name>` overrides it for one run). Ignored outside pixi projects.
+- `diagnostics_scope`: `openFiles` checks imports in open files only. `workspace` also scans the project's `.py` files and notebooks in the background (skipping virtual environments, build directories and whatever `.gitignore` excludes), so problems show up for files you have not opened.
+
+All settings: [configuration reference](https://pypilot-dev.github.io/pypilot/reference/configuration).
+
+## Other editors
+
+`pypilot lsp` is a plain LSP server over stdio. [helper/src/lsp/PROTOCOL.md](helper/src/lsp/PROTOCOL.md) documents everything an editor integration needs (settings, commands, messages, diagnostics, code actions), with snippets for Neovim, Helix and Emacs.
+
+## Release integrity
+
+*(next release)* Each release carries `SHA256SUMS` for its four archives, a CycloneDX SBOM of the engine (`pypilot-helper.cdx.json`) and GitHub build-provenance attestations, so a download can be checked with `sha256sum -c SHA256SUMS --ignore-missing` or `gh attestation verify <file> -R pypilot-dev/pypilot`. The VS Code extension and the `pypilot-cli` package pin one engine release and its hashes and refuse a download that does not match. See [Security & release integrity](https://pypilot-dev.github.io/pypilot/guide/security).
 
 ## Building from source
 
