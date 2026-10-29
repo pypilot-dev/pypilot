@@ -408,3 +408,21 @@ fn win32_wheels_do_not_count_on_64_bit_windows() {
     assert_nothing_installs(&a, WIN_X64);
     assert_eq!(a.wheel_platforms, ["Windows x86"]);
 }
+
+/// onnxruntime ships free-threaded `cp313t`/`cp314t` wheels on Linux only.
+/// Those load into the free-threaded interpreter alone, so with the regular
+/// cp314 wheel removed, 3.14 is no longer supported on Linux even though a
+/// `cp314-cp314t` file remains.
+#[test]
+fn free_threaded_wheels_do_not_stand_in_for_the_gil_build() {
+    let mut meta = fixture("onnxruntime-1.31.1.json");
+    meta.urls.retain(|f| !f.filename.contains("-cp314-cp314-"));
+    for p in [LINUX_X64, LINUX_ARM64] {
+        assert_wheels(&meta.analyze(&p), p, "3.11–3.13");
+    }
+
+    // Free-threaded wheels alone, no sdist: nothing installs.
+    meta.urls.retain(|f| f.filename.contains("t-manylinux"));
+    assert!(!meta.urls.is_empty());
+    assert_nothing_installs(&meta.analyze(&LINUX_X64), LINUX_X64);
+}

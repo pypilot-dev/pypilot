@@ -811,7 +811,10 @@ mod tests {
             ],
         );
         let e = explain(&m);
-        assert_eq!(e.platforms[0].tags, vec!["cp313", "cp314t"]);
+        // Neither the free-threaded nor the PyPy wheel loads into the
+        // default CPython build, so neither is listed or counted.
+        assert_eq!(e.platforms[0].tags, vec!["cp313"]);
+        assert_eq!(e.platforms[0].wheel_pythons, vec!["3.13"]);
     }
 
     #[test]
