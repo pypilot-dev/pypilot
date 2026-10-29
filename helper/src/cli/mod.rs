@@ -5,6 +5,7 @@
 //! the terminal and the editor cannot disagree about what a command does.
 
 mod check;
+pub mod completions;
 mod doctor;
 mod explain;
 mod fix;

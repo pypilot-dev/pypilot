@@ -72,6 +72,13 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        "completions" => match cli::completions::run(&rest) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("pypilot completions: {e}");
+                ExitCode::FAILURE
+            }
+        },
         "--version" | "-V" | "version" => {
             println!("pypilot {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -110,6 +117,7 @@ fn print_help() {
          \x20   install-pixi      Install pixi with its official installer\n\
          \x20   logs              Print the local log's path (--tail [N]: the last N\n\
          \x20                     entries, --json: raw JSON lines)\n\
+         \x20   completions <sh>  Print a completion script (bash, zsh, fish, powershell)\n\
          \x20   lsp               Run as an LSP server over stdio, used by the Zed extension\n\n\
          OPTIONS:\n\
          \x20   --path <dir>       Workspace directory to analyze (default: current dir)\n\
