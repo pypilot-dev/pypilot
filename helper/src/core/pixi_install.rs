@@ -29,7 +29,7 @@ pub const INSTALL_SH_URL: &str = "https://pixi.sh/install.sh";
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// A working pixi after [`install`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PixiInstall {
     pub path: PathBuf,
     pub version: String,

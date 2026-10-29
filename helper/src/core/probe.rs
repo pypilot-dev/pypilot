@@ -15,7 +15,7 @@ use crate::settings::Settings;
 
 /// The project's environment: a virtual environment, or the pixi prefix of a
 /// pixi project (see [`crate::core::env`]).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct VenvInfo {
     pub path: PathBuf,
     /// Interpreter version recorded in `pyvenv.cfg` (or a pixi prefix's

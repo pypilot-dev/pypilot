@@ -27,7 +27,7 @@ use crate::core::project::Requirement;
 use crate::pypi::version::VersionSpec;
 
 /// A pair of packages whose supported-Python sets don't overlap.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ConflictPair {
     pub low: PackageAnalysis,
     pub high: PackageAnalysis,

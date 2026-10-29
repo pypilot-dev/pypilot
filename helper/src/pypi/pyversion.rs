@@ -63,6 +63,13 @@ impl PyVersion {
     }
 }
 
+/// `"3.12"`: how every report and the `--json` output write a version.
+impl serde::Serialize for PyVersion {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
 impl fmt::Display for PyVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}.{}", self.major, self.minor)
@@ -164,6 +171,13 @@ impl PyVersionSet {
             })
             .collect::<Vec<_>>()
             .join(", ")
+    }
+}
+
+/// `["3.10", "3.11"]`, oldest first.
+impl serde::Serialize for PyVersionSet {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(self.iter())
     }
 }
 
@@ -332,6 +346,19 @@ mod tests {
         PyVersionSet {
             minors: minors.iter().copied().collect(),
         }
+    }
+
+    #[test]
+    fn versions_serialize_as_strings() {
+        assert_eq!(
+            serde_json::to_string(&PyVersion::py3(12)).unwrap(),
+            "\"3.12\""
+        );
+        assert_eq!(
+            serde_json::to_string(&set(&[10, 11, 13])).unwrap(),
+            r#"["3.10","3.11","3.13"]"#
+        );
+        assert_eq!(serde_json::to_string(&PyVersionSet::empty()).unwrap(), "[]");
     }
 
     #[test]
