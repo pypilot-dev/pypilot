@@ -154,19 +154,23 @@ tokio::task_local! {
 
 /// Run `fut` as `action`, then append its entry to the log. `outcome` maps the
 /// result to `(ok, error)`. The result is returned untouched.
-pub async fn scope<F, T>(
+///
+/// `fut` is boxed straight away: a whole CLI command is a large future, and
+/// keeping copies of it in this wrapper's state overflowed the main
+/// thread's stack in debug builds on Windows.
+pub fn scope<F, T>(
     action: Action,
     fut: F,
     outcome: impl FnOnce(&T) -> (bool, Option<String>),
-) -> T
+) -> impl Future<Output = T>
 where
     F: Future<Output = T>,
 {
-    scope_in(&log_dir(), action, fut, outcome).await
+    scope_in(log_dir(), action, Box::pin(fut), outcome)
 }
 
 async fn scope_in<F, T>(
-    dir: &Path,
+    dir: PathBuf,
     action: Action,
     fut: F,
     outcome: impl FnOnce(&T) -> (bool, Option<String>),
@@ -183,7 +187,7 @@ where
         .await;
     if let Some(action) = action {
         let (ok, error) = outcome(&result);
-        append(dir, &action.finish(ok, error));
+        append(&dir, &action.finish(ok, error));
     }
     result
 }
@@ -565,7 +569,7 @@ mod tests {
         let dir = scratch("scope");
         let action = Action::new("cli", "setup", &["--path".into(), "/p".into()]);
         let out = scope_in(
-            &dir,
+            dir.clone(),
             action,
             async {
                 note_context(Path::new("/p"), "auto");
