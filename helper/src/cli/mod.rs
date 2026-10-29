@@ -21,6 +21,11 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
     // The same project the editor works on, so a task run from a worktree whose
     // Python code lives in one subfolder sets up that subfolder's `.venv`.
     let workspace = crate::core::project::project_root(&workspace_from_args(args));
+    // `--pixi-env <name>`: which pixi environment is the project's, for this
+    // run only (doctor, setup and the rest all read it the same way).
+    if let Some(env) = flag_value(args, "--pixi-env") {
+        crate::core::pixi_envs::set_override(Some(&env));
+    }
     let settings = Settings::load(&workspace);
     let source = PyPiClient::new();
 
@@ -62,7 +67,7 @@ pub async fn dispatch(mode: &str, args: &[String]) -> crate::Result<()> {
 fn positional(args: &[String]) -> Option<String> {
     let mut iter = args.iter();
     while let Some(a) = iter.next() {
-        if a == "--path" || a == "-p" {
+        if a == "--path" || a == "-p" || a == "--pixi-env" {
             iter.next();
             continue;
         }
@@ -70,6 +75,20 @@ fn positional(args: &[String]) -> Option<String> {
             continue;
         }
         return Some(a.clone());
+    }
+    None
+}
+
+/// The value of `--<flag> <value>` or `--<flag>=<value>`.
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    let mut iter = args.iter();
+    while let Some(a) = iter.next() {
+        if a == flag {
+            return iter.next().cloned();
+        }
+        if let Some(v) = a.strip_prefix(flag).and_then(|r| r.strip_prefix('=')) {
+            return Some(v.to_string());
+        }
     }
     None
 }
@@ -108,6 +127,18 @@ mod tests {
             Some("mediapipe")
         );
         assert_eq!(positional(&v(&["--path", "/tmp/proj"])), None);
+    }
+
+    #[test]
+    fn pixi_env_flag() {
+        let args = v(&["--pixi-env", "test", "numpy"]);
+        assert_eq!(flag_value(&args, "--pixi-env").as_deref(), Some("test"));
+        assert_eq!(positional(&args).as_deref(), Some("numpy"));
+        assert_eq!(
+            flag_value(&v(&["--pixi-env=gpu"]), "--pixi-env").as_deref(),
+            Some("gpu")
+        );
+        assert_eq!(flag_value(&v(&["--path", "x"]), "--pixi-env"), None);
     }
 
     #[test]
