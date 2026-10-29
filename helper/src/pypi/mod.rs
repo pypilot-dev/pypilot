@@ -150,11 +150,11 @@ pub async fn analyze<S: MetadataSource>(
                 let analysis = meta.analyze(&platform);
                 match analysis.sdist_kind() {
                     Some(metadata::SdistKind::Native) => sdist_warnings.push(format!(
-                        "{} {} publishes wheels for other platforms but not yours — it will compile native code from source and needs a compiler toolchain.",
+                        "{} {} publishes wheels for other platforms but not yours, so it will compile native code from source and needs a compiler toolchain.",
                         analysis.name, analysis.version
                     )),
                     Some(metadata::SdistKind::Unknown) => sdist_warnings.push(format!(
-                        "{} {} publishes only a source distribution — it will build from source and may need a compiler if it has native extensions.",
+                        "{} {} publishes only a source distribution, so it will build from source and may need a compiler if it has native extensions.",
                         analysis.name, analysis.version
                     )),
                     None => {}
@@ -280,7 +280,7 @@ fn find_conflicts(packages: &[PackageAnalysis]) -> Vec<ConflictPair> {
     let high_floor = highest_min.supported.min();
     let explanation = match (low_cap, high_floor) {
         (Some(cap), Some(floor)) => format!(
-            "{} supports up to Python {} but {} requires at least Python {} — no single interpreter satisfies both.",
+            "{} supports up to Python {} but {} requires at least Python {}. No single interpreter satisfies both.",
             lowest_max.name, cap, highest_min.name, floor
         ),
         _ => format!(
@@ -302,7 +302,7 @@ fn degenerate_conflicts(packages: &[PackageAnalysis]) -> Vec<ConflictPair> {
     let anchor = packages.iter().max_by_key(|p| p.supported.len()).cloned();
     for p in packages.iter().filter(|p| p.supported.is_empty()) {
         let explanation = format!(
-            "{} {} has no installable distribution for your platform/Python — it constrains the project to nothing.",
+            "{} {} has no installable distribution for your platform/Python, so it constrains the project to nothing.",
             p.name, p.version
         );
         if let Some(anchor) = &anchor {

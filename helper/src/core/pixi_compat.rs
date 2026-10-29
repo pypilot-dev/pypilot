@@ -674,7 +674,7 @@ mod tests {
         );
         assert_eq!(
             f.detail,
-            "legacy supports up to Python 3.10 but shiny requires at least Python 3.11 — no single interpreter satisfies both. pixi cannot pick one Python for the environment, so `pixi add python=…` will not help; change or drop one of these PyPI dependencies. 1 PyPI dependency given as git, path or url was not checked."
+            "legacy supports up to Python 3.10 but shiny requires at least Python 3.11. No single interpreter satisfies both. pixi cannot pick one Python for the environment, so `pixi add python=…` will not help; change or drop one of these PyPI dependencies. 1 PyPI dependency given as git, path or url was not checked."
         );
     }
 
