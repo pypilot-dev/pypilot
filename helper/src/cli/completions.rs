@@ -79,6 +79,10 @@ pub const GLOBAL: &[Flag] = &[
     },
 ];
 
+const JSON: Flag = switch("--json", "Print the result as one JSON document");
+const MARKDOWN: Flag = switch("--markdown", "Print the Markdown report");
+const DRY_RUN: Flag = switch("--dry-run", "Show the steps without running them");
+
 const PIXI_WRITE: Flag = switch(
     "--write",
     "Write the pixi manifest instead of previewing it",
@@ -98,8 +102,8 @@ pub const COMMANDS: &[Cmd] = &[
         help: "Read-only environment and compatibility report",
         positional: Val::None,
         flags: &[
-            switch("--json", "Print the report as JSON"),
-            switch("--markdown", "Print the report as Markdown"),
+            JSON,
+            MARKDOWN,
             switch("--fix", "Apply the suggested fixes"),
             switch("--dry-run", "Show what --fix would run"),
         ],
@@ -110,7 +114,7 @@ pub const COMMANDS: &[Cmd] = &[
         aliases: &[],
         help: "Build the environment",
         positional: Val::None,
-        flags: &[switch("--dry-run", "Show the steps without running them")],
+        flags: &[DRY_RUN, JSON],
         project: true,
     },
     Cmd {
@@ -118,10 +122,14 @@ pub const COMMANDS: &[Cmd] = &[
         aliases: &[],
         help: "Can this package run on this project's Python",
         positional: Val::Text,
-        flags: &[switch(
-            "--suggest-alternatives",
-            "Show conda-forge alternatives even when it passes",
-        )],
+        flags: &[
+            switch(
+                "--suggest-alternatives",
+                "Show conda-forge alternatives even when it passes",
+            ),
+            JSON,
+            MARKDOWN,
+        ],
         project: true,
     },
     Cmd {
@@ -129,7 +137,7 @@ pub const COMMANDS: &[Cmd] = &[
         aliases: &[],
         help: "Why these Pythons",
         positional: Val::Text,
-        flags: &[switch("--json", "Print the explanation as JSON")],
+        flags: &[JSON],
         project: true,
     },
     Cmd {
@@ -137,7 +145,7 @@ pub const COMMANDS: &[Cmd] = &[
         aliases: &[],
         help: "Install one package and record it in the manifest",
         positional: Val::Text,
-        flags: &[],
+        flags: &[JSON],
         project: true,
     },
     Cmd {
@@ -145,7 +153,7 @@ pub const COMMANDS: &[Cmd] = &[
         aliases: &[],
         help: "Rebuild on the right Python, or re-pin the CUDA build",
         positional: Val::Choices(&["python", "cuda"]),
-        flags: &[switch("--dry-run", "Show the steps without running them")],
+        flags: &[DRY_RUN, JSON],
         project: true,
     },
     Cmd {
@@ -153,10 +161,7 @@ pub const COMMANDS: &[Cmd] = &[
         aliases: &[],
         help: "Refresh the data tables",
         positional: Val::None,
-        flags: &[
-            switch("--check", "Report staleness without writing"),
-            switch("--json", "Print the check as JSON"),
-        ],
+        flags: &[switch("--check", "Report staleness without writing"), JSON],
         project: false,
     },
     Cmd {
@@ -173,6 +178,7 @@ pub const COMMANDS: &[Cmd] = &[
             PIXI_WRITE,
             PIXI_INSTALL,
             PIXI_PLATFORM,
+            JSON,
         ],
         project: true,
     },
@@ -181,7 +187,7 @@ pub const COMMANDS: &[Cmd] = &[
         aliases: &[],
         help: "Preview or write a pixi.toml",
         positional: Val::None,
-        flags: &[PIXI_WRITE, PIXI_INSTALL, PIXI_PLATFORM],
+        flags: &[PIXI_WRITE, PIXI_INSTALL, PIXI_PLATFORM, JSON],
         project: true,
     },
     Cmd {
@@ -189,7 +195,7 @@ pub const COMMANDS: &[Cmd] = &[
         aliases: &[],
         help: "Install pixi with its official installer",
         positional: Val::None,
-        flags: &[],
+        flags: &[JSON],
         project: false,
     },
     Cmd {
@@ -217,7 +223,7 @@ pub const COMMANDS: &[Cmd] = &[
         help: "Engine version, commit, target and data tables",
         positional: Val::None,
         flags: &[
-            switch("--json", "Print as JSON"),
+            JSON,
             switch("--verbose", "Include commit, target and data tables"),
         ],
         project: false,
@@ -599,6 +605,9 @@ mod tests {
             ("doctor", "--path"),
             ("doctor", "--pixi-env"),
             ("explain", "--json"),
+            ("check", "--markdown"),
+            ("setup", "--json"),
+            ("install-pixi", "--json"),
             ("setup", "--dry-run"),
             ("fix", "--dry-run"),
             ("update-data", "--check"),
