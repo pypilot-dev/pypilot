@@ -123,8 +123,15 @@ pub fn scan(workspace: &Path) -> ProjectDeps {
     // Python nor PyPI packages (a C++ or Rust one) is still pixi's, but its
     // manifest alone does not make it a Python project: only Python or
     // notebook files next to it do, as for any folder (checked below).
+    //
+    // pixi installs what its manifest names and nothing else, so its PyPI
+    // dependencies replace the ones read above (pixi reads a pyproject's
+    // `[project.dependencies]` itself when that is its manifest). After
+    // `pypilot migrate-to-pixi`, requirements.txt stays for CI, but gdal in it
+    // now comes from conda-forge; reading it as a PyPI sdist would warn about
+    // a compile that never happens.
     if let Some(pixi) = crate::core::pixi::detect(workspace) {
-        names.extend(pixi.pypi_deps.iter().cloned());
+        names = pixi.pypi_deps.clone();
         if let Some(rp) = pixi
             .python
             .as_deref()
@@ -959,6 +966,22 @@ requests = "^2.31"
         assert_eq!(deps.conda_deps[0].name, "numpy");
         assert_eq!(deps.declared_requires_python.as_deref(), Some("==3.12.*"));
         assert_eq!(deps.pixi_python.as_deref(), Some("3.12.*"));
+    }
+
+    #[test]
+    fn a_pixi_project_checks_only_what_pixi_installs() {
+        // After `pypilot migrate-to-pixi`: requirements.txt stays for CI, but
+        // numpy and gdal now come from conda-forge.
+        let dir = fresh_dir("pypilot-scan-pixi-migrated");
+        std::fs::write(
+            dir.join("pixi.toml"),
+            include_str!("../../tests/fixtures/pixi/pixi-0.81-init.pixi.toml"),
+        )
+        .unwrap();
+        std::fs::write(dir.join("requirements.txt"), "numpy\ngdal\nrequests\n").unwrap();
+        let deps = scan(&dir);
+        assert_eq!(deps.packages, [req("requests", ">=2.34.2,<3")]);
+        assert_eq!(deps.conda_deps[0].name, "numpy");
     }
 
     #[test]
