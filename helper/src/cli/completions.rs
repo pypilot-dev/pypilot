@@ -145,7 +145,7 @@ pub const COMMANDS: &[Cmd] = &[
         aliases: &[],
         help: "Install one package and record it in the manifest",
         positional: Val::Text,
-        flags: &[JSON],
+        flags: &[DRY_RUN, JSON],
         project: true,
     },
     Cmd {
@@ -610,6 +610,7 @@ mod tests {
             ("install-pixi", "--json"),
             ("setup", "--dry-run"),
             ("fix", "--dry-run"),
+            ("install", "--dry-run"),
             ("update-data", "--check"),
             ("migrate-conda", "--to"),
             ("migrate-to-pixi", "--write"),
