@@ -124,7 +124,7 @@ What it does, by mode:
 
 | Mode | Steps |
 |---|---|
-| uv (`auto` with uv on `PATH`, or `uv`) | `uv init --bare` if there is no `pyproject.toml` (with `requires-python` and `.python-version` set to the chosen Python); `uv python install X.Y` if needed; `uv venv`; `uv add -r requirements.txt` when a requirements file exists, so its dependencies move into `pyproject.toml`. The chosen Python is pinned so a later `uv sync` keeps it. |
+| uv (`auto` with uv on `PATH`, or `uv`) | `uv init --bare` if there is no `pyproject.toml` (`.python-version` set to the chosen Python, `requires-python` lowered to the oldest Python every dependency supports, 3.9 at the lowest); `uv python install X.Y` if needed; `uv venv`; `uv add -r requirements.txt` when a requirements file exists, so its dependencies move into `pyproject.toml`. The chosen Python is pinned so a later `uv sync` keeps it. |
 | `uv-pip` | uv's pip interface on `requirements.txt`: `uv venv` + `uv pip install`; no `pyproject.toml` is created. |
 | `pip` (`auto` without uv, or `pip`) | `python -m venv` + `pip install`, then `pip freeze > requirements.txt`. It never downloads an interpreter: if the right Python is missing, it tells you which one to install. |
 | pixi project | `pixi install`. No `.venv`, no uv, `pixi.lock` is pixi's. |
