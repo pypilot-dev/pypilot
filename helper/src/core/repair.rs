@@ -157,7 +157,14 @@ pub async fn run_with_mode<S: MetadataSource>(
         mode
     };
     let assessment = solver::assess(workspace, settings, source).await;
-    let plan = plan(&assessment.findings);
+    // A stale pixi.lock is doctor's own check (`pixi lock --check`, too slow
+    // for every assessment), so ask for it here: `pixi install` fixes it.
+    let mut findings = assessment.findings.clone();
+    if let Some(project) = pixi::detect(workspace) {
+        let status = crate::core::pixi_envs::lock_status(workspace).await;
+        findings.extend(crate::core::pixi_envs::lock_finding(&project, &status));
+    }
+    let plan = plan(&findings);
     let env = Target::of(workspace, &assessment);
     let mut summary = SetupSummary {
         package_manager: settings.package_manager,
