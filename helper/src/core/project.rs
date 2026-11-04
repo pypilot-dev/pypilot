@@ -100,7 +100,17 @@ pub fn scan(workspace: &Path) -> ProjectDeps {
     let requirements = workspace.join("requirements.txt");
     if requirements.is_file() {
         if let Some(text) = read_manifest(&requirements) {
-            names.extend(parse_requirements(&text));
+            // pyproject.toml is the project's declaration: where both files
+            // name a package, its constraint is the one checked (and the one
+            // `uv sync` installs). A disagreement gets its own finding
+            // (`crate::core::manifests`).
+            let declared: std::collections::HashSet<String> =
+                names.iter().map(|r| r.name.clone()).collect();
+            names.extend(
+                parse_requirements(&text)
+                    .into_iter()
+                    .filter(|r| !declared.contains(&r.name)),
+            );
             deps.sources.push(requirements);
         }
     }
@@ -275,7 +285,7 @@ fn strip_inline_comment(line: &str) -> &str {
 /// a byte-order mark, and some editors prefix UTF-8 with one. A plain
 /// `read_to_string` rejects the first file outright and turns the second one's
 /// first package name into one that starts with an invisible character.
-fn read_manifest(path: &Path) -> Option<String> {
+pub(crate) fn read_manifest(path: &Path) -> Option<String> {
     decode_text(std::fs::read(path).ok()?)
 }
 
@@ -299,12 +309,12 @@ fn strip_extras(name: &str) -> &str {
     }
 }
 
-fn parse_requirements(text: &str) -> Vec<Requirement> {
+pub(crate) fn parse_requirements(text: &str) -> Vec<Requirement> {
     text.lines().filter_map(parse_requirement).collect()
 }
 
 /// Parse dependencies + requires-python from pyproject.toml (PEP 621 and Poetry).
-fn parse_pyproject(text: &str) -> (Vec<Requirement>, Option<String>) {
+pub(crate) fn parse_pyproject(text: &str) -> (Vec<Requirement>, Option<String>) {
     let mut names = Vec::new();
     let mut requires_python = None;
 
@@ -339,34 +349,35 @@ fn parse_pyproject(text: &str) -> (Vec<Requirement>, Option<String>) {
         }
     }
 
-    // Poetry: [tool.poetry.dependencies] — keys are names; a "python" key is the
-    // interpreter constraint, not a package.
-    if let Some(poetry) = doc
-        .get("tool")
-        .and_then(|t| t.get("poetry"))
+    // Poetry: [tool.poetry.dependencies], keyed by name; a "python" key is
+    // the interpreter constraint, not a package. The dev groups
+    // (`[tool.poetry.group.<name>.dependencies]`, and Poetry 1.1's
+    // `[tool.poetry.dev-dependencies]`) are installed by `poetry install` too.
+    let poetry = doc.get("tool").and_then(|t| t.get("poetry"));
+    if let Some(table) = poetry
         .and_then(|p| p.get("dependencies"))
         .and_then(|d| d.as_table())
     {
-        for key in poetry.keys() {
-            if key.eq_ignore_ascii_case("python") {
-                if requires_python.is_none() {
-                    if let Some(rp) = poetry.get(key).and_then(|v| v.as_str()) {
-                        requires_python = Some(caret_to_pep440(rp));
-                    }
-                }
-                continue;
-            }
-            let spec = poetry
-                .get(key)
-                .and_then(|v| v.as_str())
-                .map(caret_to_pep440)
-                .filter(|s| !s.is_empty() && s != "*")
-                .unwrap_or_default();
-            names.push(Requirement {
-                name: normalize_name(key),
-                spec,
-            });
+        if requires_python.is_none() {
+            requires_python = table
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("python"))
+                .and_then(|(_, v)| poetry_version(v))
+                .map(|v| poetry_to_pep440(&v));
         }
+        names.extend(poetry_table(table));
+    }
+    let groups = poetry
+        .and_then(|p| p.get("group"))
+        .and_then(|g| g.as_table())
+        .into_iter()
+        .flat_map(|g| g.values())
+        .filter_map(|g| g.get("dependencies").and_then(|d| d.as_table()));
+    let legacy_dev = poetry
+        .and_then(|p| p.get("dev-dependencies"))
+        .and_then(|d| d.as_table());
+    for table in groups.chain(legacy_dev) {
+        names.extend(poetry_table(table));
     }
 
     (names, requires_python)
@@ -402,6 +413,11 @@ fn parse_environment_yml(text: &str) -> (Vec<Requirement>, Option<String>) {
                     .next()
                     .unwrap_or("")
                     .trim();
+                // `- pip` asks conda for pip itself, so that the `pip:`
+                // block can run; it is no dependency of the project.
+                if name_part.eq_ignore_ascii_case("pip") {
+                    continue;
+                }
                 if name_part.eq_ignore_ascii_case("python") {
                     python = item
                         .split('=')
@@ -482,21 +498,92 @@ fn version_field(s: &str) -> &str {
     s.split('=').next().unwrap_or("").trim()
 }
 
-/// Convert a Poetry caret/tilde constraint to an approximate PEP 440 form.
-fn caret_to_pep440(spec: &str) -> String {
-    let s = spec.trim();
-    if let Some(v) = s.strip_prefix('^') {
-        // ^3.9 → >=3.9,<4 (major-locked); good enough for interpreter reasoning.
-        let major = v.split('.').next().unwrap_or("3");
-        format!(
-            ">={v},<{}",
-            major.parse::<u32>().map(|m| m + 1).unwrap_or(4)
-        )
-    } else if let Some(v) = s.strip_prefix('~') {
-        format!(">={v}")
-    } else {
-        s.to_string()
+/// The packages of one Poetry dependency table, `python` left out.
+fn poetry_table(table: &toml::map::Map<String, toml::Value>) -> Vec<Requirement> {
+    table
+        .iter()
+        .filter(|(k, _)| !k.eq_ignore_ascii_case("python"))
+        .map(|(key, value)| Requirement {
+            name: normalize_name(key),
+            spec: poetry_version(value)
+                .map(|v| poetry_to_pep440(&v))
+                .filter(|s| !s.is_empty() && s != "*")
+                .unwrap_or_default(),
+        })
+        .collect()
+}
+
+/// The version constraint of a Poetry dependency: the string itself, or the
+/// `version` key of its table form (`{ version = "^1.2", extras = [...] }`).
+/// A git, path or url dependency has none.
+pub(crate) fn poetry_version(value: &toml::Value) -> Option<String> {
+    match value {
+        toml::Value::String(s) => Some(s.clone()),
+        toml::Value::Table(t) => t.get("version").and_then(|v| v.as_str()).map(String::from),
+        _ => None,
     }
+}
+
+/// Convert a Poetry version constraint to PEP 440.
+///
+/// Poetry's caret allows changes that keep the left-most non-zero component
+/// (`^1.2.3` is `>=1.2.3,<2`, `^0.2.3` is `>=0.2.3,<0.3`), its tilde allows
+/// patch changes, or minor ones when only a major is given (`~1.2.3` is
+/// `>=1.2.3,<1.3`, `~1` is `>=1,<2`), and a bare version is an exact pin.
+/// Comma-separated clauses are converted one by one; `||` alternatives and
+/// PEP 440 operators are kept as written.
+pub(crate) fn poetry_to_pep440(spec: &str) -> String {
+    let s = spec.trim();
+    if s.contains("||") {
+        return s.to_string();
+    }
+    s.split(',')
+        .map(|clause| poetry_clause(clause.trim()))
+        .filter(|c| !c.is_empty())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn poetry_clause(clause: &str) -> String {
+    let parts = |v: &str| -> Option<Vec<u64>> {
+        v.trim()
+            .trim_end_matches(".*")
+            .split('.')
+            .map(|p| p.parse::<u64>().ok())
+            .collect()
+    };
+    let join = |p: &[u64]| p.iter().map(u64::to_string).collect::<Vec<_>>().join(".");
+    if let Some(v) = clause.strip_prefix('^') {
+        let v = v.trim();
+        let Some(p) = parts(v) else {
+            return format!(">={v}");
+        };
+        // Bump the left-most non-zero component; `^0.0.3` locks the patch.
+        let idx = p
+            .iter()
+            .position(|&c| c != 0)
+            .unwrap_or(p.len().saturating_sub(1));
+        let mut upper: Vec<u64> = p[..=idx].to_vec();
+        upper[idx] += 1;
+        return format!(">={v},<{}", join(&upper));
+    }
+    if clause.starts_with("~=") {
+        return clause.to_string();
+    }
+    if let Some(v) = clause.strip_prefix('~') {
+        let v = v.trim();
+        let Some(p) = parts(v) else {
+            return format!(">={v}");
+        };
+        let mut upper: Vec<u64> = p[..p.len().min(2)].to_vec();
+        let last = upper.len() - 1;
+        upper[last] += 1;
+        return format!(">={v},<{}", join(&upper));
+    }
+    if clause.starts_with(|c: char| c.is_ascii_digit()) {
+        return format!("=={clause}");
+    }
+    clause.to_string()
 }
 
 fn has_python_file(dir: &Path) -> bool {
@@ -849,6 +936,71 @@ requests = "^2.31"
         assert!(names.iter().any(|r| r.name == "requests"));
         assert!(!names.iter().any(|r| r.name == "python"));
         assert!(rp.unwrap().starts_with(">=3.10"));
+    }
+
+    #[test]
+    fn poetry_constraints_translate_to_pep440() {
+        assert_eq!(poetry_to_pep440("^3.8"), ">=3.8,<4");
+        assert_eq!(poetry_to_pep440("^2.2"), ">=2.2,<3");
+        assert_eq!(poetry_to_pep440("^0.2.3"), ">=0.2.3,<0.3");
+        assert_eq!(poetry_to_pep440("^0.0.3"), ">=0.0.3,<0.0.4");
+        assert_eq!(poetry_to_pep440("~1.2.3"), ">=1.2.3,<1.3");
+        assert_eq!(poetry_to_pep440("~1.2"), ">=1.2,<1.3");
+        assert_eq!(poetry_to_pep440("~1"), ">=1,<2");
+        assert_eq!(poetry_to_pep440("~=1.4"), "~=1.4");
+        assert_eq!(poetry_to_pep440("1.2.3"), "==1.2.3");
+        assert_eq!(poetry_to_pep440(">=1.0, <2.0"), ">=1.0,<2.0");
+        assert_eq!(poetry_to_pep440("^1.2 || ^2.0"), "^1.2 || ^2.0");
+        assert_eq!(poetry_to_pep440("*"), "*");
+    }
+
+    #[test]
+    fn poetry_tables_and_dev_groups_are_declared_dependencies() {
+        let text = r#"
+[tool.poetry.dependencies]
+python = "^3.8"
+requests = { version = "^2.31", extras = ["socks"] }
+numpy = "^2.2"
+mylib = { git = "https://example.com/mylib.git" }
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+
+[tool.poetry.dev-dependencies]
+black = "*"
+"#;
+        let (names, rp) = parse_pyproject(text);
+        assert_eq!(rp.as_deref(), Some(">=3.8,<4"));
+        let spec = |n: &str| names.iter().find(|r| r.name == n).map(|r| r.spec.clone());
+        assert_eq!(spec("requests").as_deref(), Some(">=2.31,<3"));
+        assert_eq!(spec("numpy").as_deref(), Some(">=2.2,<3"));
+        assert_eq!(spec("mylib").as_deref(), Some(""));
+        assert_eq!(spec("pytest").as_deref(), Some(">=8.0,<9"));
+        assert_eq!(spec("black").as_deref(), Some(""));
+        assert!(spec("python").is_none());
+    }
+
+    #[test]
+    fn pyproject_pins_win_over_requirements_txt() {
+        let dir = fresh_dir("pypilot-scan-pyproject-wins");
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"x\"\ndependencies = [\"requests==2.31.0\"]\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("requirements.txt"), "requests==2.25.0\nsix\n").unwrap();
+        let deps = scan(&dir);
+        assert_eq!(deps.packages, [req("requests", "==2.31.0"), req("six", "")]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn conda_pip_itself_is_not_a_dependency() {
+        let text = "dependencies:\n  - python=3.11\n  - numpy\n  - pip\n  - pip:\n    - requests==2.31.0\n";
+        let (names, py) = parse_environment_yml(text);
+        assert_eq!(py.as_deref(), Some("3.11"));
+        let names: Vec<&str> = names.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["numpy", "requests"]);
     }
 
     #[test]
