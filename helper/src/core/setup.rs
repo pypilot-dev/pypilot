@@ -166,6 +166,14 @@ pub async fn run_with_mode<S: MetadataSource>(
         }
     }
 
+    // Requirements uv cannot resolve would fail `uv sync` after the venv was
+    // already replaced: stop first (core::resolution).
+    if let Some(step) = crate::core::resolution::blocking_step(&assessment) {
+        summary.ok = false;
+        summary.steps.push(step);
+        return Ok(summary);
+    }
+
     // uv mode only builds a venv once it knows which Python to use, so a
     // broken venv in a project with no version constraints would otherwise be
     // left in place for `uv sync` to trip over. Rebuild it on the version it

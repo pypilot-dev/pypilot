@@ -275,7 +275,7 @@ fn strip_inline_comment(line: &str) -> &str {
 /// a byte-order mark, and some editors prefix UTF-8 with one. A plain
 /// `read_to_string` rejects the first file outright and turns the second one's
 /// first package name into one that starts with an invisible character.
-fn read_manifest(path: &Path) -> Option<String> {
+pub(crate) fn read_manifest(path: &Path) -> Option<String> {
     decode_text(std::fs::read(path).ok()?)
 }
 

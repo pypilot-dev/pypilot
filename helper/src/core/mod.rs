@@ -31,10 +31,13 @@ pub mod probe;
 pub mod project;
 pub mod pyright;
 pub mod repair;
+pub mod req_edit;
 pub mod rescan;
+pub mod resolution;
 pub mod setup;
 pub mod solver;
 pub mod stdlib;
+pub mod suggest;
 pub mod toolchain;
 pub mod torch_gpu;
 pub mod torch_index;
@@ -101,6 +104,22 @@ pub enum FixKind {
     /// is gone, or it leaks the system site-packages): rebuild it in place,
     /// on the Python it had (or the pinned one), then sync.
     RepairEnvironment { python: Option<PyVersion> },
+
+    // --- Requirement edits (resolution diagnosis) ----------------------------
+    // Fixes that change what the manifest asks for rather than the
+    // environment. Each is applied by `crate::core::req_edit::apply`, which
+    // edits only the requirements named and goes through `core::exec`, so a
+    // dry run records the write instead of making it. Serialized as
+    // `{"kind": "edit_requirement", "edit": {"file", "old", "new"}}` and
+    // `{"kind": "add_requirements", "packages": [...]}`.
+    /// Replace one requirement in one manifest (pyproject.toml's
+    /// `[project] dependencies`, or a requirements.txt line) with another:
+    /// relax a pin uv cannot satisfy, correct a typo'd name, or add an
+    /// environment marker.
+    EditRequirement(RequirementEdit),
+    /// Add packages the code imports but the manifest never declares, by
+    /// installing them the way `pypilot install` does (which records them).
+    AddRequirements(Vec<String>),
 }
 
 impl serde::Serialize for FixKind {
@@ -112,6 +131,8 @@ impl serde::Serialize for FixKind {
             FixKind::RecreateWithPython(py) => map.serialize_entry("python", py)?,
             FixKind::ReinstallPackages(packages) => map.serialize_entry("packages", packages)?,
             FixKind::RepairEnvironment { python } => map.serialize_entry("python", python)?,
+            FixKind::EditRequirement(edit) => map.serialize_entry("edit", edit)?,
+            FixKind::AddRequirements(packages) => map.serialize_entry("packages", packages)?,
             _ => {}
         }
         map.end()
@@ -131,8 +152,21 @@ impl FixKind {
             FixKind::Relock => "relock",
             FixKind::ReinstallPackages(_) => "reinstall_packages",
             FixKind::RepairEnvironment { .. } => "repair_environment",
+            FixKind::EditRequirement(_) => "edit_requirement",
+            FixKind::AddRequirements(_) => "add_requirements",
         }
     }
+}
+
+/// One requirement replaced by another in one manifest file.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RequirementEdit {
+    /// The manifest, `pyproject.toml` or a requirements file.
+    pub file: std::path::PathBuf,
+    /// The requirement as written there, e.g. `urllib3<1.21`.
+    pub old: String,
+    /// What replaces it, e.g. `urllib3>=1.21.1,<3`.
+    pub new: String,
 }
 
 /// One finding: a problem plus the *why* and an optional fix. Every user-facing

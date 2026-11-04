@@ -105,6 +105,11 @@ pub fn plan(findings: &[Finding]) -> RepairPlan {
                 }
             }
             FixKind::SyncEnvironment => p.sync = true,
+            // Not wired into the planner yet: shown, not run.
+            FixKind::EditRequirement(_) | FixKind::AddRequirements(_) => {
+                p.manual.push(f.clone());
+                continue;
+            }
             // Suggestions the user runs themselves (`migrate-conda`,
             // `migrate-to-pixi`), or guidance only.
             FixKind::Manual | FixKind::MigrateConda | FixKind::MigrateToPixi => {

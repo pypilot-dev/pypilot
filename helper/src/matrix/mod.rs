@@ -266,6 +266,15 @@ pub fn import_names_for(package: &str) -> Vec<String> {
     names
 }
 
+/// Every (import name, distribution) pair in the bundled table, for
+/// spelling suggestions ([`crate::core::suggest::did_you_mean`]).
+pub fn import_map_pairs() -> Vec<(&'static str, &'static str)> {
+    import_map()
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect()
+}
+
 /// True when the name came from the bundled table rather than falling through.
 pub fn is_mapped(import_name: &str) -> bool {
     import_map().contains_key(import_name)
