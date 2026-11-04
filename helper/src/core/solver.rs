@@ -244,6 +244,7 @@ pub async fn assess<S: MetadataSource>(
         compat.as_ref(),
         probes.uv.as_ref().map(|u| u.path.as_path()),
         resolve_python,
+        target_python,
         source,
         &mut findings,
     )

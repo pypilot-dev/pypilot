@@ -51,6 +51,13 @@ pub enum Outcome {
 #[allow(async_fn_in_trait)]
 pub trait Resolver {
     async fn resolve(&self, lines: &[String]) -> Option<Outcome>;
+
+    /// [`Resolver::resolve`] for another Python than this resolver's.
+    /// `None` when it cannot say, which is the default.
+    async fn resolve_on(&self, lines: &[String], python: PyVersion) -> Option<Outcome> {
+        let _ = (lines, python);
+        None
+    }
 }
 
 /// [`Resolver`] that runs `uv pip compile` in the workspace (so uv's own
@@ -62,6 +69,16 @@ pub struct UvResolver<'a> {
 }
 
 impl Resolver for UvResolver<'_> {
+    async fn resolve_on(&self, lines: &[String], python: PyVersion) -> Option<Outcome> {
+        UvResolver {
+            uv: self.uv,
+            workspace: self.workspace,
+            python: Some(python),
+        }
+        .resolve(lines)
+        .await
+    }
+
     async fn resolve(&self, lines: &[String]) -> Option<Outcome> {
         use std::collections::HashMap;
         use std::sync::{Mutex, OnceLock};
@@ -684,6 +701,10 @@ pub struct Context<'a> {
     pub project_name: Option<String>,
     /// The Python to resolve for.
     pub python: Option<PyVersion>,
+    /// The Python the fix moves the environment to, when that is another
+    /// one (the venv's Python is unsupported): a resolve that fails only
+    /// because of `python` is that finding's to fix, not a requirement's.
+    pub target_python: Option<PyVersion>,
 }
 
 /// Add the resolution findings to `findings` (see the module docs).
@@ -748,6 +769,19 @@ pub async fn diagnose<S: MetadataSource, R: Resolver>(
             .filter(|i| lines.contains(&reqs[*i].raw))
             .collect();
         if missing.is_empty() {
+            // uv blames the requested Python, and the Python the fix moves
+            // to resolves: rewriting a requirement (`numpy>=2.1` to `numpy`)
+            // would throw away a bound that is fine there (c12b, A s3).
+            if let Some(target) = ctx.target_python.filter(|t| Some(*t) != ctx.python) {
+                if stderr.contains("requested Python version")
+                    && matches!(
+                        resolver.resolve_on(&input, target).await,
+                        Some(Outcome::Resolved(_))
+                    )
+                {
+                    return;
+                }
+            }
             let f = conflict_finding(resolver, &expl, reqs, options, &lines, ctx.python).await;
             findings.push(f);
             return;
@@ -782,6 +816,7 @@ pub async fn diagnose_workspace<S: MetadataSource>(
     compat: Option<&CompatReport>,
     uv: Option<&Path>,
     python: Option<PyVersion>,
+    target_python: Option<PyVersion>,
     source: &S,
     findings: &mut Vec<Finding>,
 ) {
@@ -794,6 +829,7 @@ pub async fn diagnose_workspace<S: MetadataSource>(
         compat,
         project_name: project_name(workspace),
         python,
+        target_python,
     };
     let resolver = uv.map(|uv| UvResolver {
         uv,
@@ -959,6 +995,7 @@ mod tests {
             compat: None,
             project_name: name.map(String::from),
             python: Some(PyVersion::py3(12)),
+            target_python: None,
         };
         let mut findings = Vec::new();
         diagnose(
@@ -969,6 +1006,49 @@ mod tests {
         )
         .await;
         findings
+    }
+
+    #[tokio::test]
+    async fn a_python_only_failure_the_target_python_resolves_is_left_alone() {
+        // c12b, A s3: on the venv's 3.9 `numpy>=2.1` has no release; on the
+        // Python the fix moves to it does. The bound stays.
+        const PY: &str = "error: No solution found when resolving dependencies
+  cause: Because the requested Python version (>=3.9) does not satisfy Python>=3.10 and numpy>=2.1.0 depends on Python>=3.10, we can conclude that numpy>=2.1.0 cannot be used.
+         And because you require numpy>=2.1, we can conclude that your requirements are unsatisfiable.
+";
+        struct ByPython;
+        impl Resolver for ByPython {
+            async fn resolve(&self, _: &[String]) -> Option<Outcome> {
+                Some(Outcome::NoSolution(PY.into()))
+            }
+            async fn resolve_on(&self, _: &[String], python: PyVersion) -> Option<Outcome> {
+                Some(if python >= PyVersion::py3(10) {
+                    Outcome::Resolved(vec![("numpy".into(), "2.2.6".into())])
+                } else {
+                    Outcome::NoSolution(PY.into())
+                })
+            }
+        }
+        let declared = Declared {
+            reqs: reqs("pyproject.toml", &["numpy>=2.1"]),
+            ..Default::default()
+        };
+        let mut ctx = Context {
+            declared: &declared,
+            compat: None,
+            project_name: None,
+            python: Some(PyVersion::py3(9)),
+            target_python: Some(PyVersion::py3(12)),
+        };
+        let source = crate::pypi::FixtureSource::new();
+        let mut findings = Vec::new();
+        diagnose(&ctx, &source, Some(&ByPython), &mut findings).await;
+        assert!(findings.is_empty(), "{findings:#?}");
+        // No other Python to move to: the conflict is reported.
+        ctx.target_python = None;
+        diagnose(&ctx, &source, Some(&ByPython), &mut findings).await;
+        assert_eq!(findings.len(), 1, "{findings:#?}");
+        assert!(findings[0].title.starts_with(CONFLICT_TITLE));
     }
 
     #[tokio::test]
@@ -1120,6 +1200,7 @@ mod tests {
             compat: None,
             project_name: None,
             python: None,
+            target_python: None,
         };
         // uv reports one at a time; both are confirmed, round by round.
         struct Seq;
@@ -1181,6 +1262,7 @@ mod tests {
             compat: Some(&compat),
             project_name: None,
             python: None,
+            target_python: None,
         };
         let mut source = crate::pypi::FixtureSource::new();
         source.insert("requests", meta("requests", &["2.34.2"]));
@@ -1238,6 +1320,7 @@ mod tests {
             compat: Some(&compat),
             project_name: None,
             python: None,
+            target_python: None,
         };
         let mut findings = vec![Finding {
             severity: Severity::Info,
@@ -1311,6 +1394,7 @@ mod tests {
             compat: Some(&compat),
             project_name: None,
             python: None,
+            target_python: None,
         };
         let mut findings = vec![Finding {
             severity: Severity::Info,
@@ -1363,6 +1447,7 @@ mod tests {
             compat: Some(&compat),
             project_name: None,
             python: None,
+            target_python: None,
         };
         let mut findings = Vec::new();
         let none: Option<&Table> = None;
