@@ -69,6 +69,27 @@ pub trait MetadataSource {
     /// capped, because the files that decide Python support belong to that
     /// release rather than the newest one.
     async fn fetch_version(&self, name: &str, version: &str) -> crate::Result<PackageMetadata>;
+
+    /// The project's trove classifiers (`Operating System :: POSIX`, ...).
+    /// Only asked for the rare package that ships no wheel for this platform,
+    /// to tell "no wheel yet" from "does not support this system". Empty when
+    /// unknown, which callers read as "no claim either way".
+    async fn classifiers(&self, _name: &str) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// `{"info": {"classifiers": [...]}}`, all [`MetadataSource::classifiers`]
+/// reads of a PyPI JSON document.
+#[derive(serde::Deserialize)]
+struct ClassifierDoc {
+    info: ClassifierInfo,
+}
+
+#[derive(serde::Deserialize)]
+struct ClassifierInfo {
+    #[serde(default)]
+    classifiers: Vec<String>,
 }
 
 /// Live PyPI client: disk cache first, then `pypi.org/pypi/<name>/json`.
@@ -206,12 +227,41 @@ impl MetadataSource for PyPiClient {
         self.cache.put_release(name, &meta);
         Ok(meta)
     }
+
+    async fn classifiers(&self, name: &str) -> Vec<String> {
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+        // Once per process and name: the LSP assesses the same project often.
+        static SEEN: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+        let key = format!("{}|{name}", self.base_url);
+        let seen = SEEN.get_or_init(Default::default);
+        if let Some(hit) = seen.lock().ok().and_then(|m| m.get(&key).cloned()) {
+            return hit;
+        }
+        let url = format!("{}/{}/json", self.base_url, name);
+        let Ok(resp) = self.http.get(&url).send().await else {
+            return Vec::new();
+        };
+        if !resp.status().is_success() {
+            return Vec::new();
+        }
+        let list = resp
+            .json::<ClassifierDoc>()
+            .await
+            .map(|d| d.info.classifiers)
+            .unwrap_or_default();
+        if let Ok(mut m) = seen.lock() {
+            m.insert(key, list.clone());
+        }
+        list
+    }
 }
 
 /// Recorded-fixture source used by tests — no network, ever.
 #[derive(Default, Clone)]
 pub struct FixtureSource {
     by_name: HashMap<String, PackageMetadata>,
+    classifiers: HashMap<String, Vec<String>>,
 }
 
 impl FixtureSource {
@@ -233,6 +283,14 @@ impl FixtureSource {
         self.insert(name, meta);
         Ok(())
     }
+
+    /// Give `name` these trove classifiers.
+    pub fn set_classifiers(&mut self, name: &str, classifiers: &[&str]) {
+        self.classifiers.insert(
+            name.to_lowercase(),
+            classifiers.iter().map(|c| c.to_string()).collect(),
+        );
+    }
 }
 
 impl MetadataSource for FixtureSource {
@@ -250,5 +308,12 @@ impl MetadataSource for FixtureSource {
             .get(&key)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("no fixture registered for `{key}`"))
+    }
+
+    async fn classifiers(&self, name: &str) -> Vec<String> {
+        self.classifiers
+            .get(&name.to_lowercase())
+            .cloned()
+            .unwrap_or_default()
     }
 }
