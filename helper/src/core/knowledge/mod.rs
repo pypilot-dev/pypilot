@@ -16,7 +16,7 @@
 //!
 //! # Fixes, for the `doctor --fix` planner
 //!
-//! A constraint (`numpy<2`, `setuptools<81`, `standard-imghdr`,
+//! A constraint (`numpy<2`, `setuptools<82`, `standard-imghdr`,
 //! `pandas>=2.2.2`, `requests==2.32.2`) is a requirement edit, built by
 //! [`rules::Context::constraint_fix`]:
 //!
@@ -364,7 +364,7 @@ fn local_modules(workspace: &Path) -> HashSet<String> {
 
 /// For the LSP guardian: the requirement to offer for an import of `module`
 /// instead of its bare distribution, when the table knows newer releases of
-/// that distribution dropped it (`pkg_resources` gives `setuptools<81`).
+/// that distribution dropped it (`pkg_resources` gives `setuptools<82`).
 /// `None` for everything else, and when the installed release still has it.
 pub fn install_requirement_for(
     module: &str,

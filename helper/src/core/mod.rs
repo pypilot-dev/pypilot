@@ -134,7 +134,7 @@ pub enum FixKind {
     AddRequirements(Vec<String>),
 
     // ---- Known breakages ([`knowledge`]), run by [`knowledge::apply::apply`].
-    // Their constraint fixes (`numpy<2`, `setuptools<81`, ...) are
+    // Their constraint fixes (`numpy<2`, `setuptools<82`, ...) are
     // `EditRequirement` / `AddRequirements` above; only this has no
     // equivalent there.
     /// Remove stray distributions from the manifest and the environment and

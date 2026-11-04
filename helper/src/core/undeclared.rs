@@ -238,7 +238,7 @@ mod tests {
 
         let mut source = crate::pypi::FixtureSource::new();
         // setuptools is on PyPI, but `pkg_resources` is the known-breakage
-        // finding's (setuptools<81, C s7a), so it is not listed here.
+        // finding's (setuptools<82, C s7a), so it is not listed here.
         for name in [
             "PyYAML",
             "requests",

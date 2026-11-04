@@ -347,7 +347,7 @@ async fn doctor_files_an_unreachable_package_as_not_checked() {
 /// newest one (82+) does not, so "Install setuptools" would leave the import
 /// broken (lab scenarios C s7a and s7b).
 #[tokio::test]
-async fn pkg_resources_offers_setuptools_below_81() {
+async fn pkg_resources_offers_the_table_cap() {
     let mut src = FixtureSource::new();
     let meta = serde_json::from_str(
         r#"{"info": {"name": "setuptools", "version": "84.2.1", "requires_python": ">=3.9"},
@@ -357,6 +357,12 @@ async fn pkg_resources_offers_setuptools_below_81() {
     .unwrap();
     src.insert("setuptools", meta);
     let buffer = "import pkg_resources\n";
+    // The cap the bundled table gives (`setuptools<82`).
+    let cap = pypilot::core::knowledge::table::bundled()
+        .module_removal("pkg_resources")
+        .unwrap()
+        .constraint
+        .clone();
 
     // s7a: setuptools not installed.
     let findings = analyze_buffer(
@@ -369,7 +375,7 @@ async fn pkg_resources_offers_setuptools_below_81() {
     )
     .await;
     assert_eq!(findings.len(), 1, "{findings:#?}");
-    assert_eq!(findings[0].package, "setuptools<81");
+    assert_eq!(findings[0].package, cap);
     assert_eq!(findings[0].problem, Problem::NotInstalled);
 
     // s7b: setuptools 84 installed, which dropped pkg_resources.
@@ -388,7 +394,7 @@ async fn pkg_resources_offers_setuptools_below_81() {
     )
     .await;
     assert_eq!(findings.len(), 1, "{findings:#?}");
-    assert_eq!(findings[0].package, "setuptools<81");
+    assert_eq!(findings[0].package, cap);
 
     // setuptools 80 still ships it: silent.
     installed

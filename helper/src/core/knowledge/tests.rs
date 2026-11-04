@@ -419,12 +419,21 @@ fn the_sklearn_stub_is_replaced_by_scikit_learn() {
 
 // --- pkg_resources --------------------------------------------------------------
 
+/// The cap the table gives for `import pkg_resources` (`setuptools<82`).
+fn pkg_resources_cap() -> String {
+    bundled()
+        .module_removal("pkg_resources")
+        .unwrap()
+        .constraint
+        .clone()
+}
+
 fn importing(module: &str) -> BTreeMap<String, String> {
     BTreeMap::from([(module.to_string(), "app.py".to_string())])
 }
 
 #[test]
-fn pkg_resources_with_setuptools_82_asks_for_setuptools_below_81() {
+fn pkg_resources_with_setuptools_82_asks_for_the_table_cap() {
     // C s7b: setuptools 84 installed, no pkg_resources on disk.
     let mut ctx = venv_ctx(12);
     ctx.imports = importing("pkg_resources");
@@ -436,7 +445,7 @@ fn pkg_resources_with_setuptools_82_asks_for_setuptools_below_81() {
         found[0].title,
         "`import pkg_resources` fails: setuptools 84.2.1 no longer ships it"
     );
-    assert_eq!(found[0].fix, constraint("setuptools<81"));
+    assert_eq!(found[0].fix, constraint(&pkg_resources_cap()));
     assert!(found[0].detail.contains("importlib.metadata"));
 
     // C s7a: setuptools not installed at all.
@@ -444,7 +453,7 @@ fn pkg_resources_with_setuptools_82_asks_for_setuptools_below_81() {
     ctx.declared = vec![req("requests", "")];
     let found = evaluate(&bundled(), &ctx);
     assert_eq!(found.len(), 1);
-    assert_eq!(found[0].fix, constraint("setuptools<81"));
+    assert_eq!(found[0].fix, constraint(&pkg_resources_cap()));
 
     // Installed and shipping it: silent.
     ctx.installed = installed(&[("setuptools", "80.9.0")]);
@@ -462,8 +471,8 @@ fn the_guardian_offers_the_constraint_not_the_newest_setuptools() {
     let t = bundled();
     let none = BTreeMap::new();
     assert_eq!(
-        rules::install_requirement_for(&t, "pkg_resources", &none).as_deref(),
-        Some("setuptools<81")
+        rules::install_requirement_for(&t, "pkg_resources", &none),
+        Some(pkg_resources_cap())
     );
     let new = BTreeMap::from([("setuptools".to_string(), "84.2.1".to_string())]);
     assert!(rules::install_requirement_for(&t, "pkg_resources", &new).is_some());
