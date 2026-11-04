@@ -56,12 +56,22 @@ pub enum Severity {
 /// A machine-actionable fix a finding can carry. Both the CLI and the LSP
 /// `executeCommand` map onto these — they call the exact same code.
 ///
-/// Serialized as `{"kind": "setup_environment"}`, or
-/// `{"kind": "recreate_with_python", "python": "3.12"}`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-#[serde(tag = "kind", content = "python", rename_all = "snake_case")]
+/// Serialized as `{"kind": "setup_environment"}`, with the variant's data
+/// beside the kind: `{"kind": "recreate_with_python", "python": "3.12"}`,
+/// `{"kind": "reinstall_packages", "packages": ["requests"]}`,
+/// `{"kind": "repair_environment", "python": "3.12"}` (`python` is `null`
+/// when the environment's version is unknown). Clients must treat a kind they
+/// do not know as "Fix environment" (`pypilot doctor --fix`), which handles
+/// every kind.
+///
+/// `pypilot doctor --fix` turns the findings' kinds into one targeted plan
+/// ([`repair::plan`]). To add a kind: add the variant here (with its
+/// serialization in the `Serialize` impl below), then give it one arm in
+/// [`repair::plan`], which is the only place that decides what a kind runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FixKind {
-    /// Run the full F1 bootstrap (install uv → Python → venv → deps).
+    /// Nothing usable exists yet: run the full F1 bootstrap (install uv,
+    /// Python, venv, deps), as `pypilot setup` does.
     SetupEnvironment,
     /// Recreate the venv on a specific Python version.
     RecreateWithPython(PyVersion),
@@ -75,6 +85,52 @@ pub enum FixKind {
     MigrateToPixi,
     /// Nothing to automate; the message itself is the guidance.
     Manual,
+    /// The environment is sound but its packages are not what the project
+    /// declares (missing, or drifted from `uv.lock`): install into the
+    /// existing environment (`uv sync`, `--locked` when the lock is current;
+    /// `uv pip install -r` / `pip install` in the pip modes).
+    SyncEnvironment,
+    /// `uv.lock` no longer matches `pyproject.toml`: `uv lock`, then sync.
+    Relock,
+    /// These installed distributions are damaged (files or metadata
+    /// missing): reinstall just them (`uv sync --reinstall-package X`).
+    ReinstallPackages(Vec<String>),
+    /// The environment itself is damaged (its interpreter or `pyvenv.cfg`
+    /// is gone, or it leaks the system site-packages): rebuild it in place,
+    /// on the Python it had (or the pinned one), then sync.
+    RepairEnvironment { python: Option<PyVersion> },
+}
+
+impl serde::Serialize for FixKind {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = s.serialize_map(None)?;
+        map.serialize_entry("kind", self.kind())?;
+        match self {
+            FixKind::RecreateWithPython(py) => map.serialize_entry("python", py)?,
+            FixKind::ReinstallPackages(packages) => map.serialize_entry("packages", packages)?,
+            FixKind::RepairEnvironment { python } => map.serialize_entry("python", python)?,
+            _ => {}
+        }
+        map.end()
+    }
+}
+
+impl FixKind {
+    /// The `kind` string the JSON output carries.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            FixKind::SetupEnvironment => "setup_environment",
+            FixKind::RecreateWithPython(_) => "recreate_with_python",
+            FixKind::MigrateConda => "migrate_conda",
+            FixKind::MigrateToPixi => "migrate_to_pixi",
+            FixKind::Manual => "manual",
+            FixKind::SyncEnvironment => "sync_environment",
+            FixKind::Relock => "relock",
+            FixKind::ReinstallPackages(_) => "reinstall_packages",
+            FixKind::RepairEnvironment { .. } => "repair_environment",
+        }
+    }
 }
 
 /// One finding: a problem plus the *why* and an optional fix. Every user-facing
@@ -161,6 +217,30 @@ mod tests {
                 "manual"
             ]
         );
+        let new = [
+            (
+                FixKind::SyncEnvironment,
+                serde_json::json!({"kind": "sync_environment"}),
+            ),
+            (FixKind::Relock, serde_json::json!({"kind": "relock"})),
+            (
+                FixKind::ReinstallPackages(vec!["requests".into()]),
+                serde_json::json!({"kind": "reinstall_packages", "packages": ["requests"]}),
+            ),
+            (
+                FixKind::RepairEnvironment {
+                    python: Some(PyVersion::py3(12)),
+                },
+                serde_json::json!({"kind": "repair_environment", "python": "3.12"}),
+            ),
+            (
+                FixKind::RepairEnvironment { python: None },
+                serde_json::json!({"kind": "repair_environment", "python": null}),
+            ),
+        ];
+        for (kind, json) in new {
+            assert_eq!(serde_json::to_value(&kind).unwrap(), json);
+        }
         assert_eq!(
             serde_json::to_value(Severity::Warning).unwrap(),
             serde_json::json!("warning")
