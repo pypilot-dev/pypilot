@@ -34,7 +34,8 @@ use std::path::{Path, PathBuf};
 use crate::core::exec::{self, Effect};
 use crate::core::setup::{self, SetupSummary, Step};
 use crate::core::{
-    health, pip, pixi, req_edit, resolution, solver, uv, Assessment, Finding, FixKind, Severity,
+    health, pip, pixi, req_edit, resolution, solver, undeclared, uv, Assessment, Finding, FixKind,
+    Severity,
 };
 use crate::pypi::pyversion::PyVersion;
 use crate::pypi::MetadataSource;
@@ -169,7 +170,7 @@ pub async fn run_with_mode<S: MetadataSource>(
     } else {
         mode
     };
-    let mut assessment = solver::assess(workspace, settings, source).await;
+    let mut assessment = assess_with_imports(workspace, settings, source).await;
     let mut plan = plan(&assessment.findings);
     let first_why = describe(&plan);
 
@@ -191,7 +192,7 @@ pub async fn run_with_mode<S: MetadataSource>(
         }
         if edit_steps.iter().all(|s| s.ok) {
             let applied = std::mem::take(&mut plan.requirements);
-            assessment = solver::assess(workspace, settings, source).await;
+            assessment = assess_with_imports(workspace, settings, source).await;
             assessment.findings.retain(|f| !applied.contains(&f.fix));
             plan = self::plan(&assessment.findings);
             plan.requirements.clear();
@@ -342,6 +343,23 @@ pub async fn run_with_mode<S: MetadataSource>(
     }
     finish(&mut summary);
     Ok(summary)
+}
+
+/// [`solver::assess`] plus the imports no dependency provides
+/// ([`undeclared`]), which only a workspace walk finds and so are not part
+/// of every assessment.
+async fn assess_with_imports<S: MetadataSource>(
+    workspace: &Path,
+    settings: &Settings,
+    source: &S,
+) -> Assessment {
+    let mut a = solver::assess(workspace, settings, source).await;
+    if !a.project.is_pixi() {
+        let venv = a.probes.venv.as_ref().map(|v| (v.path.as_path(), v.python));
+        let missing = undeclared::find(workspace, &a.project, venv, source).await;
+        a.findings.extend(undeclared::finding(&missing));
+    }
+    a
 }
 
 /// The environment the fix works on: the project's venv wherever it lives
