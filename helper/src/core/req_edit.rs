@@ -90,7 +90,14 @@ pub fn declared(workspace: &Path) -> Declared {
     }
     let requirements = workspace.join("requirements.txt");
     if let Some(text) = read_manifest(&requirements) {
+        let from_pyproject: Vec<String> = out.reqs.iter().map(|r| r.name.clone()).collect();
         read_requirements(&text, &requirements, workspace, &mut out);
+        // pyproject.toml's requirement is the one installed: setup never
+        // copies requirements.txt's pin over it. Resolving both would report
+        // a clash that no install ever meets (the pin disagreement has its
+        // own finding).
+        out.reqs
+            .retain(|r| r.file != requirements || !from_pyproject.contains(&r.name));
     }
     out
 }
@@ -176,7 +183,7 @@ fn push_requirement(raw: &str, path: &Path, out: &mut Declared) {
 }
 
 /// `line` without a `#` comment (one at the start, or after whitespace).
-fn strip_comment(line: &str) -> &str {
+pub fn strip_comment(line: &str) -> &str {
     if line.trim_start().starts_with('#') {
         return "";
     }
@@ -212,6 +219,8 @@ pub async fn apply(
             edit_file(edit)?;
             let detail = if edit.old.trim().is_empty() {
                 format!("added `{}`", edit.new)
+            } else if edit.new.trim().is_empty() {
+                format!("removed `{}`", edit.old)
             } else {
                 format!("`{}` -> `{}`", edit.old, edit.new)
             };
@@ -280,7 +289,11 @@ pub fn edit_file(edit: &RequirementEdit) -> crate::Result<()> {
         updated,
         Effect::new(
             format!("edit {}", file_label(&edit.file)),
-            format!("replace `{}` with `{}`", edit.old, edit.new),
+            if edit.new.trim().is_empty() {
+                format!("remove `{}`", edit.old)
+            } else {
+                format!("replace `{}` with `{}`", edit.old, edit.new)
+            },
         ),
     )?;
     Ok(())
@@ -327,7 +340,7 @@ pub fn edit_pyproject(text: &str, old: &str, new: &str) -> crate::Result<String>
 }
 
 /// Replace the requirements-file line whose requirement is `old`, keeping
-/// its indentation, comment and line ending.
+/// its indentation, comment and line ending. An empty `new` removes the line.
 pub fn edit_requirements(text: &str, old: &str, new: &str) -> crate::Result<String> {
     if old.trim().is_empty() {
         let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
@@ -345,6 +358,10 @@ pub fn edit_requirements(text: &str, old: &str, new: &str) -> crate::Result<Stri
         let body = strip_comment(line.trim_end_matches(['\r', '\n']));
         if body.trim() == old.trim() && !old.trim().is_empty() {
             hits += 1;
+            if new.trim().is_empty() {
+                // An empty replacement removes the line, comment and all.
+                continue;
+            }
             let start = line.find(body.trim()).unwrap_or(0);
             out.push_str(&line[..start]);
             out.push_str(new);
@@ -392,6 +409,11 @@ mod tests {
             "# top\r\nrequests==2.31.0\r\n  urllib3>=1.21.1,<3  # old\r\n-r more.txt\r\n"
         );
         assert!(edit_requirements(text, "numpy", "numpy<2").is_err());
+        // An empty replacement drops the line.
+        assert_eq!(
+            edit_requirements(text, "-r more.txt", "").unwrap(),
+            "# top\r\nrequests==2.31.0\r\n  urllib3<1.21  # old\r\n"
+        );
     }
 
     #[test]
@@ -448,6 +470,26 @@ mod tests {
         assert_eq!(flask.spec(), ">=3");
         assert_eq!(flask.marker(), "; python_version >= '3.9'");
         assert_eq!(flask.with_spec(""), "flask[async]; python_version >= '3.9'");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn pyproject_pins_win_over_requirements_lines() {
+        // D 5a: requirements.txt pins requests and pyyaml differently.
+        // pyproject.toml's are the ones installed, so only they resolve.
+        let dir = tempdir();
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\ndependencies = [\"requests==2.31.0\", \"pyyaml==6.0.1\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("requirements.txt"),
+            "requests==2.25.0\nPyYAML==5.4.1\nattrs>=23\n",
+        )
+        .unwrap();
+        let raws: Vec<String> = declared(&dir).reqs.into_iter().map(|r| r.raw).collect();
+        assert_eq!(raws, ["requests==2.31.0", "pyyaml==6.0.1", "attrs>=23"]);
         std::fs::remove_dir_all(&dir).ok();
     }
 

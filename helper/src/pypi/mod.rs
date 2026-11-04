@@ -303,6 +303,46 @@ pub fn trust_installed(
     }
 }
 
+/// Re-judge `report` by the releases a lock file pins: `uv sync --locked`
+/// installs those, not the newest release of each range, so the Pythons
+/// the project can run on are the ones the locked releases support.
+/// `locked` maps a normalized name to its one locked version; a package
+/// locked at several versions (a fork across Pythons), or whose locked
+/// release PyPI cannot describe, keeps its analysis. Returns whether
+/// anything changed.
+pub async fn fit_report_to_lock<S: MetadataSource>(
+    source: &S,
+    report: &mut CompatReport,
+    locked: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    let platform = report.platform;
+    let mut changed = false;
+    for analysis in report.per_package.iter_mut() {
+        let key = crate::core::project::normalize_name(&analysis.name);
+        let Some(version) = locked.get(&key) else {
+            continue;
+        };
+        let same = crate::pypi::version::PackageVersion::parse(version)
+            .zip(crate::pypi::version::PackageVersion::parse(
+                &analysis.version,
+            ))
+            .is_some_and(|(a, b)| a == b);
+        if same {
+            continue;
+        }
+        if let Ok(meta) = source.fetch_version(&analysis.name, version).await {
+            *analysis = meta.analyze(&platform);
+            changed = true;
+        }
+    }
+    if changed {
+        let (intersection, conflicts) = summarize(&report.per_package);
+        report.intersection = intersection;
+        report.conflicts = conflicts;
+    }
+    changed
+}
+
 /// Why `candidate` cannot join a project whose dependencies are `project`:
 /// the pair [`find_conflicts`] names once the candidate is added (the same
 /// sentence `doctor` and `setup` print for a conflicting project).
@@ -711,6 +751,58 @@ mod tests {
         let mut report = analyze(&src, linux(), &any).await;
         fit_report_to_python(&src, &mut report, &any, PyVersion::py3(11)).await;
         assert!(!report.is_compatible(PyVersion::py3(11)));
+    }
+
+    /// D 5b: a uv project with a current uv.lock installs the locked
+    /// releases, so the Pythons it can run on are theirs, not the newest
+    /// release's. numpy 2.4.0 has a cp315 wheel; the locked 2.2.6 stops at
+    /// cp313.
+    #[tokio::test]
+    async fn a_current_lock_judges_by_its_locked_releases() {
+        let mut src = FixtureSource::new();
+        let mut numpy = pkg(
+            "numpy",
+            Some(">=3.11"),
+            vec![
+                wheel("numpy-2.4.0-cp313-cp313-manylinux_2_17_x86_64.whl"),
+                wheel("numpy-2.4.0-cp315-cp315-manylinux_2_17_x86_64.whl"),
+            ],
+        );
+        numpy.info.version = "2.4.0".into();
+        src.insert("numpy", numpy);
+        let mut locked = pkg(
+            "numpy",
+            Some(">=3.10"),
+            vec![
+                wheel("numpy-2.2.6-cp310-cp310-manylinux_2_17_x86_64.whl"),
+                wheel("numpy-2.2.6-cp313-cp313-manylinux_2_17_x86_64.whl"),
+            ],
+        );
+        locked.info.version = "2.2.6".into();
+        src.insert("numpy==2.2.6", locked);
+        src.insert(
+            "six",
+            pkg("six", None, vec![wheel("six-1.0-py2.py3-none-any.whl")]),
+        );
+
+        let reqs = [Requirement::any("numpy"), Requirement::any("six")];
+        let mut report = analyze(&src, linux(), &reqs).await;
+        assert!(report.is_compatible(PyVersion::py3(15)));
+
+        let lock: std::collections::BTreeMap<String, String> = [
+            ("numpy".to_string(), "2.2.6".to_string()),
+            ("six".to_string(), "1.0".to_string()),
+        ]
+        .into();
+        assert!(fit_report_to_lock(&src, &mut report, &lock).await);
+        assert_eq!(report.per_package[0].version, "2.2.6");
+        assert!(!report.is_compatible(PyVersion::py3(15)));
+        assert_eq!(report.suggested_python(), Some(PyVersion::py3(13)));
+        // Already the locked releases: nothing to do.
+        assert!(!fit_report_to_lock(&src, &mut report, &lock).await);
+        // A locked release PyPI cannot describe keeps its analysis.
+        let gone = [("six".to_string(), "0.1".to_string())].into();
+        assert!(!fit_report_to_lock(&src, &mut report, &gone).await);
     }
 
     #[tokio::test]

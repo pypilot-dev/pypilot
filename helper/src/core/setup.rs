@@ -512,6 +512,12 @@ async fn run_uv_full(
         if summary.failed() {
             return;
         }
+        // `uv init --python X` writes `requires-python = ">=X"`: the Python
+        // chosen for this machine, not what the project needs.
+        if let Some(chosen) = summary.python {
+            let deps = assessment.compat.as_ref().map(|c| &c.intersection);
+            widen_init_requires_python(workspace, chosen, init_floor(chosen, deps), summary);
+        }
     }
 
     // Install the target Python if one was determined.
@@ -973,6 +979,84 @@ pub(crate) async fn pin_python(
     }
 }
 
+/// The oldest Python a new pyproject.toml's `requires-python` starts from:
+/// older ones are past their end of life, and allowing them only makes uv
+/// resolve for them too.
+const INIT_FLOOR_MIN: PyVersion = PyVersion::new(3, 9);
+
+/// The `requires-python` floor for a pyproject.toml PyPilot creates: the
+/// lowest Python every dependency supports (`deps`, the compatibility
+/// intersection), else the minor below `chosen`. Never above `chosen`, never
+/// below [`INIT_FLOOR_MIN`] unless `chosen` is.
+pub fn init_floor(
+    chosen: PyVersion,
+    deps: Option<&crate::pypi::pyversion::PyVersionSet>,
+) -> PyVersion {
+    let floor = match deps.and_then(|d| d.min()).filter(|m| *m <= chosen) {
+        Some(min) => min,
+        None => PyVersion::new(chosen.major, chosen.minor.saturating_sub(1)),
+    };
+    floor.max(INIT_FLOOR_MIN).min(chosen)
+}
+
+/// Lower the `>=chosen` that `uv init` wrote to `>=floor`, so the project
+/// declares the Pythons its dependencies allow rather than the one this
+/// machine got. `.python-version` keeps the environment on `chosen`.
+fn widen_init_requires_python(
+    workspace: &Path,
+    chosen: PyVersion,
+    floor: PyVersion,
+    summary: &mut SetupSummary,
+) {
+    const NAME: &str = "set requires-python";
+    if floor >= chosen {
+        return;
+    }
+    let path = workspace.join("pyproject.toml");
+    let why = format!(
+        "uv init wrote `>={chosen}`, the Python picked for this machine; the dependencies run on Python {floor} and newer, so the project allows those too (.python-version keeps the environment on {chosen})"
+    );
+    let effect = Effect::new(NAME, why);
+    if exec::is_dry_run() {
+        // `uv init` has not really run: there is no file to read yet.
+        exec::note(effect.writes(&path));
+        return step_ok(summary, NAME, &format!("`>={chosen}` -> `>={floor}`"));
+    }
+    let Some(text) = project::read_manifest(&path) else {
+        return;
+    };
+    let Some((old, edited)) = lowered_requires_python(&text, floor) else {
+        return;
+    };
+    match exec::write(&path, edited, effect) {
+        Ok(()) => step_ok(
+            summary,
+            NAME,
+            &format!("`{old}` -> `>={floor}` (the lowest Python every dependency supports)"),
+        ),
+        // The project is still usable on the narrower range.
+        Err(e) => summary.steps.push(Step {
+            name: NAME.to_string(),
+            ok: false,
+            detail: format!("could not update pyproject.toml: {e}"),
+        }),
+    }
+}
+
+/// `requires-python = ">=X"` rewritten to `>=floor` when `X` is above it.
+/// Anything other than a plain `>=` bound is left alone.
+fn lowered_requires_python(text: &str, floor: PyVersion) -> Option<(String, String)> {
+    let mut doc: toml_edit::DocumentMut = text.parse().ok()?;
+    let project = doc.get_mut("project")?.as_table_like_mut()?;
+    let old = project.get("requires-python")?.as_str()?.trim().to_string();
+    let current = PyVersion::parse(old.strip_prefix(">=")?.trim())?;
+    if current <= floor {
+        return None;
+    }
+    project.insert("requires-python", toml_edit::value(format!(">={floor}")));
+    Some((old, doc.to_string()))
+}
+
 fn step_ok(summary: &mut SetupSummary, name: &str, detail: &str) {
     summary.steps.push(Step {
         name: name.to_string(),
@@ -1006,6 +1090,60 @@ mod tests {
     use crate::core::probe::{Probes, VenvInfo};
     use crate::core::Assessment;
     use crate::settings::PackageManager;
+
+    #[test]
+    fn a_new_pyproject_allows_what_the_dependencies_allow() {
+        use crate::pypi::pyversion::PyVersionSet;
+        let v = PyVersion::new;
+        // D 9: numpy, pyyaml, requests support 3.12 to 3.14; 3.14 is chosen.
+        let deps = PyVersionSet::from_versions([v(3, 12), v(3, 13), v(3, 14)]);
+        assert_eq!(init_floor(v(3, 14), Some(&deps)), v(3, 12));
+        // Pure-Python dependencies: not below 3.9.
+        let wide = PyVersionSet::from_versions((7..=15).map(|m| v(3, m)));
+        assert_eq!(init_floor(v(3, 15), Some(&wide)), v(3, 9));
+        // No dependencies: the minor below the chosen one.
+        assert_eq!(init_floor(v(3, 14), None), v(3, 13));
+        // Never above the chosen Python, never raised past an old one.
+        assert_eq!(init_floor(v(3, 8), None), v(3, 8));
+
+        let text = "[project]\nname = \"nb\"\nversion = \"0.1.0\"\nrequires-python = \">=3.14\"\ndependencies = []\n";
+        let (old, new) = lowered_requires_python(text, v(3, 12)).unwrap();
+        assert_eq!(old, ">=3.14");
+        assert_eq!(new, text.replace(">=3.14", ">=3.12"));
+        assert!(lowered_requires_python(text, v(3, 14)).is_none());
+        assert!(
+            lowered_requires_python(&text.replace(">=3.14", ">=3.10,<3.14"), v(3, 9)).is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_dry_run_lists_the_requires_python_step() {
+        let dir = std::env::temp_dir().join(format!("pypilot-init-floor-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut summary = SetupSummary {
+            package_manager: PackageManager::Auto,
+            resolved_mode: ResolvedMode::UvFull,
+            python: Some(PyVersion::new(3, 14)),
+            venv_path: dir.join(".venv"),
+            why: String::new(),
+            steps: Vec::new(),
+            ok: true,
+        };
+        let (_, planned) = exec::dry_run(async {
+            widen_init_requires_python(
+                &dir,
+                PyVersion::new(3, 14),
+                PyVersion::new(3, 12),
+                &mut summary,
+            )
+        })
+        .await;
+        assert_eq!(planned.len(), 1, "{planned:?}");
+        assert_eq!(planned[0].name, "set requires-python");
+        assert_eq!(summary.steps[0].detail, "`>=3.14` -> `>=3.12`");
+        assert!(!dir.join("pyproject.toml").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     fn assessment(venv: Option<VenvInfo>) -> Assessment {
         Assessment {

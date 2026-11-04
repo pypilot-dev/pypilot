@@ -42,14 +42,11 @@ pub async fn apply<S: MetadataSource>(
     let requirements = read(&workspace.join("requirements.txt"));
 
     if let Some(text) = &requirements {
-        if let Some(f) = invalid_requirements_finding(text) {
-            findings.push(f);
-        }
+        findings.extend(invalid_requirements_findings(text, workspace));
     }
     if let (Some(py), Some(req)) = (&pyproject, &requirements) {
-        if let Some(f) = pin_conflict_finding(&pin_conflicts(py, req)) {
-            findings.push(f);
-        }
+        let file = workspace.join("requirements.txt");
+        findings.extend(pin_conflict_findings(&pin_conflicts(py, req), req, &file));
     }
     let poetry = pyproject.as_deref().is_some_and(is_poetry_only);
     if let Some(f) = lockfile_finding(&lockfiles(workspace), poetry, settings) {
@@ -88,6 +85,9 @@ pub struct InvalidLine {
     pub line: usize,
     pub text: String,
     pub reason: String,
+    /// The line it obviously should be, when there is one (`requests==2.31`
+    /// for `requests=2.31`); an empty string means remove the line.
+    pub fix: Option<String>,
 }
 
 /// Every requirement line of a requirements.txt that pip would reject.
@@ -106,14 +106,90 @@ pub fn invalid_requirements(text: &str) -> Vec<InvalidLine> {
         }
         joined.push_str(line);
         if let Some(reason) = invalid_requirement(&joined) {
+            // A `\`-continued line is not one line to rewrite.
+            let fix = (start == i + 1).then(|| obvious_fix(&joined)).flatten();
             out.push(InvalidLine {
                 line: start,
                 text: joined.trim().to_string(),
                 reason,
+                fix,
             });
         }
     }
     out
+}
+
+/// [`invalid_requirements`], plus `-e`/`--editable` lines whose local path
+/// does not exist under `dir`: pip stops on those too, and the fix (remove
+/// the line) is obvious.
+pub fn invalid_requirements_at(text: &str, dir: &Path) -> Vec<InvalidLine> {
+    let mut out = invalid_requirements(text);
+    for (i, raw) in text.lines().enumerate() {
+        let body = crate::core::req_edit::strip_comment(raw).trim();
+        let path = body
+            .strip_prefix("--editable")
+            .or_else(|| body.strip_prefix("-e"))
+            .filter(|rest| rest.starts_with([' ', '\t', '=']))
+            .map(|rest| rest.trim_start_matches([' ', '\t', '=']).trim());
+        let Some(path) = path.filter(|p| !p.is_empty()) else {
+            continue;
+        };
+        // URLs and VCS references are pip's to judge.
+        if path.contains("://") || path.contains('+') || path.contains('@') {
+            continue;
+        }
+        let local = path.split('[').next().unwrap_or(path);
+        if dir.join(local).exists() {
+            continue;
+        }
+        out.push(InvalidLine {
+            line: i + 1,
+            text: body.to_string(),
+            reason: format!("the editable path `{local}` does not exist"),
+            fix: Some(String::new()),
+        });
+    }
+    out.sort_by_key(|b| b.line);
+    out
+}
+
+/// The line an invalid requirement obviously meant, or `None` when what it
+/// meant is a guess: `pip install requests` is `requests`, `requests=2.31`
+/// is `requests==2.31`, `six>=` (an operator with no version) is `six`.
+fn obvious_fix(line: &str) -> Option<String> {
+    let line = crate::core::req_edit::strip_comment(line).trim();
+    let valid = |req: &str| invalid_requirement(req).is_none() && !req.starts_with('-');
+    for prefix in ["pip install ", "pip3 install ", "python -m pip install "] {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            let rest = rest.trim();
+            // One requirement, no options: more would need several lines.
+            return (!rest.is_empty() && !rest.contains(char::is_whitespace) && valid(rest))
+                .then(|| rest.to_string());
+        }
+    }
+    if line.contains(';') {
+        return None;
+    }
+    let dep = crate::core::pixi_migrate::parse_pep508(line).ok()?;
+    let head_end = line
+        .find(['=', '<', '>', '!', '~', ' '])
+        .unwrap_or(line.len());
+    let head = line[..head_end].trim();
+    if dep.url.is_some() || head.is_empty() {
+        return None;
+    }
+    let spec = dep.spec.as_str();
+    // `name=1.2`: a single `=` where `==` was meant.
+    if let Some(version) = spec.strip_prefix('=').filter(|v| !v.starts_with('=')) {
+        let fixed = format!("{head}=={version}");
+        return valid(&fixed).then_some(fixed);
+    }
+    // `name>=`: an operator with nothing after it constrains nothing.
+    const OPS: [&str; 8] = ["===", "==", "!=", "<=", ">=", "~=", "<", ">"];
+    if OPS.contains(&spec) {
+        return valid(head).then(|| head.to_string());
+    }
+    None
 }
 
 /// Why one logical requirements.txt line is not a requirement, or `None`
@@ -178,34 +254,72 @@ fn invalid_clause(clause: &str) -> Option<String> {
     (!valid).then(|| format!("`{version}` is not a version"))
 }
 
-fn invalid_requirements_finding(text: &str) -> Option<Finding> {
-    let bad = invalid_requirements(text);
-    if bad.is_empty() {
-        return None;
-    }
-    let lines: Vec<String> = bad.iter().map(|b| b.line.to_string()).collect();
-    let title = match lines.as_slice() {
-        [one] => format!("requirements.txt line {one} is not a valid requirement"),
-        [init @ .., last] => format!(
-            "requirements.txt lines {} and {last} are not valid requirements",
-            init.join(", ")
-        ),
-        [] => unreachable!(),
-    };
-    let each: Vec<String> = bad
+/// The findings for requirements.txt lines pip cannot read: one per line
+/// with an obvious fix (a [`FixKind::EditRequirement`] on that line), and
+/// one manual finding for the rest.
+fn invalid_requirements_findings(text: &str, dir: &Path) -> Vec<Finding> {
+    let file = dir.join("requirements.txt");
+    let bad = invalid_requirements_at(text, dir);
+    let (fixable, manual): (Vec<&InvalidLine>, Vec<&InvalidLine>) =
+        bad.iter().partition(|b| b.fix.is_some());
+    let stops = "pip and uv stop at the first line they cannot read, so nothing in requirements.txt installs until";
+    let mut out: Vec<Finding> = fixable
         .iter()
-        .map(|b| format!("line {} `{}`: {}", b.line, b.text, b.reason))
+        .map(|b| {
+            let new = b.fix.clone().unwrap_or_default();
+            let action = if new.is_empty() {
+                "Fix: remove the line.".to_string()
+            } else {
+                format!("Fix: change it to `{new}`.")
+            };
+            Finding {
+                severity: Severity::Error,
+                title: format!(
+                    "requirements.txt line {} is not a valid requirement",
+                    b.line
+                ),
+                detail: format!(
+                    "line {} `{}`: {}. {stops} it is fixed or removed. {action}",
+                    b.line, b.text, b.reason
+                ),
+                fix: FixKind::EditRequirement(crate::core::RequirementEdit {
+                    file: file.clone(),
+                    old: b.text.clone(),
+                    new,
+                }),
+            }
+        })
         .collect();
-    Some(Finding {
-        severity: Severity::Error,
-        title,
-        detail: format!(
-            "{}. pip and uv stop at the first line they cannot read, so nothing in requirements.txt installs until {} fixed or removed.",
-            each.join("; "),
-            if bad.len() == 1 { "it is" } else { "they are" }
-        ),
-        fix: FixKind::Manual,
-    })
+    if !manual.is_empty() {
+        let lines: Vec<String> = manual.iter().map(|b| b.line.to_string()).collect();
+        let title = match lines.as_slice() {
+            [one] => format!("requirements.txt line {one} is not a valid requirement"),
+            [init @ .., last] => format!(
+                "requirements.txt lines {} and {last} are not valid requirements",
+                init.join(", ")
+            ),
+            [] => unreachable!(),
+        };
+        let each: Vec<String> = manual
+            .iter()
+            .map(|b| format!("line {} `{}`: {}", b.line, b.text, b.reason))
+            .collect();
+        out.push(Finding {
+            severity: Severity::Error,
+            title,
+            detail: format!(
+                "{}. {stops} {} fixed or removed.",
+                each.join("; "),
+                if manual.len() == 1 {
+                    "it is"
+                } else {
+                    "they are"
+                }
+            ),
+            fix: FixKind::Manual,
+        });
+    }
+    out
 }
 
 // --- pyproject.toml against requirements.txt ----------------------------------
@@ -259,32 +373,73 @@ fn disagree(a: &str, b: &str) -> bool {
     rules_out(a, b) || rules_out(b, a)
 }
 
-fn pin_conflict_finding(conflicts: &[PinConflict]) -> Option<Finding> {
-    if conflicts.is_empty() {
-        return None;
-    }
-    let names: Vec<&str> = conflicts.iter().map(|c| c.name.as_str()).collect();
-    let each: Vec<String> = conflicts
+/// One finding per package the two files pin differently. pyproject.toml is
+/// what uv installs, so the fix brings requirements.txt in line with it: the
+/// line is rewritten to pyproject.toml's specifier, its extras and marker
+/// kept. When the line cannot be found as written, the finding stays manual.
+fn pin_conflict_findings(
+    conflicts: &[PinConflict],
+    requirements: &str,
+    file: &Path,
+) -> Vec<Finding> {
+    conflicts
         .iter()
         .map(|c| {
-            format!(
-                "{} is `{}` in pyproject.toml but `{}` in requirements.txt",
-                c.name, c.pyproject, c.requirements
-            )
+            let line = requirement_line(requirements, &c.name);
+            let fix = match &line {
+                Some(raw) => FixKind::EditRequirement(crate::core::RequirementEdit {
+                    file: file.to_path_buf(),
+                    old: raw.clone(),
+                    new: crate::core::req_edit::DeclaredReq {
+                        file: file.to_path_buf(),
+                        raw: raw.clone(),
+                        name: c.name.clone(),
+                    }
+                    .with_spec(&c.pyproject),
+                }),
+                None => FixKind::Manual,
+            };
+            let action = match &fix {
+                FixKind::EditRequirement(e) => format!(
+                    "Fix: change requirements.txt's `{}` to `{}` so both files say the same.",
+                    e.old, e.new
+                ),
+                _ => format!(
+                    "Fix: change requirements.txt's {} pin to `{}{}` so both files say the same.",
+                    c.name, c.name, c.pyproject
+                ),
+            };
+            Finding {
+                severity: Severity::Warning,
+                title: format!(
+                    "pyproject.toml and requirements.txt disagree on {}",
+                    c.name
+                ),
+                detail: format!(
+                    "{} is `{}` in pyproject.toml but `{}` in requirements.txt. pyproject.toml is the project's declaration: PyPilot installs its pin and never copies requirements.txt's over it, so requirements.txt is the stale one. {action} If requirements.txt's pin is the one you want, change pyproject.toml instead.",
+                    c.name, c.pyproject, c.requirements
+                ),
+                fix,
+            }
         })
+        .collect()
+}
+
+/// The requirement on `name` (normalized) as requirements.txt writes it,
+/// without a comment, when exactly one line declares it.
+fn requirement_line(text: &str, name: &str) -> Option<String> {
+    let hits: Vec<String> = text
+        .lines()
+        .map(|l| crate::core::req_edit::strip_comment(l).trim())
+        .filter(|body| {
+            project::requirement_name(body).is_some_and(|n| project::normalize_name(&n) == name)
+        })
+        .map(str::to_string)
         .collect();
-    Some(Finding {
-        severity: Severity::Warning,
-        title: format!(
-            "pyproject.toml and requirements.txt disagree on {}",
-            names.join(", ")
-        ),
-        detail: format!(
-            "{}. PyPilot follows pyproject.toml, the project's declaration, and setup will not copy requirements.txt's pins over it. If requirements.txt is the one that is right, change pyproject.toml; otherwise regenerate it with `uv export --format requirements-txt --no-hashes -o requirements.txt`.",
-            each.join("; ")
-        ),
-        fix: FixKind::Manual,
-    })
+    match hits.as_slice() {
+        [one] => Some(one.clone()),
+        _ => None,
+    }
 }
 
 /// How requirements.txt relates to pyproject.toml when setup installs both.
@@ -369,7 +524,7 @@ fn lockfile_finding(present: &[&str], poetry_only: bool, settings: &Settings) ->
     let why = match followed {
         Some("poetry.lock") => "PyPilot follows poetry.lock: the dependencies are declared in [tool.poetry], so `poetry install` is what installs them.".to_string(),
         Some(lock) => format!(
-            "PyPilot follows {lock}: this is a uv project, and `uv sync` installs from it."
+            "PyPilot follows {lock}: this is a uv project, `uv sync` installs from it, and the Python is chosen for the releases it locks."
         ),
         None => "PyPilot follows neither: package_manager is set to pip, so it installs requirements.txt.".to_string(),
     };
@@ -834,14 +989,75 @@ mod tests {
         assert_eq!(bad[0].reason, "it has no package name");
         assert_eq!(bad[1].reason, "`>=` has no version after it");
 
-        let f = invalid_requirements_finding(text).unwrap();
+        let dir = Path::new(".");
+        let found = invalid_requirements_findings(text, dir);
+        assert_eq!(found.len(), 2, "{found:#?}");
+        // `six>=` has an obvious fix and its own finding.
+        assert_eq!(
+            found[0].title,
+            "requirements.txt line 4 is not a valid requirement"
+        );
+        assert_eq!(
+            found[0].fix,
+            FixKind::EditRequirement(crate::core::RequirementEdit {
+                file: dir.join("requirements.txt"),
+                old: "six>=".into(),
+                new: "six".into(),
+            })
+        );
+        assert!(found[0].detail.ends_with("Fix: change it to `six`."));
+        let f = &found[1];
         assert_eq!(f.severity, Severity::Error);
+        assert_eq!(f.fix, FixKind::Manual);
         assert_eq!(
             f.title,
-            "requirements.txt lines 3, 4, 14 and 15 are not valid requirements"
+            "requirements.txt lines 3, 14 and 15 are not valid requirements"
         );
         assert!(f.detail.contains("line 3 `==broken line`"), "{}", f.detail);
-        assert!(invalid_requirements_finding("requests\nsix>=1.16\n").is_none());
+        assert!(invalid_requirements_findings("requests\nsix>=1.16\n", dir).is_empty());
+    }
+
+    #[test]
+    fn obvious_requirement_mistakes_get_their_fix() {
+        let fix = |line: &str| obvious_fix(line);
+        assert_eq!(fix("requests=2.31").as_deref(), Some("requests==2.31"));
+        assert_eq!(
+            fix("Flask[async] = 3.0").as_deref(),
+            Some("Flask[async]==3.0")
+        );
+        assert_eq!(fix("pip install requests").as_deref(), Some("requests"));
+        assert_eq!(
+            fix("pip install rich==13.7.0").as_deref(),
+            Some("rich==13.7.0")
+        );
+        assert_eq!(fix("six>=").as_deref(), Some("six"));
+        // Guesses stay manual.
+        assert_eq!(fix("pip install a b"), None);
+        assert_eq!(fix("pip install -U requests"), None);
+        assert_eq!(fix("==broken line"), None);
+        assert_eq!(fix("also bad"), None);
+        assert_eq!(fix("bad>=1,"), None);
+        assert_eq!(fix("requests=2.31; python_version<'3.12'"), None);
+        let bad = invalid_requirements("pip install requests\nrequests=2.31\n");
+        let fixes: Vec<Option<&str>> = bad.iter().map(|b| b.fix.as_deref()).collect();
+        assert_eq!(fixes, [Some("requests"), Some("requests==2.31")]);
+    }
+
+    #[test]
+    fn a_missing_editable_path_is_removed() {
+        let dir = std::env::temp_dir().join(format!("pypilot-editable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("libs/here")).unwrap();
+        let text = "-e ./libs/gone\n-e ./libs/here\n--editable=./old[dev]  # x\n-e git+https://x/y.git#egg=y\nrequests\n";
+        let bad = invalid_requirements_at(text, &dir);
+        let lines: Vec<(usize, &str)> = bad.iter().map(|b| (b.line, b.text.as_str())).collect();
+        assert_eq!(lines, [(1, "-e ./libs/gone"), (3, "--editable=./old[dev]")]);
+        assert!(bad.iter().all(|b| b.fix.as_deref() == Some("")));
+        let found = invalid_requirements_findings(text, &dir);
+        assert_eq!(found.len(), 2);
+        assert!(found[0].detail.contains("`./libs/gone` does not exist"));
+        assert!(found[0].detail.ends_with("Fix: remove the line."));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -849,7 +1065,10 @@ mod tests {
         let bad = invalid_requirements("ok==1\nsix>= \\\n  \n");
         assert_eq!(bad.len(), 1);
         assert_eq!(bad[0].line, 2);
-        let f = invalid_requirements_finding("x\n==1\n").unwrap();
+        // Two physical lines are not one line to rewrite.
+        assert_eq!(bad[0].fix, None);
+        let found = invalid_requirements_findings("x\n==1\n", Path::new("."));
+        let f = &found[0];
         assert_eq!(
             f.title,
             "requirements.txt line 2 is not a valid requirement"
@@ -868,16 +1087,52 @@ mod tests {
         assert_eq!(conflicts[0].pyproject, "==2.31.0");
         assert_eq!(conflicts[0].requirements, "==2.25.0");
 
-        let f = pin_conflict_finding(&conflicts).unwrap();
+        let file = Path::new("requirements.txt");
+        let found = pin_conflict_findings(&conflicts, requirements, file);
+        assert_eq!(found.len(), 3);
+        let f = &found[1];
         assert_eq!(f.severity, Severity::Warning);
         assert_eq!(
             f.title,
-            "pyproject.toml and requirements.txt disagree on requests, pyyaml, six"
+            "pyproject.toml and requirements.txt disagree on pyyaml"
         );
-        assert!(f.detail.contains(
-            "requests is `==2.31.0` in pyproject.toml but `==2.25.0` in requirements.txt"
-        ));
-        assert!(pin_conflict_finding(&pin_conflicts(pyproject, "requests>=2\n")).is_none());
+        assert!(f
+            .detail
+            .contains("pyyaml is `==6.0.1` in pyproject.toml but `==5.4.1` in requirements.txt"));
+        // pyproject.toml is followed, and the fix says so: no contradiction.
+        assert!(f.detail.contains("requirements.txt is the stale one"));
+        assert_eq!(
+            f.fix,
+            FixKind::EditRequirement(crate::core::RequirementEdit {
+                file: file.to_path_buf(),
+                old: "pyyaml==5.4.1".into(),
+                new: "pyyaml==6.0.1".into(),
+            })
+        );
+        assert!(
+            pin_conflict_findings(&pin_conflicts(pyproject, "requests>=2\n"), "", file).is_empty()
+        );
+    }
+
+    #[test]
+    fn pin_fix_keeps_extras_and_markers_and_needs_one_line() {
+        let pyproject = "[project]\nname = \"x\"\ndependencies = [\"requests==2.31.0\"]\n";
+        let requirements = "Requests[socks]==2.25.0 ; python_version >= '3.8'  # pinned\n";
+        let file = Path::new("requirements.txt");
+        let found =
+            pin_conflict_findings(&pin_conflicts(pyproject, requirements), requirements, file);
+        let FixKind::EditRequirement(edit) = &found[0].fix else {
+            panic!("{:?}", found[0].fix);
+        };
+        assert_eq!(
+            edit.old,
+            "Requests[socks]==2.25.0 ; python_version >= '3.8'"
+        );
+        assert_eq!(edit.new, "Requests[socks]==2.31.0; python_version >= '3.8'");
+        // Listed twice: which one to change is not obvious.
+        let twice = "requests==2.25.0\nrequests==2.20.0\n";
+        let found = pin_conflict_findings(&pin_conflicts(pyproject, twice), twice, file);
+        assert_eq!(found[0].fix, FixKind::Manual);
     }
 
     #[test]

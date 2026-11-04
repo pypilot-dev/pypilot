@@ -77,7 +77,7 @@ pub async fn run<S: MetadataSource>(
     }
 
     if let Some(text) = project::read_manifest(&workspace.join("requirements.txt")) {
-        let bad = manifests::invalid_requirements(&text);
+        let bad = manifests::invalid_requirements_at(&text, workspace);
         if !bad.is_empty() {
             let each: Vec<String> = bad
                 .iter()

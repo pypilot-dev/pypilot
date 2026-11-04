@@ -102,6 +102,39 @@ fn installable_packages(
         .collect()
 }
 
+/// The release `uv.lock` pins for each package it locks at one version, when
+/// the project installs from it (a uv project, not pixi or Poetry-only) and
+/// the lock is current for pyproject.toml. `None` otherwise: a stale lock
+/// is re-resolved by the sync, so its versions say nothing.
+fn current_lock_versions(
+    workspace: &Path,
+    settings: &Settings,
+    project: &ProjectDeps,
+) -> Option<std::collections::BTreeMap<String, String>> {
+    if project.is_pixi() || !crate::core::health::uses_lock(settings.package_manager) {
+        return None;
+    }
+    let pyproject = crate::core::project::read_manifest(&workspace.join("pyproject.toml"))?;
+    if crate::core::manifests::is_poetry_only(&pyproject) {
+        return None;
+    }
+    let lock = crate::core::health::read_lock(workspace)?;
+    lock.root_requires.as_ref()?;
+    if !crate::core::health::lock_changes(workspace, &lock).is_empty() {
+        return None;
+    }
+    Some(single_versions(&lock))
+}
+
+/// Packages a lock pins at exactly one version.
+fn single_versions(lock: &crate::core::health::Lock) -> std::collections::BTreeMap<String, String> {
+    lock.versions
+        .iter()
+        .filter(|(_, v)| v.len() == 1)
+        .filter_map(|(name, v)| Some((name.clone(), v.iter().next()?.clone())))
+        .collect()
+}
+
 /// Full read-only assessment of a workspace (F5 / doctor).
 pub async fn assess<S: MetadataSource>(
     workspace: &Path,
@@ -115,11 +148,21 @@ pub async fn assess<S: MetadataSource>(
         None
     } else {
         let mut report = pypi::analyze(source, Platform::current(), &project.packages).await;
+        // A current uv.lock is what `uv sync --locked` installs: judge the
+        // Pythons by its releases, as the lock-file finding says PyPilot
+        // follows it.
+        let locked = current_lock_versions(workspace, settings, &project);
+        if let Some(locked) = &locked {
+            pypi::fit_report_to_lock(source, &mut report, locked).await;
+        }
         // An existing venv: a version range is judged by the release the
-        // installer picks on its Python, not by the newest release.
+        // installer picks on its Python, not by the newest release. With a
+        // current lock that release is the locked one, already judged.
         if let Some(venv) = probes.venv.as_ref() {
             if let Some(py) = venv.python {
-                pypi::fit_report_to_python(source, &mut report, &project.packages, py).await;
+                if locked.is_none() {
+                    pypi::fit_report_to_python(source, &mut report, &project.packages, py).await;
+                }
                 // What is installed there installed on that Python.
                 let installed = crate::core::installed::scan(&venv.path).versions;
                 pypi::trust_installed(&mut report, &installed, py);
@@ -1018,6 +1061,44 @@ fn capping_clause(compat: &CompatReport) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_current_uv_lock_pins_the_releases_judged() {
+        let dir = std::env::temp_dir().join(format!("pypilot-lock-fit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\nrequires-python = \">=3.9\"\ndependencies = [\"six\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("uv.lock"),
+            "version = 1\nrequires-python = \">=3.9\"\n\n[[package]]\nname = \"demo\"\nversion = \"0.1.0\"\nsource = { virtual = \".\" }\n\n[package.metadata]\nrequires-dist = [{ name = \"six\" }]\n\n[[package]]\nname = \"six\"\nversion = \"1.17.0\"\nsource = { registry = \"https://pypi.org/simple\" }\n",
+        )
+        .unwrap();
+        let project = crate::core::project::scan(&dir);
+        let uv = Settings::default();
+        let locked = current_lock_versions(&dir, &uv, &project).unwrap();
+        assert_eq!(locked.get("six").map(String::as_str), Some("1.17.0"));
+
+        // pip mode installs requirements, not the lock.
+        let pip = Settings {
+            package_manager: crate::settings::PackageManager::Pip,
+            ..Settings::default()
+        };
+        assert!(current_lock_versions(&dir, &pip, &project).is_none());
+
+        // A dependency the lock does not know yet: the sync re-resolves.
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\nversion = \"0.1.0\"\nrequires-python = \">=3.9\"\ndependencies = [\"six\", \"attrs\"]\n",
+        )
+        .unwrap();
+        let project = crate::core::project::scan(&dir);
+        assert!(current_lock_versions(&dir, &uv, &project).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn analysis(name: &str, minors: &[u8]) -> PackageAnalysis {
         PackageAnalysis {

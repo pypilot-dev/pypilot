@@ -129,6 +129,8 @@ async fn uv_project_mode_plans_init_python_venv_and_add() {
         names(&steps),
         [
             "uv init".to_string(),
+            // `uv init` writes `>=3.12`; the dependencies allow older Pythons.
+            "set requires-python".to_string(),
             format!("uv python install {py}"),
             "uv venv".to_string(),
             // The pyproject.toml `uv init` would create is what makes this
