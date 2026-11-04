@@ -136,6 +136,18 @@ pub async fn assess<S: MetadataSource>(
     }
     let (target_python, mut findings) = synthesize(&env, &project, compat.as_ref());
     findings.extend(hardware.findings);
+    // The manifests themselves: unreadable requirements.txt lines, pins that
+    // disagree, two lock files, Poetry and conda-only projects.
+    crate::core::manifests::apply(
+        &mut findings,
+        workspace,
+        settings,
+        &project,
+        compat.as_ref(),
+        probes.venv.as_ref(),
+        source,
+    )
+    .await;
 
     // What is installed against what is declared and locked: missing,
     // drifted, half-installed packages, a stale uv.lock (file reads only).

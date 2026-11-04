@@ -107,7 +107,11 @@ pub fn plan(findings: &[Finding]) -> RepairPlan {
             FixKind::SyncEnvironment => p.sync = true,
             // Suggestions the user runs themselves (`migrate-conda`,
             // `migrate-to-pixi`), or guidance only.
-            FixKind::Manual | FixKind::MigrateConda | FixKind::MigrateToPixi => {
+            FixKind::Manual
+            | FixKind::MigrateConda
+            | FixKind::MigrateToPixi
+            | FixKind::MigrateCondaToPixi
+            | FixKind::PoetryInstall => {
                 p.manual.push(f.clone());
                 continue;
             }

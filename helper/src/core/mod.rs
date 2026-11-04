@@ -17,6 +17,7 @@ pub mod install;
 pub mod installed;
 pub mod interpreter;
 pub mod logs;
+pub mod manifests;
 pub mod modules;
 pub mod pip;
 pub mod pixi;
@@ -101,6 +102,14 @@ pub enum FixKind {
     /// is gone, or it leaks the system site-packages): rebuild it in place,
     /// on the Python it had (or the pinned one), then sync.
     RepairEnvironment { python: Option<PyVersion> },
+    /// Move a project whose only manifest is a conda `environment.yml` to
+    /// pixi (`pypilot migrate-conda --to pixi --write --install`), which
+    /// keeps its Python pin and conda packages. Offered when pixi is
+    /// installed; [`FixKind::MigrateConda`] otherwise.
+    MigrateCondaToPixi,
+    /// Install a Poetry project with `poetry install`: its dependencies live
+    /// in `[tool.poetry]`, which uv and pip do not read.
+    PoetryInstall,
 }
 
 impl serde::Serialize for FixKind {
@@ -131,6 +140,8 @@ impl FixKind {
             FixKind::Relock => "relock",
             FixKind::ReinstallPackages(_) => "reinstall_packages",
             FixKind::RepairEnvironment { .. } => "repair_environment",
+            FixKind::MigrateCondaToPixi => "migrate_conda_to_pixi",
+            FixKind::PoetryInstall => "poetry_install",
         }
     }
 }
@@ -208,6 +219,8 @@ mod tests {
             FixKind::MigrateConda,
             FixKind::MigrateToPixi,
             FixKind::Manual,
+            FixKind::MigrateCondaToPixi,
+            FixKind::PoetryInstall,
         ]
         .map(|k| serde_json::to_value(k).unwrap()["kind"].clone());
         assert_eq!(
@@ -216,7 +229,9 @@ mod tests {
                 "setup_environment",
                 "migrate_conda",
                 "migrate_to_pixi",
-                "manual"
+                "manual",
+                "migrate_conda_to_pixi",
+                "poetry_install"
             ]
         );
         let new = [
