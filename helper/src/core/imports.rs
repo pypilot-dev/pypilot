@@ -243,6 +243,179 @@ fn is_ipython_line(raw: &str, code: &str) -> bool {
     false
 }
 
+/// A use of `module.symbol` found in source: `np.float` after
+/// `import numpy as np`, or `from pydantic import BaseSettings`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolUse {
+    /// The module the symbol is looked up in, dotted: `numpy`, `collections`.
+    pub module: String,
+    pub symbol: String,
+    /// One-based line number.
+    pub line: u32,
+    /// The code as written: `np.float`, `from pydantic import BaseSettings`.
+    pub written: String,
+    /// `from module import symbol` rather than an attribute access.
+    pub from_import: bool,
+}
+
+/// Find uses of the `(module, symbol)` pairs in `targets`: attribute access
+/// through whatever name the module is bound to (`import numpy as np` then
+/// `np.float`, `import collections` then `collections.Mapping`,
+/// `from scipy import integrate` then `integrate.simps`), and `from module
+/// import symbol`, parenthesized lists included. One use per pair per line.
+///
+/// A line scanner like [`extract`]: strings and comments are masked, and a
+/// name rebound later in the file is not tracked, which is fine for the
+/// module aliases this looks for.
+pub fn symbol_uses(source: &str, targets: &[(String, String)]) -> Vec<SymbolUse> {
+    if targets.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    let mut open_delim: Option<&'static str> = None;
+    for raw in source.lines() {
+        let (code, next) = strip_strings_and_comments(raw, open_delim);
+        open_delim = next;
+        lines.push(code);
+    }
+    let is_target =
+        |module: &str, symbol: &str| targets.iter().any(|(m, s)| m == module && s == symbol);
+
+    // Local name -> dotted module it is bound to; and the import lines.
+    let mut aliases: std::collections::HashMap<String, String> = Default::default();
+    let mut import_lines = std::collections::HashSet::new();
+    let mut out: Vec<SymbolUse> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+        if let Some(rest) = trimmed.strip_prefix("import ") {
+            import_lines.insert(i);
+            for part in rest.split(',') {
+                let mut words = part.split_whitespace();
+                let path = words.next().unwrap_or("");
+                if !is_module_path(path) {
+                    continue;
+                }
+                match (words.next(), words.next()) {
+                    (Some("as"), Some(name)) => {
+                        aliases.insert(name.to_string(), path.to_string());
+                    }
+                    _ => {
+                        let root = path.split('.').next().unwrap_or(path);
+                        aliases.insert(root.to_string(), root.to_string());
+                    }
+                }
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("from ") {
+            let start = i;
+            let mut body = rest.to_string();
+            // `from x import (a,\n b)`: read on to the closing parenthesis.
+            if body.contains('(') {
+                while !body.contains(')') && i + 1 < lines.len() {
+                    i += 1;
+                    import_lines.insert(i);
+                    body.push(' ');
+                    body.push_str(lines[i].trim());
+                }
+            }
+            import_lines.insert(start);
+            if let Some((module, names)) = body.split_once(" import ") {
+                let module = module.trim();
+                if is_module_path(module) {
+                    let names = names.replace(['(', ')', '\\'], " ");
+                    for part in names.split(',') {
+                        let mut words = part.split_whitespace();
+                        let Some(name) = words.next().filter(|n| is_module_path(n)) else {
+                            continue;
+                        };
+                        let local = match (words.next(), words.next()) {
+                            (Some("as"), Some(alias)) => alias,
+                            _ => name,
+                        };
+                        if is_target(module, name) {
+                            out.push(SymbolUse {
+                                module: module.to_string(),
+                                symbol: name.to_string(),
+                                line: start as u32 + 1,
+                                written: format!("from {module} import {name}"),
+                                from_import: true,
+                            });
+                        }
+                        // It may be a submodule (`from scipy import integrate`).
+                        aliases.insert(local.to_string(), format!("{module}.{name}"));
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+
+    for (n, code) in lines.iter().enumerate() {
+        if import_lines.contains(&n) {
+            continue;
+        }
+        let chars: Vec<char> = code.chars().collect();
+        let mut j = 0;
+        while j < chars.len() {
+            let starts = is_ident_char(chars[j])
+                && !chars[j].is_ascii_digit()
+                && (j == 0 || (!is_ident_char(chars[j - 1]) && chars[j - 1] != '.'));
+            if !starts {
+                j += 1;
+                continue;
+            }
+            // Read `name(.name)*`.
+            let mut parts: Vec<String> = Vec::new();
+            let mut k = j;
+            loop {
+                let word: String = chars[k..]
+                    .iter()
+                    .take_while(|c| is_ident_char(**c))
+                    .collect();
+                if word.is_empty() {
+                    break;
+                }
+                k += word.chars().count();
+                parts.push(word);
+                if k < chars.len() && chars[k] == '.' {
+                    k += 1;
+                } else {
+                    break;
+                }
+            }
+            if parts.len() >= 2 {
+                if let Some(bound) = aliases.get(&parts[0]) {
+                    let bound_len = bound.split('.').count();
+                    let mut full: Vec<&str> = bound.split('.').collect();
+                    full.extend(parts[1..].iter().map(String::as_str));
+                    for cut in bound_len..full.len() {
+                        let module = full[..cut].join(".");
+                        let symbol = full[cut];
+                        let line = n as u32 + 1;
+                        let seen = out
+                            .iter()
+                            .any(|u| u.line == line && u.module == module && u.symbol == symbol);
+                        if is_target(&module, symbol) && !seen {
+                            // `full[cut]` is `parts[cut - bound_len + 1]`.
+                            let written = parts[..cut - bound_len + 2].join(".");
+                            out.push(SymbolUse {
+                                module,
+                                symbol: symbol.to_string(),
+                                line,
+                                written,
+                                from_import: false,
+                            });
+                        }
+                    }
+                }
+            }
+            j = k.max(j + 1);
+        }
+    }
+    out.sort_by_key(|u| u.line);
+    out
+}
+
 fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
@@ -622,5 +795,85 @@ mod attr_tests {
         assert_eq!(dotted[0].binding, None);
         let from = extract("from a import b\n");
         assert_eq!(from[0].binding, None);
+    }
+}
+
+#[cfg(test)]
+mod symbol_tests {
+    use super::*;
+
+    fn targets(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(m, s)| (m.to_string(), s.to_string()))
+            .collect()
+    }
+
+    fn found(src: &str, pairs: &[(&str, &str)]) -> Vec<(String, u32, bool)> {
+        symbol_uses(src, &targets(pairs))
+            .into_iter()
+            .map(|u| (u.written, u.line, u.from_import))
+            .collect()
+    }
+
+    #[test]
+    fn numpy_aliases_are_followed() {
+        let src = "import numpy as np\nx = np.zeros(3, dtype=np.float)\ny = np.float64(1)\n";
+        assert_eq!(
+            found(src, &[("numpy", "float")]),
+            [("np.float".into(), 2, false)]
+        );
+        let src = "import numpy\nnumpy.float(1)\n# np.float in a comment\ns = 'numpy.float'\n";
+        assert_eq!(
+            found(src, &[("numpy", "float")]),
+            [("numpy.float".into(), 2, false)]
+        );
+        // Not imported: `np` is somebody else's name.
+        assert!(found("np.float\n", &[("numpy", "float")]).is_empty());
+        // `self.np.float` is an attribute of something else.
+        assert!(found("import numpy as np\nself.np.float\n", &[("numpy", "float")]).is_empty());
+    }
+
+    #[test]
+    fn from_imports_and_parenthesized_lists() {
+        let src = "from pydantic import BaseSettings\n";
+        assert_eq!(
+            found(src, &[("pydantic", "BaseSettings")]),
+            [("from pydantic import BaseSettings".into(), 1, true)]
+        );
+        let src = "from collections import (\n    OrderedDict,\n    Mapping as M,\n)\n";
+        assert_eq!(
+            found(src, &[("collections", "Mapping")]),
+            [("from collections import Mapping".into(), 1, true)]
+        );
+        // `collections.abc.Mapping` is the replacement, not a use.
+        let src = "import collections\nimport collections.abc\nisinstance(x, collections.abc.Mapping)\nisinstance(x, collections.Mapping)\n";
+        assert_eq!(
+            found(src, &[("collections", "Mapping")]),
+            [("collections.Mapping".into(), 4, false)]
+        );
+    }
+
+    #[test]
+    fn decorators_and_submodule_aliases() {
+        let src = "import asyncio\n@asyncio.coroutine\ndef f():\n    yield from asyncio.sleep(0)\n";
+        assert_eq!(
+            found(src, &[("asyncio", "coroutine")]),
+            [("asyncio.coroutine".into(), 2, false)]
+        );
+        let src = "from scipy import integrate\nintegrate.simps(y)\n";
+        assert_eq!(
+            found(src, &[("scipy.integrate", "simps")]),
+            [("integrate.simps".into(), 2, false)]
+        );
+        let src =
+            "import scipy.integrate as si\nsi.simps(y)\nimport scipy\nscipy.integrate.simps(y)\n";
+        assert_eq!(
+            found(src, &[("scipy.integrate", "simps")]),
+            [
+                ("si.simps".into(), 2, false),
+                ("scipy.integrate.simps".into(), 4, false)
+            ]
+        );
     }
 }
