@@ -60,6 +60,25 @@ pub fn check(venv: &Path, python: Option<PyVersion>) -> Vec<Finding> {
 /// requirement, a dependency that is not installed, or a version that does not
 /// parse. A false alarm about a working environment is worse than silence.
 pub fn conflicts(venv: &Path, installed: &Installed, python: Option<PyVersion>) -> Vec<Conflict> {
+    conflicts_in(&requirements(venv, python), installed)
+}
+
+/// One installed distribution's requirement on another, whose marker holds
+/// on this Python.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Requires {
+    /// The package that declares the requirement, normalized.
+    pub package: String,
+    pub package_version: Option<String>,
+    /// The dependency it constrains, normalized.
+    pub dependency: String,
+    /// The specifier as written, e.g. `<2,>=1.21`; never empty.
+    pub spec: String,
+}
+
+/// Every versioned `Requires-Dist` of the venv's distributions that applies
+/// on `python`. Markers this module cannot evaluate are skipped.
+pub fn requirements(venv: &Path, python: Option<PyVersion>) -> Vec<Requires> {
     let mut out = Vec::new();
     for (package, package_version, metadata) in dist_infos(venv) {
         for line in requires_dist(&metadata) {
@@ -74,23 +93,38 @@ pub fn conflicts(venv: &Path, installed: &Installed, python: Option<PyVersion>) 
                     continue;
                 }
             }
-            let Some(have) = installed.version_of(&req.name) else {
-                continue;
-            };
-            let Some(parsed) = PackageVersion::parse(&have) else {
-                continue;
-            };
-            if VersionSpec::parse(&req.spec).admits(&parsed) {
-                continue;
-            }
-            out.push(Conflict {
+            out.push(Requires {
                 package: package.clone(),
                 package_version: package_version.clone(),
                 dependency: req.name,
                 spec: req.spec,
-                installed: have,
             });
         }
+    }
+    out
+}
+
+/// The [`requirements`] that exclude the installed version of their
+/// dependency.
+pub fn conflicts_in(reqs: &[Requires], installed: &Installed) -> Vec<Conflict> {
+    let mut out = Vec::new();
+    for req in reqs {
+        let Some(have) = installed.version_of(&req.dependency) else {
+            continue;
+        };
+        let Some(parsed) = PackageVersion::parse(&have) else {
+            continue;
+        };
+        if VersionSpec::parse(&req.spec).admits(&parsed) {
+            continue;
+        }
+        out.push(Conflict {
+            package: req.package.clone(),
+            package_version: req.package_version.clone(),
+            dependency: req.dependency.clone(),
+            spec: req.spec.clone(),
+            installed: have,
+        });
     }
     out
 }
