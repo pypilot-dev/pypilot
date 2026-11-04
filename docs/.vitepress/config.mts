@@ -73,6 +73,7 @@ export default defineConfig({
             { text: 'GPU & CUDA', link: '/guide/gpu-cuda' },
             { text: 'Notebooks', link: '/guide/notebooks' },
             { text: 'Conda projects', link: '/guide/conda' },
+            { text: 'What doctor --fix fixes', link: '/guide/fixing' },
             { text: 'Troubleshooting & FAQ', link: '/guide/troubleshooting' },
             { text: 'Security & release integrity', link: '/guide/security' },
             { text: 'Roadmap', link: '/guide/roadmap' }
