@@ -747,7 +747,8 @@ dependencies = [\"jwt\", \"pyjwt\"]
             names,
             [
                 "uv remove jwt",
-                "uv pip uninstall jwt pyjwt",
+                // `uv remove` syncs jwt away; pyjwt is reinstalled clean.
+                "uv pip uninstall pyjwt",
                 "uv pip install --reinstall PyJWT"
             ]
         );

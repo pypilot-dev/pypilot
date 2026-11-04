@@ -214,6 +214,7 @@ async fn replace_dist(
     steps: &mut Vec<Step>,
 ) {
     // 1. The manifest stops asking for the strays.
+    let mut removed_by_uv: Vec<String> = Vec::new();
     if !r.drop.is_empty() {
         let declared = pyproject_names(workspace);
         let in_pyproject: Vec<&str> = r
@@ -233,6 +234,7 @@ async fn replace_dist(
             if !record(steps, &name, out, "removed from pyproject.toml") {
                 return;
             }
+            removed_by_uv.extend(in_pyproject.iter().map(|d| normalize_name(d)));
         }
         if manifests.requirements {
             let path = workspace.join("requirements.txt");
@@ -261,12 +263,21 @@ async fn replace_dist(
     }
 
     // 2. Uninstall what is still there (a sync above may have removed some).
+    // A dry run cannot look, so it predicts: `uv remove` syncs the venv,
+    // which uninstalls what it dropped (c12c listed an uninstall the real
+    // run never needed).
     let venv = workspace.join(".venv");
     let present = installed::scan(&venv);
     let still: Vec<&str> = r
         .uninstall
         .iter()
-        .filter(|d| exec::is_dry_run() || present.contains(d))
+        .filter(|d| {
+            if exec::is_dry_run() {
+                !removed_by_uv.contains(&normalize_name(d))
+            } else {
+                present.contains(d)
+            }
+        })
         .map(String::as_str)
         .collect();
     if !still.is_empty() {
