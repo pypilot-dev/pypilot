@@ -209,10 +209,13 @@ pub async fn run<S: MetadataSource>(
             } else {
                 "".to_string()
             };
+            // The range is that release's, which a version range does not
+            // say: `numpy>=2.1` judged by numpy 2.5.4 supports 3.12+.
+            let label = format!("{} {}", p.name, p.version);
             println!(
                 "    {} {:<20} {}{}",
                 "•".cyan(),
-                p.name.bold(),
+                label.bold(),
                 p.supported.to_range_string().green(),
                 sdist_note
             );

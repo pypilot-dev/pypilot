@@ -1076,7 +1076,14 @@ fn incompat_reason(compat: &CompatReport, current: PyVersion, target: Option<PyV
     let blockers = compat.blockers_for(current);
     let names: Vec<String> = blockers
         .iter()
-        .map(|p| format!("{} (supports {})", p.name, p.supported.to_range_string()))
+        .map(|p| {
+            format!(
+                "{} {} (supports {})",
+                p.name,
+                p.version,
+                p.supported.to_range_string()
+            )
+        })
         .collect();
     let who = if names.is_empty() {
         "some dependencies".to_string()
@@ -1249,7 +1256,12 @@ mod tests {
             .find(|f| f.severity == Severity::Error)
             .unwrap();
         assert_eq!(f.fix, FixKind::RecreateWithPython(PyVersion::py3(12)));
-        assert!(f.detail.contains("mediapipe"));
+        // The release judged is named: a range's newest may support less.
+        assert!(
+            f.detail.contains("mediapipe 1.0 (supports 3.9–3.12)"),
+            "{}",
+            f.detail
+        );
         assert!(f.detail.contains("3.13"));
     }
 
