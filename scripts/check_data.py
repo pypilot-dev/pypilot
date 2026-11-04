@@ -440,7 +440,39 @@ def conda_summary(versions: List[Dict]) -> Optional[Dict]:
         return None
     plats = {p for v in recent for p in (v.get("platforms") or []) if p in CONDA_PLATFORMS}
     return {"version": recent[0]["version"], "platforms": sorted(plats),
-            "newest_platforms": list(recent[0].get("platforms") or [])}
+            "newest_platforms": list(recent[0].get("platforms") or []),
+            "versions": [v["version"] for v in recent]}
+
+
+def prefix_query(query: str) -> Dict:
+    body = json.dumps({"query": query}).encode()
+    req = urllib.request.Request(PREFIX_GRAPHQL, data=body, headers={
+        "User-Agent": USER_AGENT, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise NetworkError(f"{PREFIX_GRAPHQL}: {exc}") from exc
+    if data.get("errors"):
+        raise NetworkError(f"{PREFIX_GRAPHQL}: {data['errors']}")
+    return data["data"]
+
+
+def conda_built_on(name: str, versions: List[str], platforms: List[str]) -> List[str]:
+    """The `platforms` one of `versions` has a build for, asked of the
+    variants list (authoritative; the per-version `platforms` field has been
+    seen to collapse to a single platform)."""
+    pairs = [(v, p) for p in platforms for v in versions]
+    if not pairs:
+        return []
+    fields = " ".join(
+        f"v{i}: variants(version: {json.dumps(v)}, platform: {json.dumps(p)}, limit: 1) "
+        f"{{ page {{ platform }} }}"
+        for i, (v, p) in enumerate(pairs))
+    pkg = prefix_query(f'{{ package(channelName: "conda-forge", name: {json.dumps(name)}) '
+                       f"{{ {fields} }} }}").get("package") or {}
+    return sorted({p for i, (_v, p) in enumerate(pairs)
+                   if ((pkg.get(f"v{i}") or {}).get("page") or [])})
 
 
 def conda_forge_latest(names: List[str]) -> Dict[str, Optional[Dict]]:
@@ -452,18 +484,9 @@ def conda_forge_latest(names: List[str]) -> Dict[str, Optional[Dict]]:
             f'p{j}: package(channelName: "conda-forge", name: {json.dumps(n)}) '
             f"{{ versions(limit: {CONDA_VERSIONS_FETCHED}, page: 0) {{ page {{ version platforms }} }} }}"
             for j, n in enumerate(chunk))
-        body = json.dumps({"query": "{ " + fields + " }"}).encode()
-        req = urllib.request.Request(PREFIX_GRAPHQL, data=body, headers={
-            "User-Agent": USER_AGENT, "Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            raise NetworkError(f"{PREFIX_GRAPHQL}: {exc}") from exc
-        if data.get("errors"):
-            raise NetworkError(f"{PREFIX_GRAPHQL}: {data['errors']}")
+        data = prefix_query("{ " + fields + " }")
         for j, n in enumerate(chunk):
-            pkg = data["data"].get(f"p{j}")
+            pkg = data.get(f"p{j}")
             page = ((pkg or {}).get("versions") or {}).get("page") or []
             out[n] = conda_summary(page) if pkg else None
     return out
@@ -495,16 +518,22 @@ def check_conda_forge(table: Dict) -> List[Dict]:
                           f"(limit {CONDA_FORGE_MAX_AGE_DAYS}); {regen}", age_days=age))
     rows = table["packages"]
     latest = conda_forge_latest(sorted({r["conda"] for r in rows}))
-    # The batched API answer has been seen to under-report platforms under
-    # load, so a row that looks changed is asked about again on its own.
-    def recheck(name: str) -> Optional[Dict]:
-        return conda_forge_latest([name]).get(name)
+    # The per-version platform lists have been seen to under-report (down to
+    # a single platform, the same wrong answer on every retry), so a tabled
+    # platform that looks gone is confirmed against the variants list.
+    def recheck(r: Dict, info: Optional[Dict]) -> Optional[Dict]:
+        info = info or conda_forge_latest([r["conda"]]).get(r["conda"])
+        if info is None or tabled_platforms(r) == ["noarch"]:
+            return info
+        gone = [p for p in tabled_platforms(r) if p not in info["platforms"]]
+        found = conda_built_on(r["conda"], info["versions"], gone)
+        return dict(info, platforms=sorted(set(info["platforms"]) | set(found)))
 
     gone, moved, newer = [], [], []
     for r in rows:
         info = latest.get(r["conda"])
         if info is None or not platforms_match(r, info):
-            info = recheck(r["conda"])
+            info = recheck(r, info)
         if info is None:
             gone.append(r["pypi"])
             continue

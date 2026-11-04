@@ -545,11 +545,19 @@ def builds_for(conda: str, versions: List[Dict]) -> List[Dict]:
     per_newest, noarch = pythons(newest)
     if noarch and not per_newest:
         return [{"platform": "noarch", "python": []}]
+    # The variants list is the authority: the per-version platform lists
+    # have been seen to collapse to a single platform. So a platform counts
+    # from the variants of the newest version built there; the listing only
+    # fills in what the variants of the recent versions do not show.
+    confirmed = {plat: newest for plat in per_newest}
+    for older in versions[1:]:
+        if all(plat in confirmed for plat in PLATFORMS):
+            break
+        per_older, _ = pythons(older["version"])
+        for plat in per_older:
+            confirmed.setdefault(plat, older["version"])
     chosen = platform_versions(versions)
-    # The variants list is the authority for the newest version: it can name
-    # platforms the version listing missed.
-    for plat in per_newest:
-        chosen[plat] = newest
+    chosen.update(confirmed)
     rows = []
     for plat in PLATFORMS:
         version = chosen.get(plat)
