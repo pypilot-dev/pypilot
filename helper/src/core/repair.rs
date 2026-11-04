@@ -272,8 +272,11 @@ pub async fn run_with_mode<S: MetadataSource>(
     if mode == ResolvedMode::Pixi || plan.setup {
         let mut s = setup::run_with_mode(workspace, settings, source, mode).await?;
         if !plan.fixes.is_empty() {
-            s.why = format!("{} {}", describe(&plan), s.why);
+            // `summary.why` is `describe(&plan)`, after the edits' own line.
+            s.why = format!("{} {}", summary.why, s.why).trim_end().to_string();
         }
+        // The requirement edits ran before the bootstrap: report them too.
+        s.steps.splice(0..0, std::mem::take(&mut summary.steps));
         // A conda-only project the bootstrap just moved to pixi is pixi's
         // now, like any pixi project.
         if s.resolved_mode != ResolvedMode::Pixi {

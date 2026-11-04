@@ -401,3 +401,36 @@ async fn an_unsatisfiable_requires_python_builds_nothing() {
     assert!(summary.steps[0].detail.contains("matches no Python"));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// D 5a: the requirements.txt edit runs before the bootstrap, and the
+/// bootstrap's report still lists it.
+#[tokio::test]
+async fn requirement_edits_before_a_setup_are_reported() {
+    let root = project("edit-then-setup", ".venv", 12);
+    std::fs::remove_dir_all(root.join(".venv")).unwrap();
+    std::fs::write(root.join("requirements.txt"), "numpy==1.25.0\n").unwrap();
+    let (summary, steps) = plan_for(&root).await;
+    assert_eq!(names(&steps)[0], "edit requirements.txt", "{steps:#?}");
+    assert_eq!(
+        summary.steps[0].name, "edit requirements.txt",
+        "{summary:#?}"
+    );
+    assert_eq!(
+        summary.steps[0].detail,
+        "`numpy==1.25.0` -> `numpy==1.26.4`"
+    );
+    assert!(
+        summary
+            .why
+            .contains("requirements.txt disagree on numpy. Then: "),
+        "{}",
+        summary.why
+    );
+    assert!(!summary.why.ends_with(' '));
+    // A dry run: the file is untouched.
+    assert_eq!(
+        std::fs::read_to_string(root.join("requirements.txt")).unwrap(),
+        "numpy==1.25.0\n"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
