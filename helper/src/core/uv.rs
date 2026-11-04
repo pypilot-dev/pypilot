@@ -525,6 +525,7 @@ pub async fn add_requirements(
     cwd: &Path,
 ) -> crate::Result<Output> {
     let mut args: Vec<String> = vec!["add".into(), "-r".into()];
+    keep_venv_python(&mut args, cwd);
     let file_arg = if let Ok(rel) = requirements_file.strip_prefix(cwd) {
         rel.display().to_string()
     } else {
@@ -561,6 +562,7 @@ pub async fn add_with_requirements_migration(
     let req_path = cwd.join("requirements.txt");
     if req_path.is_file() {
         let mut args: Vec<String> = vec!["add".into(), "-r".into(), "requirements.txt".into()];
+        keep_venv_python(&mut args, cwd);
         if let Some(url) = index_url {
             args.push("--index".into());
             args.push(url.to_string());
@@ -586,6 +588,7 @@ pub async fn add(
     cwd: &Path,
 ) -> crate::Result<Output> {
     let mut args: Vec<String> = vec!["add".into()];
+    keep_venv_python(&mut args, cwd);
     if let Some(url) = index_url {
         args.push("--index".into());
         args.push(url.to_string());
@@ -611,7 +614,11 @@ pub async fn add_dev(uv: &UvInfo, packages: &[String], cwd: &Path) -> crate::Res
     );
     exec::run(
         &uv.path,
-        &add_dev_args(packages),
+        &{
+            let mut args = add_dev_args(packages);
+            keep_venv_python(&mut args, cwd);
+            args
+        },
         Some(cwd),
         add_writes(effect, cwd),
     )
@@ -620,6 +627,24 @@ pub async fn add_dev(uv: &UvInfo, packages: &[String], cwd: &Path) -> crate::Res
 
 /// The argument vector for [`add_dev`], split out so a test can assert on it
 /// without needing a uv binary present.
+/// Add `--python X.Y` (the project `.venv`'s Python) to a `uv add`.
+///
+/// With no `.python-version`, uv project commands choose the newest Python
+/// requires-python allows and rebuild `.venv` on it, so recording one
+/// package silently moved a 3.11 venv to 3.15. Inserted right after the
+/// subcommand; nothing is added when there is no venv to keep.
+fn keep_venv_python(args: &mut Vec<String>, cwd: &Path) {
+    let Some(py) = std::fs::read_to_string(cwd.join(".venv").join("pyvenv.cfg"))
+        .ok()
+        .and_then(|t| crate::core::probe::parse_pyvenv_version(&t))
+    else {
+        return;
+    };
+    let at = 1.min(args.len());
+    args.insert(at, py.to_string());
+    args.insert(at, "--python".into());
+}
+
 fn add_dev_args(packages: &[String]) -> Vec<String> {
     let mut args: Vec<String> = vec!["add".into(), "--dev".into()];
     args.extend(packages.iter().cloned());
@@ -948,6 +973,24 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[test]
+    fn uv_add_keeps_the_venv_python() {
+        let dir = std::env::temp_dir().join(format!("pp-uv-keep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".venv")).unwrap();
+        let mut args: Vec<String> = vec!["add".into(), "numpy<2".into()];
+        keep_venv_python(&mut args, &dir);
+        assert_eq!(args, ["add", "numpy<2"], "no pyvenv.cfg: unchanged");
+        std::fs::write(
+            dir.join(".venv").join("pyvenv.cfg"),
+            "version_info = 3.11.9",
+        )
+        .unwrap();
+        keep_venv_python(&mut args, &dir);
+        assert_eq!(args, ["add", "--python", "3.11", "numpy<2"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
