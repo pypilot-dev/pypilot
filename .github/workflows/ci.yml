@@ -74,3 +74,8 @@ jobs:
         run: |
           uv run --no-project --python 3.8 python scripts/bump_engine_pins.py --self-test
           uv run --no-project --python 3.15 python scripts/bump_engine_pins.py --self-test
+      - name: Self-test check_data.py
+        # Offline: the conda-forge platform rule and the schema comparison.
+        run: |
+          uv run --no-project --python 3.9 python scripts/check_data.py --self-test
+          uv run --no-project --python 3.15 python scripts/check_data.py --self-test

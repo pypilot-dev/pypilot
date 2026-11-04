@@ -18,7 +18,9 @@ Checks:
               cuda_extensions.json
   conda-forge every package in conda_forge_packages.json still exists on
               conda-forge and is built for the platforms the table says (via
-              prefix.dev); a table older than CONDA_FORGE_MAX_AGE_DAYS is
+              prefix.dev; a platform counts when one of the three newest
+              versions is built for it, so a release still uploading is not
+              drift); a table older than CONDA_FORGE_MAX_AGE_DAYS is
               stale (regenerate with scripts/gen_conda_forge.py); newer
               conda-forge versions are reported as info
   python      a released CPython newer than the engine's MAX_MINOR (it would
@@ -30,7 +32,7 @@ Checks:
 Exit codes: 0 current, 1 stale (or schema break), 2 network error and nothing
 found stale. Stdlib only, Python 3.9+.
 
-Usage: python scripts/check_data.py [--json]
+Usage: python scripts/check_data.py [--json] [--self-test]
 """
 
 from __future__ import annotations
@@ -403,14 +405,52 @@ def check_extensions(ext_table: Dict) -> List[Dict]:
     return out
 
 
+# Same rule as scripts/gen_conda_forge.py: a platform counts as built when one
+# of the newest CONDA_RECENT_VERSIONS versions has a build for it. conda-forge
+# uploads a release platform by platform; until the last one lands, pixi
+# installs the previous release there, so the table keeps that platform.
+CONDA_RECENT_VERSIONS = 3
+CONDA_VERSIONS_FETCHED = 10
+
+
+def _conda_vpart(part: str) -> Tuple[int, Any]:
+    if part.isdigit():
+        return (2, int(part))
+    if part == "post":
+        return (3, 0)
+    if part == "dev":
+        return (0, 0)
+    return (1, part)
+
+
+def conda_vkey(version: str) -> Tuple:
+    """Sort key for conda versions (numbers as numbers, letters before them)."""
+    parts = re.findall(r"\d+|[a-zA-Z]+", version.lower().split("+")[0])
+    return tuple(_conda_vpart(p) for p in parts) + ((2, -1),)
+
+
+def conda_summary(versions: List[Dict]) -> Optional[Dict]:
+    """{version, platforms, newest_platforms} from [{version, platforms}]:
+    the newest version, the tracked platforms any of the newest
+    CONDA_RECENT_VERSIONS is built for, and the newest version's own list
+    (for noarch). None when there are no versions."""
+    recent = sorted(versions, key=lambda v: conda_vkey(v["version"]),
+                    reverse=True)[:CONDA_RECENT_VERSIONS]
+    if not recent:
+        return None
+    plats = {p for v in recent for p in (v.get("platforms") or []) if p in CONDA_PLATFORMS}
+    return {"version": recent[0]["version"], "platforms": sorted(plats),
+            "newest_platforms": list(recent[0].get("platforms") or [])}
+
+
 def conda_forge_latest(names: List[str]) -> Dict[str, Optional[Dict]]:
-    """conda name -> {version, platforms}, or None when conda-forge lacks it."""
+    """conda name -> conda_summary(), or None when conda-forge lacks it."""
     out: Dict[str, Optional[Dict]] = {}
-    for i in range(0, len(names), 20):
-        chunk = names[i:i + 20]
+    for i in range(0, len(names), 10):
+        chunk = names[i:i + 10]
         fields = " ".join(
             f'p{j}: package(channelName: "conda-forge", name: {json.dumps(n)}) '
-            f"{{ latestVersion {{ version platforms }} }}"
+            f"{{ versions(limit: {CONDA_VERSIONS_FETCHED}, page: 0) {{ page {{ version platforms }} }} }}"
             for j, n in enumerate(chunk))
         body = json.dumps({"query": "{ " + fields + " }"}).encode()
         req = urllib.request.Request(PREFIX_GRAPHQL, data=body, headers={
@@ -424,7 +464,8 @@ def conda_forge_latest(names: List[str]) -> Dict[str, Optional[Dict]]:
             raise NetworkError(f"{PREFIX_GRAPHQL}: {data['errors']}")
         for j, n in enumerate(chunk):
             pkg = data["data"].get(f"p{j}")
-            out[n] = pkg["latestVersion"] if pkg else None
+            page = ((pkg or {}).get("versions") or {}).get("page") or []
+            out[n] = conda_summary(page) if pkg else None
     return out
 
 
@@ -433,9 +474,9 @@ def tabled_platforms(row: Dict) -> List[str]:
 
 
 def current_platforms(row: Dict, info: Dict) -> List[str]:
-    if tabled_platforms(row) == ["noarch"] and "noarch" in info["platforms"]:
+    if tabled_platforms(row) == ["noarch"] and "noarch" in info["newest_platforms"]:
         return ["noarch"]
-    return sorted(p for p in info["platforms"] if p in CONDA_PLATFORMS)
+    return list(info["platforms"])
 
 
 def platforms_match(row: Dict, info: Dict) -> bool:
@@ -618,10 +659,62 @@ def print_human(results: List[Dict], code: int) -> None:
         print("Could not reach upstream for some checks; nothing found stale in the rest.")
 
 
+def self_test() -> int:
+    """Offline checks of the pure helpers. Exit 0 on success."""
+    def row(platforms: List[str]) -> Dict:
+        return {"builds": [{"platform": p, "python": []} for p in platforms]}
+
+    # lap 0.5.14 mid-upload: linux-64 still comes from 0.5.13, so no drift.
+    lap = conda_summary([
+        {"version": "0.5.12", "platforms": ["linux-64", "osx-64", "win-64"]},
+        {"version": "0.5.14", "platforms": ["linux-aarch64", "osx-64", "osx-arm64", "win-64"]},
+        {"version": "0.5.13", "platforms": ["linux-64", "linux-aarch64", "linux-ppc64le",
+                                            "osx-64", "osx-arm64", "win-64"]},
+    ])
+    assert lap is not None and lap["version"] == "0.5.14", lap
+    assert platforms_match(row(CONDA_PLATFORMS), lap), lap
+    # cylp 0.94.1 gains osx-arm64 and win-64: still reported.
+    cylp = conda_summary([
+        {"version": "0.94.1", "platforms": ["linux-aarch64", "osx-64", "osx-arm64", "win-64"]},
+        {"version": "0.92.3", "platforms": ["linux-64", "linux-aarch64", "osx-64"]},
+    ])
+    assert not platforms_match(row(["linux-64", "linux-aarch64", "osx-64"]), cylp), cylp
+    assert platforms_match(row(CONDA_PLATFORMS), cylp), cylp
+    # Only the three newest versions count; numeric, not string, order.
+    old = conda_summary([
+        {"version": "1.10", "platforms": ["osx-64"]},
+        {"version": "1.9", "platforms": ["osx-64"]},
+        {"version": "1.8", "platforms": ["osx-64"]},
+        {"version": "1.2", "platforms": ["win-64"]},
+    ])
+    assert old is not None and old["version"] == "1.10" and old["platforms"] == ["osx-64"], old
+    assert conda_vkey("1.0rc1") < conda_vkey("1.0") < conda_vkey("1.0.post1"), "vkey"
+    # noarch rows compare against the newest version only.
+    pure = conda_summary([{"version": "2", "platforms": ["noarch"]},
+                          {"version": "1", "platforms": ["linux-64"]}])
+    assert platforms_match(row(["noarch"]), pure), pure
+    assert conda_summary([]) is None
+    # A new optional field passes the schema check; removals and retypes do not.
+    old_t = {"packages": [{"version": "1", "builds": [{"platform": "linux-64", "python": []}]}]}
+    new_t = {"packages": [{"version": "2", "builds": [
+        {"platform": "linux-64", "python": [], "version": "1"}]}]}
+    problems: List[str] = []
+    compare_shape(old_t, new_t, "t", problems)
+    assert problems == [], problems
+    compare_shape(old_t, {"packages": [{"version": 2, "builds": [{"python": []}]}]}, "t", problems)
+    assert len(problems) == 2, problems
+    print("self-test passed")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--json", action="store_true", help="machine-readable output")
+    parser.add_argument("--self-test", action="store_true",
+                        help="run the offline checks of the helpers and exit")
     args = parser.parse_args()
+    if args.self_test:
+        return self_test()
     results = run_checks()
     code = exit_code(results)
     if args.json:
