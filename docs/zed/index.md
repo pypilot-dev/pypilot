@@ -17,11 +17,12 @@ The shim uses a `pypilot` on your `PATH` when its version is new enough; otherwi
 
 ## Commands as tasks
 
-Zed extensions cannot add command-palette entries, so PyPilot's commands ship as tasks. Copy [`tasks/pypilot.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/pypilot.json) into your project's `.zed/tasks.json`, or into your global tasks file (`~/.config/zed/tasks.json`; on Windows `%APPDATA%\Zed\tasks.json`). Run them with `task: spawn`. The fix environment task runs the full `pypilot setup`. For the targeted fix, run `pypilot doctor --fix` in a terminal, see [What doctor --fix fixes](/guide/fixing).
+Zed extensions cannot add command-palette entries, so PyPilot's commands ship as tasks. Copy [`tasks/pypilot.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/pypilot.json) into your project's `.zed/tasks.json`, or into your global tasks file (`~/.config/zed/tasks.json`; on Windows `%APPDATA%\Zed\tasks.json`). Run them with `task: spawn`. <Badge type="tip" text="1.4" /> The fix environment task runs `pypilot doctor --fix`, which applies only the fixes doctor found (see [What doctor --fix fixes](/guide/fixing)); the set up task runs the full `pypilot setup`.
 
 | Task | Runs |
 |---|---|
-| `pypilot: fix environment (set up environment)` | `pypilot setup` |
+| `pypilot: fix environment (only what doctor found)` | `pypilot doctor --fix` |
+| `pypilot: set up environment (full bootstrap)` | `pypilot setup` |
 | `pypilot: show details (doctor report)` | `pypilot doctor` |
 | `pypilot: explain python range (what blocks each version)` <Badge type="tip" text="1.3" /> | `pypilot explain` |
 | `pypilot: fix python version` | `pypilot fix python` |
@@ -32,7 +33,7 @@ Zed extensions cannot add command-palette entries, so PyPilot's commands ship as
 | `pypilot: migrate to pixi (write pixi.toml and install)` <Badge type="tip" text="1.3" /> | `pypilot migrate-to-pixi --write --install` |
 | `pypilot: install pixi` <Badge type="tip" text="1.3" /> | `pypilot install-pixi` |
 
-The tasks pass no `--path`: Zed runs them in the worktree root, so paths with spaces are never split. A task run of `doctor` or `setup` also tells the running language server to re-scan, so the editor notification reflects what the terminal just did.
+The tasks pass no `--path`: Zed runs them in the worktree root, so paths with spaces are never split. A task run of `doctor`, `doctor --fix` or `setup` also tells the running language server to re-scan, so the editor notification reflects what the terminal just did.
 
 ::: tip Windows: "os error 193" when spawning a task
 Zed's spawner cannot launch Microsoft Store *App Execution Aliases*, including a Store-installed `pwsh.exe`. Point the task shell at a real executable, for example:

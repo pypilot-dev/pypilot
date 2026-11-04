@@ -8,7 +8,8 @@
 //   * project: <workspace>/.zed/tasks.json
 //
 // Labels mirror the F5 toast buttons so the two surfaces map 1:1:
-//   "Fix environment" runs pypilot setup   (identical code path)
+//   "Fix environment" runs pypilot doctor --fix (identical code path:
+//                     only the fixes the findings call for)
 //   "Show details"   runs pypilot doctor  (same assessment, read-only)
 //
 // We deliberately pass NO `--path`: Zed sets `cwd` to the worktree root and
@@ -36,7 +37,17 @@
 //     skipping the profile (prompt/banner tooling) roughly halves startup.
 [
   {
-    "label": "pypilot: fix environment (set up environment)",
+    "label": "pypilot: fix environment (only what doctor found)",
+    "command": "pypilot",
+    "args": ["doctor", "--fix"],
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "save": "all",
+    "reveal": "always"
+  },
+  {
+    "label": "pypilot: set up environment (full bootstrap)",
     "command": "pypilot",
     "args": ["setup"],
     "cwd": "$ZED_WORKTREE_ROOT",
