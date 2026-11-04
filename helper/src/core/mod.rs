@@ -9,6 +9,7 @@ pub mod command;
 pub mod depcheck;
 pub mod env;
 pub mod exec;
+pub mod foreign_setup;
 pub mod gpu;
 pub mod guardian;
 pub mod health;

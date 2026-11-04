@@ -80,6 +80,14 @@ pub async fn run_with_mode<S: MetadataSource>(
     };
     let assessment = solver::assess(workspace, settings, source).await;
 
+    // An environment.yml or Poetry project, or a requirements.txt pip cannot
+    // read: a uv setup would install nothing or fail half-way.
+    if let Some(summary) =
+        crate::core::foreign_setup::run(workspace, settings, source, &assessment, mode).await?
+    {
+        return Ok(summary);
+    }
+
     if mode == ResolvedMode::Pixi {
         let mut summary = SetupSummary {
             package_manager: settings.package_manager,

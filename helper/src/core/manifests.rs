@@ -65,7 +65,7 @@ pub async fn apply<S: MetadataSource>(
         }
     }
     if is_conda_only(workspace, project) {
-        let pixi = crate::core::pixi::locate().await.is_some();
+        let pixi = conda_goes_to_pixi(settings).await;
         apply_conda(findings, project, venv.is_some(), pixi);
     }
 }
@@ -625,8 +625,17 @@ async fn oldest_release_floor<S: MetadataSource>(
 pub fn is_conda_only(workspace: &Path, project: &ProjectDeps) -> bool {
     project.has_conda_env
         && !project.is_pixi()
-        && !workspace.join("pyproject.toml").is_file()
-        && !workspace.join("requirements.txt").is_file()
+        // `exec::exists`: a dry run that planned the migration's
+        // pyproject.toml must see it, or setup would plan it again.
+        && !crate::core::exec::exists(&workspace.join("pyproject.toml"))
+        && !crate::core::exec::exists(&workspace.join("requirements.txt"))
+}
+
+/// Whether a conda-only project is moved to pixi rather than to a
+/// pyproject.toml: pixi is installed and the user has not chosen a package
+/// manager (an explicit uv or pip choice keeps the pyproject route).
+pub async fn conda_goes_to_pixi(settings: &Settings) -> bool {
+    settings.package_manager == PackageManager::Auto && crate::core::pixi::locate().await.is_some()
 }
 
 fn apply_conda(findings: &mut Vec<Finding>, project: &ProjectDeps, has_venv: bool, pixi: bool) {
