@@ -43,12 +43,12 @@ jobs:
       matrix:
         include:
           - { slug: linux-x64, os: ubuntu-latest, target: x86_64-unknown-linux-gnu, ext: tar.gz }
-          # macos-13 (Intel) hosted-runner capacity has been withdrawn and jobs
-          # pinned to it queue indefinitely rather than fail. macos-14 is Apple
-          # Silicon hardware, but its toolchain cross-links x86_64-apple-darwin
+          # Retired images (macos-13, and macos-14 since 2026-11-02) leave jobs
+          # queued indefinitely rather than failing. macos-15 is Apple Silicon
+          # hardware, but its toolchain cross-links x86_64-apple-darwin
           # natively, so the produced binary is unchanged, only the build host is.
-          - { slug: darwin-x64, os: macos-14, target: x86_64-apple-darwin, ext: tar.gz }
-          - { slug: darwin-arm64, os: macos-14, target: aarch64-apple-darwin, ext: tar.gz }
+          - { slug: darwin-x64, os: macos-15, target: x86_64-apple-darwin, ext: tar.gz }
+          - { slug: darwin-arm64, os: macos-15, target: aarch64-apple-darwin, ext: tar.gz }
           - { slug: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, ext: zip }
     steps:
       - uses: actions/checkout@v4
