@@ -50,11 +50,11 @@ use serde::Serialize;
 
 use crate::core::installed;
 use crate::core::project::{self, normalize_name, ProjectDeps};
+use crate::core::resolution::{Outcome, Resolver};
 use crate::core::Finding;
 use crate::pypi::pyversion::PyVersion;
 use crate::pypi::{CompatReport, MetadataSource};
 
-#[allow(unused_imports)] // Named in the docs above.
 use crate::core::FixKind;
 
 /// [`FixKind::ReplaceDist`]'s payload.
@@ -77,23 +77,101 @@ const MAX_SOURCE_ENTRIES: usize = 20_000;
 /// project, the venv and the source, plus yanked pins.
 ///
 /// `venv` is the project venv and its Python; `target` is the Python setup
-/// would pick, used when there is no venv. Read-only: file reads and cached
-/// PyPI lookups for pinned versions.
-pub async fn assess<S: MetadataSource>(
+/// would pick, used when there is no venv. Read-only: file reads, cached
+/// PyPI lookups for pinned versions, and with a `resolver` the resolves
+/// that check a requirement edit before it is offered
+/// ([`verify_alternatives`]).
+pub async fn assess<S: MetadataSource, R: Resolver>(
     workspace: &Path,
     project: &ProjectDeps,
     compat: Option<&CompatReport>,
     venv: Option<(&Path, Option<PyVersion>)>,
     target: Option<PyVersion>,
     source: &S,
+    resolver: Option<&R>,
 ) -> Vec<Finding> {
     if !project.is_python_project() {
         return Vec::new();
     }
     let ctx = context(workspace, project, compat, venv, target);
     let mut findings = rules::evaluate(table::table(), &ctx);
+    if let Some(resolver) = resolver {
+        let alternatives = rules::alternatives(table::table(), &ctx);
+        verify_alternatives(workspace, &alternatives, &mut findings, resolver).await;
+    }
     findings.extend(yanked::check(workspace, project, source, &ctx).await);
     findings
+}
+
+/// A finding's requirement edit must leave the project resolvable: an
+/// upgrade of a pinned package next to other pins often does not (flask
+/// 1.1.2 to 2.x with jinja2==2.11.3 pinned). When uv finds no solution
+/// with the edit, try the finding's [`rules::Alternative`]s in order and
+/// take the first that resolves. When uv cannot say (offline), or nothing
+/// resolves, the finding keeps its fix; the planner checks again after
+/// applying it and rolls back an edit that leaves the project unresolvable.
+pub async fn verify_alternatives<R: Resolver>(
+    workspace: &Path,
+    alternatives: &[rules::Alternative],
+    findings: &mut [Finding],
+    resolver: &R,
+) {
+    if alternatives.is_empty() {
+        return;
+    }
+    let declared = crate::core::req_edit::declared(workspace);
+    if declared.custom_resolution {
+        return;
+    }
+    let lines: Vec<String> = declared.reqs.iter().map(|r| r.raw.clone()).collect();
+    for f in findings.iter_mut() {
+        let FixKind::EditRequirement(edit) = &f.fix else {
+            continue;
+        };
+        let mine: Vec<&rules::Alternative> =
+            alternatives.iter().filter(|a| a.title == f.title).collect();
+        if mine.is_empty()
+            || resolves_with(resolver, &declared.options, &lines, edit).await != Some(false)
+        {
+            continue;
+        }
+        for alt in mine {
+            let FixKind::EditRequirement(e) = &alt.fix else {
+                continue;
+            };
+            if resolves_with(resolver, &declared.options, &lines, e).await == Some(true) {
+                f.detail = f.detail.replace(&alt.replaces, &alt.sentence);
+                f.fix = alt.fix.clone();
+                break;
+            }
+        }
+    }
+}
+
+/// Does the project resolve with `edit` applied? `None` when uv cannot say.
+async fn resolves_with<R: Resolver>(
+    resolver: &R,
+    options: &[String],
+    lines: &[String],
+    edit: &crate::core::RequirementEdit,
+) -> Option<bool> {
+    let mut input = options.to_vec();
+    if edit.old.trim().is_empty() {
+        input.extend(lines.iter().cloned());
+        input.push(edit.new.clone());
+    } else {
+        input.extend(lines.iter().map(|l| {
+            if *l == edit.old {
+                edit.new.clone()
+            } else {
+                l.clone()
+            }
+        }));
+    }
+    match resolver.resolve(&input).await? {
+        Outcome::Resolved(_) => Some(true),
+        Outcome::NoSolution(_) => Some(false),
+    }
 }
 
 /// Gather the [`rules::Context`] for a workspace.

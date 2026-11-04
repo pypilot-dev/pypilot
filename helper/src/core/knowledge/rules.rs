@@ -72,6 +72,19 @@ pub struct CodeUse {
     pub from_import: bool,
 }
 
+/// Another fix for a finding, tried when the first one does not resolve
+/// (see [`super::verify_alternatives`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Alternative {
+    /// The finding it belongs to.
+    pub title: String,
+    /// The fix sentence in the finding's detail that it replaces.
+    pub replaces: String,
+    /// The sentence that says what this fix does instead.
+    pub sentence: String,
+    pub fix: FixKind,
+}
+
 impl Context {
     fn declared(&self, name: &str) -> Option<&Requirement> {
         let key = normalize_name(name);
@@ -300,6 +313,53 @@ pub fn evaluate(table: &Table, ctx: &Context) -> Vec<Finding> {
     }
     out.extend(symbol_findings(&table.symbol_removals, ctx));
     out.extend(drift_findings(ctx));
+    out
+}
+
+/// The other fixes worth trying for [`evaluate`]'s findings, best first, for
+/// a finding whose own fix may not resolve: a pinned package upgraded next
+/// to other pins (flask 1.1.2 with jinja2 2.11.3) can be fixed by capping
+/// the culprit instead (`itsdangerous<2.1`).
+pub fn alternatives(table: &Table, ctx: &Context) -> Vec<Alternative> {
+    let hits: Vec<ApiHit> = table
+        .api_removals
+        .iter()
+        .filter_map(|r| api_hit(r, ctx))
+        .filter(|h| h.upgrade)
+        .collect();
+    let mut out = Vec::new();
+    for hit in &hits {
+        let group: Vec<&ApiHit> = hits
+            .iter()
+            .filter(|h| h.requirement == hit.requirement)
+            .collect();
+        if group.len() > 1 || ctx.pixi {
+            continue;
+        }
+        let finding = api_finding(&group, ctx);
+        let rule = hit.rule;
+        let fix = ctx.constraint_fix(&rule.constraint);
+        let FixKind::EditRequirement(edit) = &fix else {
+            continue;
+        };
+        let sentence = if edit.old.is_empty() {
+            format!(
+                "Upgrading to `{}` does not resolve with the project's other requirements (checked with uv), so the fix holds {} back instead: add `{}`.",
+                hit.requirement, rule.dependency, edit.new
+            )
+        } else {
+            format!(
+                "Upgrading to `{}` does not resolve with the project's other requirements (checked with uv), so the fix holds {} back instead: change `{}` to `{}`.",
+                hit.requirement, rule.dependency, edit.old, edit.new
+            )
+        };
+        out.push(Alternative {
+            title: finding.title.clone(),
+            replaces: api_fix_sentence(&group, ctx),
+            sentence,
+            fix,
+        });
+    }
     out
 }
 

@@ -196,6 +196,15 @@ pub async fn assess<S: MetadataSource>(
         .as_ref()
         .filter(|v| !v.kind.is_pixi())
         .map(|v| (v.path.as_path(), v.python));
+    // A constraint edit is checked with uv before it is offered.
+    let resolver = probes
+        .uv
+        .as_ref()
+        .map(|u| crate::core::resolution::UvResolver {
+            uv: u.path.as_path(),
+            workspace,
+            python: env.venv_python.or(target_python),
+        });
     findings.extend(
         crate::core::knowledge::assess(
             workspace,
@@ -204,6 +213,7 @@ pub async fn assess<S: MetadataSource>(
             venv_for_knowledge,
             target_python,
             source,
+            resolver.as_ref(),
         )
         .await,
     );

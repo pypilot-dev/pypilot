@@ -904,6 +904,77 @@ fn distutils_on_3_11_warns_when_requires_python_allows_3_12() {
     assert!(evaluate(&bundled(), &ctx).is_empty());
 }
 
+/// A resolver that fails any input containing all of `clash`.
+struct Clash(Vec<&'static str>);
+
+impl crate::core::resolution::Resolver for Clash {
+    async fn resolve(&self, lines: &[String]) -> Option<crate::core::resolution::Outcome> {
+        use crate::core::resolution::Outcome;
+        if self.0.iter().all(|c| lines.iter().any(|l| l == c)) {
+            Some(Outcome::NoSolution("No solution found".into()))
+        } else {
+            Some(Outcome::Resolved(Vec::new()))
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_upgrade_that_does_not_resolve_becomes_the_cap() {
+    // E s05: flask 1.1.2 with itsdangerous 2.1.2, and jinja2 pinned at
+    // 2.11.3, which flask 2 does not accept.
+    let dir = scratch("s05");
+    std::fs::write(
+        dir.join("pyproject.toml"),
+        "[project]\nname = \"s05\"\nversion = \"0.1.0\"\ndependencies = [\"flask==1.1.2\", \"jinja2==2.11.3\", \"itsdangerous==2.1.2\"]\n",
+    )
+    .unwrap();
+    let mut ctx = venv_ctx(12);
+    ctx.installed = installed(&[
+        ("flask", "1.1.2"),
+        ("itsdangerous", "2.1.2"),
+        ("jinja2", "2.11.3"),
+    ]);
+    ctx.declared = vec![
+        req("flask", "==1.1.2"),
+        req("jinja2", "==2.11.3"),
+        req("itsdangerous", "==2.1.2"),
+    ];
+    ctx.declared_raw = crate::core::req_edit::declared(&dir).reqs;
+    ctx.new_requirement_file = Some(dir.join("pyproject.toml"));
+    let mut found = evaluate(&bundled(), &ctx);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    let FixKind::EditRequirement(e) = &found[0].fix else {
+        panic!("{:?}", found[0].fix)
+    };
+    assert_eq!(e.new, "flask>=2.0.0,<3");
+
+    let alternatives = rules::alternatives(&bundled(), &ctx);
+    let resolver = Clash(vec!["flask>=2.0.0,<3", "jinja2==2.11.3"]);
+    verify_alternatives(&dir, &alternatives, &mut found, &resolver).await;
+    let FixKind::EditRequirement(e) = &found[0].fix else {
+        panic!("{:?}", found[0].fix)
+    };
+    assert_eq!(
+        (e.old.as_str(), e.new.as_str()),
+        ("itsdangerous==2.1.2", "itsdangerous<2.1")
+    );
+    assert!(
+        found[0].detail.contains("does not resolve"),
+        "{}",
+        found[0].detail
+    );
+    assert!(!found[0].detail.contains("rules out the cap"));
+
+    // When the upgrade resolves, it stays.
+    let mut found = evaluate(&bundled(), &ctx);
+    verify_alternatives(&dir, &alternatives, &mut found, &Clash(vec!["nothing"])).await;
+    let FixKind::EditRequirement(e) = &found[0].fix else {
+        panic!()
+    };
+    assert_eq!(e.new, "flask>=2.0.0,<3");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn source_scan_finds_symbol_uses_with_file_and_line() {
     let dir = scratch("symbols");
