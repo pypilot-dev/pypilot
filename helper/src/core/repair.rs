@@ -18,7 +18,11 @@
 //! 3. `uv lock` ([`FixKind::Relock`]);
 //! 4. one sync into the existing environment ([`FixKind::SyncEnvironment`],
 //!    with `--reinstall-package` for [`FixKind::ReinstallPackages`]);
-//! 5. the notebook kernel, then a check that the result is healthy: the
+//! 5. known-breakage fixes ([`FixKind::AddConstraint`],
+//!    [`FixKind::ReplaceDist`]), through [`knowledge::apply::apply_all`]:
+//!    a constraint such as `numpy<2`, or a stray dist removed and the right
+//!    one reinstalled;
+//! 6. the notebook kernel, then a check that the result is healthy: the
 //!    package checks again, and an import of every declared package.
 //!
 //! A healthy project gets no steps at all. The Python version only changes
@@ -34,8 +38,8 @@ use std::path::{Path, PathBuf};
 use crate::core::exec::{self, Effect};
 use crate::core::setup::{self, SetupSummary, Step};
 use crate::core::{
-    health, pip, pixi, req_edit, resolution, solver, undeclared, uv, Assessment, Finding, FixKind,
-    Severity,
+    health, knowledge, pip, pixi, req_edit, resolution, solver, undeclared, uv, Assessment,
+    Finding, FixKind, Severity,
 };
 use crate::pypi::pyversion::PyVersion;
 use crate::pypi::MetadataSource;
@@ -54,6 +58,8 @@ pub struct RepairPlan {
     pub reinstall: Vec<String>,
     /// Install the declared dependencies into the environment.
     pub sync: bool,
+    /// Known-breakage fixes ([`knowledge::apply`]), deduplicated, in order.
+    pub known: Vec<FixKind>,
     /// Titles of the findings this plan fixes, in order.
     pub fixes: Vec<String>,
     /// Error and Warning findings PyPilot cannot fix itself.
@@ -84,6 +90,7 @@ impl RepairPlan {
             && !self.relock
             && !self.sync
             && self.requirements.is_empty()
+            && self.known.is_empty()
     }
 
     fn rebuild_on(&mut self, python: Option<PyVersion>, required: bool, reason: &str) {
@@ -133,6 +140,12 @@ pub fn plan(findings: &[Finding]) -> RepairPlan {
             FixKind::EditRequirement(_) | FixKind::AddRequirements(_) => {
                 if !p.requirements.contains(&f.fix) {
                     p.requirements.push(f.fix.clone());
+                }
+            }
+            // Known breakages: run after the rebuild and the sync.
+            FixKind::AddConstraint(_) | FixKind::ReplaceDist(_) => {
+                if !p.known.contains(&f.fix) {
+                    p.known.push(f.fix.clone());
                 }
             }
             // Suggestions the user runs themselves (`migrate-conda`,
@@ -264,6 +277,9 @@ pub async fn run_with_mode<S: MetadataSource>(
         // A conda-only project the bootstrap just moved to pixi is pixi's
         // now, like any pixi project.
         if s.resolved_mode != ResolvedMode::Pixi {
+            if s.steps.iter().all(|st| st.ok) {
+                knowledge::apply::apply_all(workspace, settings, &plan.known, &mut s.steps).await;
+            }
             verify(workspace, settings, &mut s).await;
         }
         finish(&mut s);
@@ -343,6 +359,10 @@ pub async fn run_with_mode<S: MetadataSource>(
             &mut summary,
         )
         .await;
+    }
+
+    if summary.steps.iter().all(|s| s.ok) && !plan.known.is_empty() {
+        knowledge::apply::apply_all(workspace, settings, &plan.known, &mut summary.steps).await;
     }
 
     if summary.steps.iter().all(|s| s.ok) {

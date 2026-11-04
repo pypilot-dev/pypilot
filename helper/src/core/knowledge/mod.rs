@@ -1,0 +1,360 @@
+//! Known breakages: what package metadata cannot see.
+//!
+//! uv refuses pins that contradict declared metadata, so the breakages that
+//! survive resolution are the undeclared ones: an old pandas with no numpy cap
+//! next to numpy 2, a Flask with no Werkzeug cap next to Werkzeug 3, jwt and
+//! PyJWT writing the same `jwt/` directory, an enum34 backport shadowing the
+//! standard library, source importing `imghdr` on Python 3.13, `import
+//! pkg_resources` with setuptools 82.
+//!
+//! The facts live in `data/known_breakages.json` ([`table`]), which installed
+//! engines refresh from `main` like the other tables. [`rules`] turns them and
+//! a [`rules::Context`] (declared, resolved and installed versions, the
+//! project's imports, the Python) into findings that name the culprit and
+//! carry a fix. [`assess`] is the one hook
+//! the solver calls.
+//!
+//! # Fixes, for the `doctor --fix` planner
+//!
+//! Findings from here carry one of two fix kinds, grouped apart in
+//! [`FixKind`]:
+//!
+//! - [`FixKind::AddConstraint`]: put a requirement in the manifest and the
+//!   venv (`numpy<2`, `setuptools<81`, `standard-imghdr`, `pandas>=2.2.2`,
+//!   `requests==2.32.2`). An existing requirement on the same name is
+//!   replaced.
+//! - [`FixKind::ReplaceDist`]: drop strays from the manifest, uninstall them,
+//!   and (re)install the right distribution (jwt next to PyJWT, enum34,
+//!   sklearn).
+//!
+//! Both run through [`apply::apply`]: `apply(workspace, settings, &fix)`
+//! returns the steps it ran, every mutation goes through
+//! [`crate::core::exec`] so it plans correctly under
+//! [`crate::core::exec::dry_run`], and it never changes the venv's Python.
+//! Other fix kinds return an error. [`crate::core::repair::plan`] collects
+//! them, so `pypilot doctor --fix` runs them after its rebuild or sync.
+
+pub mod apply;
+pub mod rules;
+pub mod table;
+
+use std::collections::{BTreeMap, HashSet};
+use std::path::Path;
+
+use serde::Serialize;
+
+use crate::core::installed;
+use crate::core::project::{self, normalize_name, ProjectDeps};
+use crate::core::Finding;
+use crate::pypi::pyversion::PyVersion;
+use crate::pypi::{CompatReport, MetadataSource};
+
+#[allow(unused_imports)] // Named in the docs above.
+use crate::core::FixKind;
+
+/// [`FixKind::AddConstraint`]'s payload.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Constraint {
+    /// A PEP 508 requirement, `numpy<2`.
+    pub requirement: String,
+}
+
+/// [`FixKind::ReplaceDist`]'s payload.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Replacement {
+    /// Installed distributions to uninstall.
+    pub uninstall: Vec<String>,
+    /// Distributions to install (or reinstall) afterwards.
+    pub install: Vec<String>,
+    /// Declared dependencies to remove from the manifest.
+    pub drop: Vec<String>,
+}
+
+/// Source files read for imports, at most.
+const MAX_SOURCE_FILES: usize = 400;
+/// Directory entries walked for them, at most.
+const MAX_SOURCE_ENTRIES: usize = 20_000;
+
+/// Every known-breakage finding for a workspace: the table's rules over the
+/// project, the venv and the source.
+///
+/// `venv` is the project venv and its Python; `target` is the Python setup
+/// would pick, used when there is no venv. Read-only: file reads and cached
+/// PyPI lookups for pinned versions.
+pub async fn assess<S: MetadataSource>(
+    workspace: &Path,
+    project: &ProjectDeps,
+    compat: Option<&CompatReport>,
+    venv: Option<(&Path, Option<PyVersion>)>,
+    target: Option<PyVersion>,
+    source: &S,
+) -> Vec<Finding> {
+    if !project.is_python_project() {
+        return Vec::new();
+    }
+    let ctx = context(workspace, project, compat, venv, target);
+    let _ = source;
+    rules::evaluate(table::table(), &ctx)
+}
+
+/// Gather the [`rules::Context`] for a workspace.
+pub fn context(
+    workspace: &Path,
+    project: &ProjectDeps,
+    compat: Option<&CompatReport>,
+    venv: Option<(&Path, Option<PyVersion>)>,
+    target: Option<PyVersion>,
+) -> rules::Context {
+    let resolved = compat
+        .map(|c| {
+            c.per_package
+                .iter()
+                .map(|a| (normalize_name(&a.name), a.version.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let (installed, site_modules, declared_conflicts) = match venv {
+        Some((path, python)) => {
+            let found = installed::scan(path);
+            let conflicts = crate::core::depcheck::conflicts(path, &found, python)
+                .into_iter()
+                .map(|c| (c.package, c.dependency))
+                .collect();
+            (Some(found.versions), site_modules(path), conflicts)
+        }
+        None => (None, HashSet::new(), HashSet::new()),
+    };
+    let venv_python = venv.and_then(|(_, p)| p);
+    rules::Context {
+        declared: project.packages.clone(),
+        with_marker: declared_with_marker(workspace),
+        resolved,
+        installed,
+        site_modules,
+        python: venv_python.or(target),
+        python_is_venv: venv_python.is_some(),
+        imports: project_imports(workspace),
+        declared_conflicts,
+        pixi: project.is_pixi(),
+    }
+}
+
+/// Top-level importable names in a venv's site-packages: package
+/// directories and single-file modules.
+pub fn site_modules(venv: &Path) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for dir in installed::site_packages_dirs(venv) {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = entry.path();
+            if path.is_dir() {
+                if !name.contains('.') && !name.starts_with('_') || name == "_distutils_hack" {
+                    out.insert(name);
+                }
+            } else if let Some(stem) = name.strip_suffix(".py") {
+                out.insert(stem.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// Normalized names of dependencies written with an environment marker,
+/// read off the manifests' text. Their specifier may not apply here, so the
+/// rules judge them only by what is installed.
+pub fn declared_with_marker(workspace: &Path) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let mut consider = |req: &str| {
+        if req.contains(';') {
+            if let Some(name) = project::requirement_name(req) {
+                out.insert(normalize_name(&name));
+            }
+        }
+    };
+    if let Ok(text) = std::fs::read_to_string(workspace.join("requirements.txt")) {
+        text.lines().for_each(&mut consider);
+    }
+    if let Ok(text) = std::fs::read_to_string(workspace.join("pyproject.toml")) {
+        if let Ok(doc) = text.parse::<toml::Table>() {
+            for req in pyproject_dependencies(&doc) {
+                consider(&req);
+            }
+        }
+    }
+    out
+}
+
+/// `[project] dependencies` and every `[project.optional-dependencies]` list.
+pub fn pyproject_dependencies(doc: &toml::Table) -> Vec<String> {
+    let Some(project) = doc.get("project").and_then(|p| p.as_table()) else {
+        return Vec::new();
+    };
+    let strings = |v: &toml::Value| -> Vec<String> {
+        v.as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|s| s.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut out = project.get("dependencies").map(strings).unwrap_or_default();
+    if let Some(extras) = project
+        .get("optional-dependencies")
+        .and_then(|e| e.as_table())
+    {
+        for list in extras.values() {
+            out.extend(strings(list));
+        }
+    }
+    out
+}
+
+/// Top-level modules the project's own `.py` files and notebooks import,
+/// each with the first file (relative, `/`-separated) that imports it. The
+/// project's own modules are left out.
+pub fn project_imports(workspace: &Path) -> BTreeMap<String, String> {
+    let mut files = Vec::new();
+    let mut budget = MAX_SOURCE_ENTRIES;
+    source_files(workspace, &mut files, &mut budget);
+    let local = local_modules(workspace);
+    let mut out = BTreeMap::new();
+    for file in files {
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        let source = if file.extension().is_some_and(|e| e == "ipynb") {
+            match notebook_code(&text) {
+                Some(code) => crate::core::imports::mask_ipython(&code),
+                None => continue,
+            }
+        } else {
+            text
+        };
+        let rel = file
+            .strip_prefix(workspace)
+            .unwrap_or(&file)
+            .to_string_lossy()
+            .replace('\\', "/");
+        for import in crate::core::imports::extract(&source) {
+            if local.contains(&import.module) {
+                continue;
+            }
+            out.entry(import.module).or_insert_with(|| rel.clone());
+        }
+    }
+    out
+}
+
+/// Directories never searched for project source.
+const SKIP_DIRS: &[&str] = &[
+    "node_modules",
+    "__pycache__",
+    "site-packages",
+    "build",
+    "dist",
+    "target",
+];
+
+/// `.py` files and notebooks under `dir`, files first, skipping hidden
+/// directories, virtualenvs and build output, within the caps.
+fn source_files(dir: &Path, out: &mut Vec<std::path::PathBuf>, budget: &mut usize) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<std::fs::DirEntry> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    let mut subdirs = Vec::new();
+    for entry in entries {
+        if out.len() >= MAX_SOURCE_FILES || *budget == 0 {
+            return;
+        }
+        *budget -= 1;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() {
+            if !name.starts_with('.')
+                && !SKIP_DIRS.contains(&name.as_str())
+                && !path.join("pyvenv.cfg").is_file()
+            {
+                subdirs.push(path);
+            }
+        } else if name.ends_with(".py") || name.ends_with(".ipynb") {
+            out.push(path);
+        }
+    }
+    for sub in subdirs {
+        source_files(&sub, out, budget);
+    }
+}
+
+/// The code cells of a Python notebook, joined. `None` for anything else.
+fn notebook_code(json: &str) -> Option<String> {
+    let nb: serde_json::Value = serde_json::from_str(json).ok()?;
+    let language = nb
+        .pointer("/metadata/kernelspec/language")
+        .and_then(|l| l.as_str());
+    if language.is_some_and(|l| !l.eq_ignore_ascii_case("python")) {
+        return None;
+    }
+    let mut code = String::new();
+    for cell in nb.get("cells")?.as_array()? {
+        if cell.get("cell_type").and_then(|t| t.as_str()) != Some("code") {
+            continue;
+        }
+        match cell.get("source") {
+            Some(serde_json::Value::String(s)) => code.push_str(s),
+            Some(serde_json::Value::Array(lines)) => {
+                for l in lines.iter().filter_map(|l| l.as_str()) {
+                    code.push_str(l);
+                }
+            }
+            _ => {}
+        }
+        code.push('\n');
+    }
+    Some(code)
+}
+
+/// Module names the project defines at its root or under `src/`.
+fn local_modules(workspace: &Path) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for root in [workspace.to_path_buf(), workspace.join("src")] {
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.join("__init__.py").is_file() {
+                    names.insert(entry.file_name().to_string_lossy().into_owned());
+                }
+            } else if path.extension().is_some_and(|e| e == "py") {
+                if let Some(stem) = path.file_stem() {
+                    names.insert(stem.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    names
+}
+
+/// For the LSP guardian: the requirement to offer for an import of `module`
+/// instead of its bare distribution, when the table knows newer releases of
+/// that distribution dropped it (`pkg_resources` gives `setuptools<81`).
+/// `None` for everything else, and when the installed release still has it.
+pub fn install_requirement_for(
+    module: &str,
+    installed: &crate::core::installed::Installed,
+) -> Option<String> {
+    rules::install_requirement_for(table::table(), module, &installed.versions)
+}
+
+#[cfg(test)]
+mod tests;

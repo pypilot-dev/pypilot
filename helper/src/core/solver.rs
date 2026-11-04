@@ -182,6 +182,26 @@ pub async fn assess<S: MetadataSource>(
         findings.extend(crate::core::depcheck::check(&venv.path, venv.python));
     }
 
+    // Breakages metadata does not declare (data/known_breakages.json): numpy
+    // 2 under old compiled packages, uncapped API removals, shadowing
+    // dists, removed stdlib modules the source imports, yanked pins.
+    let venv_for_knowledge = probes
+        .venv
+        .as_ref()
+        .filter(|v| !v.kind.is_pixi())
+        .map(|v| (v.path.as_path(), v.python));
+    findings.extend(
+        crate::core::knowledge::assess(
+            workspace,
+            &project,
+            compat.as_ref(),
+            venv_for_knowledge,
+            target_python,
+            source,
+        )
+        .await,
+    );
+
     // pixi: PyPI dependencies that exclude the selected environment's
     // Python, named with the `pixi add python=…` that fixes them
     // (core::pixi_compat), plus the other environments and the other

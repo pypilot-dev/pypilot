@@ -110,7 +110,7 @@ mod tests {
         assert_eq!(v["pypilot"], VERSION);
         assert_eq!(v["command"], "version");
         assert_eq!(v["ok"], true);
-        assert_eq!(v["data"]["tables"].as_array().map(Vec::len), Some(5));
+        assert_eq!(v["data"]["tables"].as_array().map(Vec::len), Some(6));
     }
 
     #[test]

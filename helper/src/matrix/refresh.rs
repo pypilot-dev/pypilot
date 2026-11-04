@@ -24,6 +24,7 @@ pub const DATASETS: &[(&str, &str)] = &[
     ("import_map.json", crate::matrix::IMPORT_MAP_JSON),
     ("cuda_extensions.json", crate::matrix::CUDA_EXTENSIONS_JSON),
     ("conda_forge_packages.json", crate::matrix::CONDA_FORGE_JSON),
+    ("known_breakages.json", crate::matrix::KNOWN_BREAKAGES_JSON),
 ];
 
 pub(crate) fn cache_path(name: &str) -> PathBuf {

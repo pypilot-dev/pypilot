@@ -19,7 +19,7 @@
 //!
 //! The bundled datasets (`data/nvidia.json`, `data/frameworks.json`,
 //! `data/import_map.json`, `data/cuda_extensions.json`,
-//! `data/conda_forge_packages.json`) are embedded at compile time so an offline machine
+//! `data/conda_forge_packages.json`, `data/known_breakages.json`) are embedded at compile time so an offline machine
 //! always has a correct snapshot; [`refresh`] overlays newer copies fetched
 //! from the project repo, TTL-gated by F7's `data_refresh_days`, and falls
 //! back to the bundled snapshot silently on any failure.
@@ -57,6 +57,8 @@ pub const FRAMEWORKS_JSON: &str = include_str!("../../data/frameworks.json");
 pub const IMPORT_MAP_JSON: &str = include_str!("../../data/import_map.json");
 pub const CUDA_EXTENSIONS_JSON: &str = include_str!("../../data/cuda_extensions.json");
 pub const CONDA_FORGE_JSON: &str = include_str!("../../data/conda_forge_packages.json");
+/// Breakages metadata does not declare, read by [`crate::core::knowledge`].
+pub const KNOWN_BREAKAGES_JSON: &str = include_str!("../../data/known_breakages.json");
 
 /// GPU / driver facts, for the report.
 #[derive(Debug, Clone, Default)]
