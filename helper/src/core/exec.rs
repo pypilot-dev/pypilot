@@ -200,6 +200,9 @@ struct Recorder {
     steps: Vec<PlannedStep>,
     created: HashSet<PathBuf>,
     removed: HashSet<PathBuf>,
+    /// What [`write`] would have put in each file, so reading it back
+    /// ([`read`]) sees the planned edit, as the real run would.
+    contents: std::collections::HashMap<PathBuf, Vec<u8>>,
 }
 
 tokio::task_local! {
@@ -288,9 +291,29 @@ where
 pub fn write(path: &Path, contents: impl AsRef<[u8]>, effect: Effect) -> std::io::Result<()> {
     let effect = effect.writes(path);
     if note(effect) {
+        let _ = RECORDER.try_with(|r| {
+            r.borrow_mut()
+                .contents
+                .insert(path.to_path_buf(), contents.as_ref().to_vec());
+        });
         return Ok(());
     }
     std::fs::write(path, contents)
+}
+
+/// Read `path`, or under a dry run what a planned [`write`] put there.
+/// Manifests are read through this, so the assessment a dry run makes
+/// after its planned requirement edits sees them, and plans what the
+/// real run, which re-reads the edited files, would do.
+pub fn read(path: &Path) -> std::io::Result<Vec<u8>> {
+    let planned = RECORDER
+        .try_with(|r| r.borrow().contents.get(path).cloned())
+        .ok()
+        .flatten();
+    match planned {
+        Some(bytes) => Ok(bytes),
+        None => std::fs::read(path),
+    }
 }
 
 /// [`write`] that fails when `path` already exists.
@@ -379,6 +402,28 @@ pub fn is_fresh(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_dry_run_reads_back_what_it_planned_to_write() {
+        // c12b/c12c: the assessment after a planned requirement edit must
+        // see the edit, or the dry run plans another Python or no sync.
+        let dir = std::env::temp_dir().join(format!("pp-exec-read-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("pyproject.toml");
+        std::fs::write(&file, "old").unwrap();
+        let (seen, steps) = dry_run(async {
+            write(&file, "new", Effect::new("edit pyproject.toml", "test")).unwrap();
+            let manifest = crate::core::project::read_manifest(&file);
+            (read(&file).unwrap(), manifest)
+        })
+        .await;
+        assert_eq!(seen.0, b"new");
+        assert_eq!(seen.1.as_deref(), Some("new"));
+        assert_eq!(steps.len(), 1);
+        // Nothing was written, and outside the dry run the disk answers.
+        assert_eq!(read(&file).unwrap(), b"old");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[tokio::test]
     async fn a_dry_run_records_and_touches_nothing() {

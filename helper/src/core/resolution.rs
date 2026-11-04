@@ -804,7 +804,7 @@ pub async fn diagnose_workspace<S: MetadataSource>(
 }
 
 fn project_name(workspace: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(workspace.join("pyproject.toml")).ok()?;
+    let text = crate::core::project::read_manifest(&workspace.join("pyproject.toml"))?;
     let doc = toml::from_str::<toml::Value>(&text).ok()?;
     Some(doc.get("project")?.get("name")?.as_str()?.to_string())
 }

@@ -299,7 +299,7 @@ fn strip_inline_comment(line: &str) -> &str {
 /// `read_to_string` rejects the first file outright and turns the second one's
 /// first package name into one that starts with an invisible character.
 pub(crate) fn read_manifest(path: &Path) -> Option<String> {
-    decode_text(std::fs::read(path).ok()?)
+    decode_text(crate::core::exec::read(path).ok()?)
 }
 
 fn decode_text(bytes: Vec<u8>) -> Option<String> {

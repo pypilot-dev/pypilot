@@ -51,8 +51,7 @@ impl Manifests {
 
 impl Manifests {
     fn of(workspace: &Path) -> Manifests {
-        let pyproject = std::fs::read_to_string(workspace.join("pyproject.toml"))
-            .ok()
+        let pyproject = crate::core::project::read_manifest(&workspace.join("pyproject.toml"))
             .and_then(|t| t.parse::<toml::Table>().ok())
             .is_some_and(|d| d.get("project").is_some_and(|p| p.is_table()));
         let python = std::fs::read_to_string(workspace.join(".venv").join("pyvenv.cfg"))
@@ -358,8 +357,7 @@ async fn replace_dist(
 
 /// Normalized names in `[project] dependencies` (and the optional lists).
 fn pyproject_names(workspace: &Path) -> Vec<String> {
-    std::fs::read_to_string(workspace.join("pyproject.toml"))
-        .ok()
+    crate::core::project::read_manifest(&workspace.join("pyproject.toml"))
         .and_then(|t| t.parse::<toml::Table>().ok())
         .map(|d| {
             super::pyproject_dependencies(&d)

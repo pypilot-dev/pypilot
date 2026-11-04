@@ -229,8 +229,7 @@ pub struct Declared {
 }
 
 pub fn declared_packages(workspace: &Path) -> Declared {
-    let pyproject = std::fs::read_to_string(workspace.join("pyproject.toml"))
-        .ok()
+    let pyproject = crate::core::project::read_manifest(&workspace.join("pyproject.toml"))
         .and_then(|t| t.parse::<toml::Table>().ok());
     let project_name = pyproject
         .as_ref()
@@ -246,7 +245,8 @@ pub fn declared_packages(workspace: &Path) -> Declared {
     let (source, names) = if !from_pyproject.is_empty() {
         ("pyproject.toml", from_pyproject)
     } else {
-        let text = std::fs::read_to_string(workspace.join("requirements.txt")).unwrap_or_default();
+        let text = crate::core::project::read_manifest(&workspace.join("requirements.txt"))
+            .unwrap_or_default();
         (
             "requirements.txt",
             text.lines().filter_map(unconditional_name).collect(),
@@ -554,8 +554,7 @@ fn pyproject_requirements(
 /// they agree, or when the lock has no root package to compare with (a
 /// workspace member, an old lock format).
 pub fn lock_changes(workspace: &Path, lock: &Lock) -> Vec<String> {
-    let Some(table) = std::fs::read_to_string(workspace.join("pyproject.toml"))
-        .ok()
+    let Some(table) = crate::core::project::read_manifest(&workspace.join("pyproject.toml"))
         .and_then(|t| t.parse::<toml::Table>().ok())
     else {
         return Vec::new();

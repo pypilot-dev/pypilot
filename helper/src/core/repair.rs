@@ -746,7 +746,12 @@ pub fn raise_requires_python(
     floor: PyVersion,
 ) -> std::io::Result<Option<(String, String)>> {
     let path = workspace.join("pyproject.toml");
-    let text = std::fs::read_to_string(&path)?;
+    let text = crate::core::project::read_manifest(&path).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("cannot read {}", path.display()),
+        )
+    })?;
     let Some((old, new, edited)) = raised_requires_python(&text, floor) else {
         return Ok(None);
     };

@@ -227,8 +227,7 @@ pub fn context(
 /// when it has a `[project]` table, else requirements.txt when there is one.
 pub fn new_requirement_file(workspace: &Path) -> Option<std::path::PathBuf> {
     let pyproject = workspace.join("pyproject.toml");
-    let has_project = std::fs::read_to_string(&pyproject)
-        .ok()
+    let has_project = crate::core::project::read_manifest(&pyproject)
         .and_then(|t| t.parse::<toml::Table>().ok())
         .is_some_and(|d| d.get("project").is_some_and(|p| p.is_table()));
     if has_project {
@@ -273,10 +272,10 @@ pub fn declared_with_marker(workspace: &Path) -> HashSet<String> {
             }
         }
     };
-    if let Ok(text) = std::fs::read_to_string(workspace.join("requirements.txt")) {
+    if let Some(text) = crate::core::project::read_manifest(&workspace.join("requirements.txt")) {
         text.lines().for_each(&mut consider);
     }
-    if let Ok(text) = std::fs::read_to_string(workspace.join("pyproject.toml")) {
+    if let Some(text) = crate::core::project::read_manifest(&workspace.join("pyproject.toml")) {
         if let Ok(doc) = text.parse::<toml::Table>() {
             for req in pyproject_dependencies(&doc) {
                 consider(&req);
