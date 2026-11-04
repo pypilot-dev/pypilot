@@ -114,6 +114,9 @@ fn print_help() {
          \x20   install <package> Install one package and record it in the manifest\n\
          \x20   fix python        Rebuild the environment on the right Python version\n\
          \x20   fix cuda          Re-pin torch/tensorflow to the build matching the driver\n\
+         \x20   fix requirements  Apply doctor's requirement edits: relax a pin uv cannot\n\
+         \x20                     resolve, fix a typo'd name, add an OS marker, declare\n\
+         \x20                     undeclared imports\n\
          \x20   update-data       Force-refresh the bundled driver/framework/import tables\n\
          \x20                     (--check: compare with main without writing; exit\n\
          \x20                     0 current, 1 stale, 2 network error; --json)\n\

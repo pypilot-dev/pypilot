@@ -9,6 +9,7 @@ pub mod completions;
 mod doctor;
 mod explain;
 mod fix;
+mod fix_requirements;
 pub mod logs;
 mod migrate_conda;
 pub mod output;

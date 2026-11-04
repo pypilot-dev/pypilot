@@ -151,8 +151,8 @@ pub const COMMANDS: &[Cmd] = &[
     Cmd {
         name: "fix",
         aliases: &[],
-        help: "Rebuild on the right Python, or re-pin the CUDA build",
-        positional: Val::Choices(&["python", "cuda"]),
+        help: "Rebuild on the right Python, re-pin the CUDA build, or apply requirement edits",
+        positional: Val::Choices(&["python", "cuda", "requirements"]),
         flags: &[DRY_RUN, JSON],
         project: true,
     },
