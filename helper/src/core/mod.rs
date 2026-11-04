@@ -132,6 +132,11 @@ pub enum FixKind {
     /// Add packages the code imports but the manifest never declares, by
     /// installing them the way `pypilot install` does (which records them).
     AddRequirements(Vec<String>),
+    /// Raise the lower bound of pyproject.toml's `requires-python` to this
+    /// Python, keeping any upper bound: a dependency does not support the
+    /// older Pythons it allows, so `uv lock` finds no solution for them.
+    /// Serialized as `{"kind": "raise_requires_python", "python": "3.10"}`.
+    RaiseRequiresPython(PyVersion),
 
     // ---- Known breakages ([`knowledge`]), run by [`knowledge::apply::apply`].
     // Their constraint fixes (`numpy<2`, `setuptools<82`, ...) are
@@ -154,6 +159,7 @@ impl serde::Serialize for FixKind {
             FixKind::RepairEnvironment { python } => map.serialize_entry("python", python)?,
             FixKind::EditRequirement(edit) => map.serialize_entry("edit", edit)?,
             FixKind::AddRequirements(packages) => map.serialize_entry("packages", packages)?,
+            FixKind::RaiseRequiresPython(py) => map.serialize_entry("python", py)?,
             FixKind::ReplaceDist(r) => {
                 map.serialize_entry("uninstall", &r.uninstall)?;
                 map.serialize_entry("install", &r.install)?;
@@ -182,6 +188,7 @@ impl FixKind {
             FixKind::PoetryInstall => "poetry_install",
             FixKind::EditRequirement(_) => "edit_requirement",
             FixKind::AddRequirements(_) => "add_requirements",
+            FixKind::RaiseRequiresPython(_) => "raise_requires_python",
             FixKind::ReplaceDist(_) => "replace_dist",
         }
     }
@@ -305,6 +312,10 @@ mod tests {
             (
                 FixKind::RepairEnvironment { python: None },
                 serde_json::json!({"kind": "repair_environment", "python": null}),
+            ),
+            (
+                FixKind::RaiseRequiresPython(PyVersion::py3(10)),
+                serde_json::json!({"kind": "raise_requires_python", "python": "3.10"}),
             ),
         ];
         let known = [(

@@ -137,7 +137,9 @@ pub fn plan(findings: &[Finding]) -> RepairPlan {
             FixKind::SyncEnvironment => p.sync = true,
             // Requirement edits: applied first, then the project is assessed
             // again (`run_with_mode`).
-            FixKind::EditRequirement(_) | FixKind::AddRequirements(_) => {
+            FixKind::EditRequirement(_)
+            | FixKind::AddRequirements(_)
+            | FixKind::RaiseRequiresPython(_) => {
                 if !p.requirements.contains(&f.fix) {
                     p.requirements.push(f.fix.clone());
                 }

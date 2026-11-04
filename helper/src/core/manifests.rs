@@ -550,7 +550,13 @@ async fn python_floor_finding<S: MetadataSource>(
             "The project allows Python {floor}, but {}. Poetry and uv resolve for every Python the project allows, so `poetry lock` and `uv lock` find no solution for Python {floor}. Raise the floor to {required}: {change}.",
             each.join("; ")
         ),
-        fix: FixKind::Manual,
+        // pyproject.toml's requires-python is edited in place; Poetry's
+        // caret spec is left to the user.
+        fix: if declared.poetry {
+            FixKind::Manual
+        } else {
+            FixKind::RaiseRequiresPython(required)
+        },
     })
 }
 
@@ -1071,11 +1077,13 @@ dependencies = [\"requests==2.31.0\", \"pyyaml==6.0.1\"]
         );
         assert!(f.detail.contains("`>=3.10`"));
         assert!(f.detail.contains("`python = \"^3.10\"`"), "{}", f.detail);
+        assert_eq!(f.fix, FixKind::Manual);
 
         let pep621 = "[project]\nname = \"x\"\nrequires-python = \">=3.8\"\ndependencies = [\"numpy>=2.2\"]\n";
         let f = floor(pep621).await.expect("finding");
         assert!(f.title.starts_with("requires-python `>=3.8`"));
         assert!(f.detail.contains("`requires-python = \">=3.10\"`"));
+        assert_eq!(f.fix, FixKind::RaiseRequiresPython(PyVersion::py3(10)));
 
         // A floor the oldest allowed release supports, or a marker, is fine.
         assert!(floor("[project]\nname = \"x\"\nrequires-python = \">=3.10\"\ndependencies = [\"numpy>=2.2\"]\n").await.is_none());

@@ -194,7 +194,7 @@ fn strip_comment(line: &str) -> &str {
 pub fn is_requirement_fix(fix: &FixKind) -> bool {
     matches!(
         fix,
-        FixKind::EditRequirement(_) | FixKind::AddRequirements(_)
+        FixKind::EditRequirement(_) | FixKind::AddRequirements(_) | FixKind::RaiseRequiresPython(_)
     )
 }
 
@@ -227,6 +227,17 @@ pub async fn apply(
             let summary =
                 crate::core::install::install_packages(workspace, settings, &names).await?;
             Ok(summary.steps)
+        }
+        FixKind::RaiseRequiresPython(floor) => {
+            let detail = match crate::core::repair::raise_requires_python(workspace, *floor)? {
+                Some((old, new)) => format!("requires-python `{old}` -> `{new}`"),
+                None => format!("requires-python already allows only Python {floor} and newer"),
+            };
+            Ok(vec![Step {
+                name: "edit pyproject.toml".into(),
+                ok: true,
+                detail,
+            }])
         }
         other => anyhow::bail!("not a requirement fix: {other:?}"),
     }
@@ -474,6 +485,34 @@ mod tests {
             .unwrap()
             .contains("\"urllib3>=1.21.1,<3\""));
         assert!(apply(&dir, &settings, &FixKind::Manual).await.is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn raising_requires_python_is_a_requirement_fix() {
+        // c12b, A s3: `numpy>=2.1` needs Python 3.10, the project said 3.8.
+        let dir = tempdir();
+        let file = dir.join("pyproject.toml");
+        let text = "[project]
+name = \"x\"
+requires-python = \">=3.8\"
+dependencies = [\"numpy>=2.1\"]
+";
+        std::fs::write(&file, text).unwrap();
+        let fix = FixKind::RaiseRequiresPython(crate::pypi::pyversion::PyVersion::py3(10));
+        assert!(is_requirement_fix(&fix));
+        let settings = Settings::default();
+        let (result, _) = exec::dry_run(apply(&dir, &settings, &fix)).await;
+        assert_eq!(
+            result.unwrap()[0].detail,
+            "requires-python `>=3.8` -> `>=3.10`"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+        let steps = apply(&dir, &settings, &fix).await.unwrap();
+        assert!(steps[0].ok);
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert!(after.contains("requires-python = \">=3.10\""), "{after}");
+        assert!(after.contains("\"numpy>=2.1\""));
         std::fs::remove_dir_all(&dir).ok();
     }
 

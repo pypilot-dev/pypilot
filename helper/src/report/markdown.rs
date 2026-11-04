@@ -111,6 +111,12 @@ _Fix: run `poetry install`._
                     "\n_Fix: change `{}` to `{}` (`pypilot fix requirements`)._\n",
                     edit.old, edit.new
                 ));
+            } else if let FixKind::RaiseRequiresPython(py) = &f.fix {
+                s.push_str(&format!(
+                    "
+_Fix: set `requires-python = \">={py}\"` (`pypilot fix requirements`)._
+"
+                ));
             } else if let FixKind::AddRequirements(names) = &f.fix {
                 s.push_str(&format!(
                     "\n_Fix: add {} (`pypilot fix requirements`)._\n",
