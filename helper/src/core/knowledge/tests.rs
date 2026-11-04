@@ -169,7 +169,7 @@ fn a_declared_numpy_2_floor_turns_the_fix_into_an_upgrade() {
     ctx.declared = vec![req("pandas", "==2.0.3"), req("numpy", ">=2")];
     let found = evaluate(&bundled(), &ctx);
     assert_eq!(found.len(), 1);
-    assert_eq!(found[0].fix, constraint("pandas>=2.2.2"));
+    assert_eq!(found[0].fix, constraint("pandas>=2.2.2,<3"));
     assert!(found[0].detail.contains("requires numpy>=2"));
 }
 
@@ -243,7 +243,7 @@ fn each_api_removal_names_its_culprit_and_constraint() {
             "0.10.1",
             "urllib3",
             "2.2.2",
-            "requests-toolbelt>=1.0.0",
+            "requests-toolbelt>=1.0.0,<2",
         ),
     ];
     for (pkg, pv, dep, dv, fix) in cases {
@@ -297,7 +297,7 @@ fn packages_dead_on_new_python_get_upgrade_or_replacement() {
     ctx.installed = installed(&[("kafka-python", "2.0.2")]);
     let found = evaluate(&bundled(), &ctx);
     assert_eq!(found.len(), 1);
-    assert_eq!(found[0].fix, constraint("kafka-python>=2.0.3"));
+    assert_eq!(found[0].fix, constraint("kafka-python>=2.0.3,<3"));
 
     ctx.installed = installed(&[("nose", "1.3.7")]);
     let found = evaluate(&bundled(), &ctx);

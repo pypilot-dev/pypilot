@@ -100,6 +100,7 @@ impl Context {
         }
         let key = normalize_name(name);
         if let Some(d) = self.declared_raw.iter().find(|d| d.name == key) {
+            let spec = keep_lower_bounds(&d.spec(), &spec);
             if d.spec() == spec {
                 return FixKind::SyncEnvironment;
             }
@@ -117,6 +118,46 @@ impl Context {
             }),
             None => FixKind::AddRequirements(vec![requirement.to_string()]),
         }
+    }
+}
+
+/// `new` with the lower bounds of `old` that still fit under it, when `new`
+/// only caps (`<1.24`): `>=1.20` and `<1.24` give `>=1.20,<1.24`, so a cap
+/// does not throw away the floor the user wrote. Anything else is `new`.
+fn keep_lower_bounds(old: &str, new: &str) -> String {
+    let caps_only = !new.is_empty()
+        && new
+            .split(',')
+            .all(|c| c.starts_with('<') || c.starts_with("!="));
+    if !caps_only {
+        return new.to_string();
+    }
+    let cap = VersionSpec::parse(new);
+    let kept: Vec<&str> = old
+        .split(',')
+        .map(str::trim)
+        .filter(|c| c.starts_with(">=") || (c.starts_with('>') && !c.starts_with(">=")))
+        .filter(|c| {
+            let v = c.trim_start_matches(['>', '=']);
+            ver(v).is_some_and(|v| cap.admits(&v))
+        })
+        .collect();
+    if kept.is_empty() {
+        return new.to_string();
+    }
+    format!("{},{new}", kept.join(","))
+}
+
+/// `pandas>=2.2.2,<3`: the first fixed release, without moving to the next
+/// major (a bigger change than the fix needs).
+pub fn upgrade_requirement(package: &str, fixed_in: &str) -> String {
+    match fixed_in
+        .split('.')
+        .next()
+        .and_then(|m| m.parse::<u64>().ok())
+    {
+        Some(major) => format!("{package}>={fixed_in},<{}", major + 1),
+        None => format!("{package}>={fixed_in}"),
     }
 }
 
@@ -288,7 +329,7 @@ fn api_hit<'a>(rule: &'a ApiRemoval, ctx: &Context) -> Option<ApiHit<'a>> {
     }
     let dep_decl = ctx.declared_plain(&rule.dependency);
     let forced = dep_decl.is_some_and(|d| forces_from(&d.spec, &rule.breaks_from));
-    let upgrade_req = format!("{}>={}", rule.package, rule.fixed_in);
+    let upgrade_req = upgrade_requirement(&rule.package, &rule.fixed_in);
     let pick = |forced: bool| {
         if forced || rule.prefer.as_deref() == Some("upgrade") {
             (upgrade_req.clone(), true)
@@ -411,29 +452,7 @@ fn api_finding(group: &[&ApiHit], ctx: &Context) -> Finding {
             "Nothing in the project keeps {dep} below {major}, so an install picks {dep} {major} or newer. "
         )),
     }
-    let upgrades: Vec<String> = group
-        .iter()
-        .map(|h| format!("`{}>={}`", h.rule.package, h.rule.fixed_in))
-        .collect();
-    if first.forced {
-        detail.push_str(&format!(
-            "The project requires {dep}{}, which rules out the cap. Fix: upgrade to {}.",
-            ctx.declared(dep).map(|d| d.spec.as_str()).unwrap_or(""),
-            join_and(&upgrades.iter().map(String::as_str).collect::<Vec<_>>())
-        ));
-    } else if first.upgrade {
-        detail.push_str(&format!(
-            "Fix: upgrade to {} (or add `{}`, which holds {dep} back).",
-            join_and(&upgrades.iter().map(String::as_str).collect::<Vec<_>>()),
-            rule.constraint
-        ));
-    } else {
-        detail.push_str(&format!(
-            "Fix: add `{}` to the dependencies, or upgrade to {}.",
-            rule.constraint,
-            join_and(&upgrades.iter().map(String::as_str).collect::<Vec<_>>())
-        ));
-    }
+    detail.push_str(&api_fix_sentence(group, ctx));
     detail.push_str(&source_line(&rule.source));
 
     // Several packages needing an upgrade each cannot share one requirement.
@@ -447,6 +466,39 @@ fn api_finding(group: &[&ApiHit], ctx: &Context) -> Finding {
         title,
         detail,
         fix,
+    }
+}
+
+/// The "Fix: ..." sentence of an API finding.
+fn api_fix_sentence(group: &[&ApiHit], ctx: &Context) -> String {
+    let first = group[0];
+    let rule = first.rule;
+    let dep = &rule.dependency;
+    let upgrades: Vec<String> = group
+        .iter()
+        .map(|h| {
+            format!(
+                "`{}`",
+                upgrade_requirement(&h.rule.package, &h.rule.fixed_in)
+            )
+        })
+        .collect();
+    let upgrades = join_and(&upgrades.iter().map(String::as_str).collect::<Vec<_>>());
+    if first.forced {
+        format!(
+            "The project requires {dep}{}, which rules out the cap. Fix: upgrade to {upgrades}.",
+            ctx.declared(dep).map(|d| d.spec.as_str()).unwrap_or("")
+        )
+    } else if first.upgrade {
+        format!(
+            "Fix: upgrade to {upgrades} (or add `{}`, which holds {dep} back).",
+            rule.constraint
+        )
+    } else {
+        format!(
+            "Fix: add `{}` to the dependencies, or upgrade to {upgrades}.",
+            rule.constraint
+        )
     }
 }
 
@@ -506,11 +558,12 @@ fn python_finding(rule: &PythonRemoval, ctx: &Context) -> Option<Finding> {
         rule.symptom
     );
     let fix = if let Some(fixed) = &rule.fixed_in {
+        let upgrade = upgrade_requirement(&rule.package, fixed);
         detail.push_str(&format!(
-            " {} {fixed} is the first release that works there. Fix: upgrade to `{}>={fixed}`.",
-            rule.package, rule.package
+            " {} {fixed} is the first release that works there. Fix: upgrade to `{upgrade}`.",
+            rule.package
         ));
-        ctx.constraint_fix(&format!("{}>={fixed}", rule.package))
+        ctx.constraint_fix(&upgrade)
     } else if let (Some(repl), true) = (&rule.replacement, rule.drop_in) {
         detail.push_str(&format!(
             " No release fixes it. `{repl}` is a drop-in replacement with the same import. Fix: replace {} with {repl}.",
