@@ -210,10 +210,15 @@ pub async fn apply(
     match fix {
         FixKind::EditRequirement(edit) => {
             edit_file(edit)?;
+            let detail = if edit.old.trim().is_empty() {
+                format!("added `{}`", edit.new)
+            } else {
+                format!("`{}` -> `{}`", edit.old, edit.new)
+            };
             Ok(vec![Step {
                 name: format!("edit {}", file_label(&edit.file)),
                 ok: true,
-                detail: format!("`{}` -> `{}`", edit.old, edit.new),
+                detail,
             }])
         }
         FixKind::AddRequirements(names) => {
@@ -233,8 +238,21 @@ fn file_label(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
-/// Apply one [`RequirementEdit`] to its file.
+/// Apply one [`RequirementEdit`] to its file. An empty `old` adds `new`
+/// (a constraint the project did not declare, such as `numpy<2`), creating
+/// a requirements file that does not exist yet.
 pub fn edit_file(edit: &RequirementEdit) -> crate::Result<()> {
+    if edit.old.trim().is_empty() && !edit.file.exists() {
+        exec::write(
+            &edit.file,
+            format!("{}\n", edit.new.trim()),
+            Effect::new(
+                format!("edit {}", file_label(&edit.file)),
+                format!("add `{}`", edit.new),
+            ),
+        )?;
+        return Ok(());
+    }
     let text = read_manifest(&edit.file)
         .ok_or_else(|| anyhow::anyhow!("cannot read {}", edit.file.display()))?;
     let is_toml = edit
@@ -266,6 +284,16 @@ pub fn edit_pyproject(text: &str, old: &str, new: &str) -> crate::Result<String>
         .and_then(|p| p.get_mut("dependencies"))
         .and_then(toml_edit::Item::as_array_mut)
         .ok_or_else(|| anyhow::anyhow!("pyproject.toml has no [project] dependencies"))?;
+    if old.trim().is_empty() {
+        // Same layout as the entry before it, so a one-per-line array stays so.
+        let decor = deps.iter().last().map(|v| v.decor().clone());
+        let mut value = toml_edit::Value::from(new.trim());
+        if let Some(decor) = decor {
+            *value.decor_mut() = decor;
+        }
+        deps.push_formatted(value);
+        return Ok(doc.to_string());
+    }
     let hits: Vec<usize> = deps
         .iter()
         .enumerate()
@@ -290,6 +318,16 @@ pub fn edit_pyproject(text: &str, old: &str, new: &str) -> crate::Result<String>
 /// Replace the requirements-file line whose requirement is `old`, keeping
 /// its indentation, comment and line ending.
 pub fn edit_requirements(text: &str, old: &str, new: &str) -> crate::Result<String> {
+    if old.trim().is_empty() {
+        let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+        let mut out = text.to_string();
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push_str(eol);
+        }
+        out.push_str(new.trim());
+        out.push_str(eol);
+        return Ok(out);
+    }
     let mut out = String::with_capacity(text.len() + new.len());
     let mut hits = 0;
     for line in text.split_inclusive('\n') {
@@ -343,6 +381,32 @@ mod tests {
             "# top\r\nrequests==2.31.0\r\n  urllib3>=1.21.1,<3  # old\r\n-r more.txt\r\n"
         );
         assert!(edit_requirements(text, "numpy", "numpy<2").is_err());
+    }
+
+    #[test]
+    fn an_empty_old_adds_the_requirement() {
+        assert_eq!(
+            edit_requirements("pandas==1.5.3\r\n", "", "numpy<2").unwrap(),
+            "pandas==1.5.3\r\nnumpy<2\r\n"
+        );
+        assert_eq!(
+            edit_requirements("pandas==1.5.3", "", "numpy<2").unwrap(),
+            "pandas==1.5.3\nnumpy<2\n"
+        );
+        let out = edit_pyproject(PYPROJECT, "", "setuptools<81").unwrap();
+        let doc: toml::Value = toml::from_str(&out).unwrap();
+        let deps: Vec<&str> = doc["project"]["dependencies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert_eq!(deps, ["requests==2.31.0", "urllib3<1.21", "setuptools<81"]);
+        assert!(out.contains("# pins"), "comments kept: {out}");
+        let flat = "[project]\nname = \"x\"\ndependencies = [\"requests\"]\n";
+        let out = edit_pyproject(flat, "", "numpy<2").unwrap();
+        assert!(out.contains("\"requests\""), "{out}");
+        assert!(out.contains("\"numpy<2\""), "{out}");
     }
 
     #[test]
