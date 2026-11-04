@@ -210,6 +210,42 @@ fn raising_requires_python_keeps_the_upper_bound_and_layout() {
     assert_eq!(new, ">=3.10");
 }
 
+#[tokio::test]
+async fn a_snapshot_puts_the_edited_manifests_back() {
+    // s05: an edit that leaves the project unresolvable is undone.
+    let dir = std::env::temp_dir().join(format!("pp-snapshot-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let pyproject = dir.join("pyproject.toml");
+    std::fs::write(&pyproject, "flask==1.1.2\n").unwrap();
+    std::fs::write(dir.join("uv.lock"), "lock\n").unwrap();
+    let snapshot = ManifestSnapshot::take(&dir);
+
+    // A dry run restores the planned write, and the disk is untouched.
+    let (restored, steps) = dry_run(async {
+        exec::write(&pyproject, "flask>=2.0.0\n", Effect::new("edit", "test")).unwrap();
+        let restored = snapshot.restore().unwrap();
+        (restored, exec::read(&pyproject).unwrap())
+    })
+    .await;
+    assert_eq!(restored.0, ["pyproject.toml"]);
+    assert_eq!(restored.1, b"flask==1.1.2\n");
+    assert_eq!(names(&steps), ["edit", "roll back requirement edits"]);
+
+    // For real: only the changed file is written back.
+    std::fs::write(&pyproject, "flask>=2.0.0\n").unwrap();
+    assert_eq!(snapshot.restore().unwrap(), ["pyproject.toml"]);
+    assert_eq!(
+        std::fs::read_to_string(&pyproject).unwrap(),
+        "flask==1.1.2\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("uv.lock")).unwrap(),
+        "lock\n"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ---- dry runs ----------------------------------------------------------------
 
 fn fixture(name: &str) -> PathBuf {

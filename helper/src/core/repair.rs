@@ -199,11 +199,31 @@ pub async fn run_with_mode<S: MetadataSource>(
 
     // Requirement edits first: they change what the rest resolves, so the
     // project is assessed again after them. Findings they fixed are dropped
-    // from the new assessment too, which is what keeps a dry run (where
-    // the files do not change) from planning them twice.
+    // from the new assessment too, which is what keeps a dry run from
+    // planning them twice. An edit can uncover another (a pin moved to a
+    // release that needs a newer Python leaves requires-python too low,
+    // C s2b), so the edits the new assessment asks for run as a further
+    // round, a few at most, each listed as its own step.
+    let blocked_before: Vec<String> = assessment
+        .findings
+        .iter()
+        .filter(|f| resolution::blocks_install(f))
+        .map(|f| f.title.clone())
+        .collect();
+    let snapshot = ManifestSnapshot::take(workspace);
     let mut edit_steps = Vec::new();
-    if !plan.requirements.is_empty() {
-        for fix in &plan.requirements {
+    let mut applied: Vec<FixKind> = Vec::new();
+    for _ in 0..MAX_EDIT_ROUNDS {
+        let round: Vec<FixKind> = plan
+            .requirements
+            .iter()
+            .filter(|f| !applied.contains(f))
+            .cloned()
+            .collect();
+        if round.is_empty() {
+            break;
+        }
+        for fix in &round {
             match req_edit::apply(workspace, settings, fix).await {
                 Ok(steps) => edit_steps.extend(steps),
                 Err(e) => edit_steps.push(Step {
@@ -213,12 +233,62 @@ pub async fn run_with_mode<S: MetadataSource>(
                 }),
             }
         }
-        if edit_steps.iter().all(|s| s.ok) {
-            let applied = std::mem::take(&mut plan.requirements);
-            assessment = assess_with_imports(workspace, settings, source).await;
-            assessment.findings.retain(|f| !applied.contains(&f.fix));
-            plan = self::plan(&assessment.findings);
-            plan.requirements.clear();
+        applied.extend(round);
+        if edit_steps.iter().any(|s| !s.ok) {
+            break;
+        }
+        assessment = assess_with_imports(workspace, settings, source).await;
+        assessment.findings.retain(|f| !applied.contains(&f.fix));
+        plan = self::plan(&assessment.findings);
+    }
+    plan.requirements.clear();
+
+    // Edits that leave the project unresolvable where it was not (s05:
+    // `flask>=2.0.0` next to a pinned jinja2) are undone: never leave the
+    // manifests worse than they were found.
+    if !applied.is_empty() && edit_steps.iter().all(|s| s.ok) {
+        let new_blockers: Vec<&Finding> = assessment
+            .findings
+            .iter()
+            .filter(|f| resolution::blocks_install(f) && !blocked_before.contains(&f.title))
+            .collect();
+        if !new_blockers.is_empty() {
+            let mut summary = SetupSummary {
+                package_manager: settings.package_manager,
+                resolved_mode: mode,
+                python: assessment.probes.venv.as_ref().and_then(|v| v.python),
+                venv_path: Target::of(workspace, &assessment).dir,
+                why: first_why,
+                steps: edit_steps,
+                ok: false,
+            };
+            let problems: Vec<String> = new_blockers
+                .iter()
+                .map(|f| format!("{}: {}", f.title, f.detail))
+                .collect();
+            let restored = snapshot.restore();
+            summary.steps.push(match restored {
+                Ok(files) => Step {
+                    name: "roll back requirement edits".into(),
+                    ok: true,
+                    detail: format!("restored {}", files.join(", ")),
+                },
+                Err(e) => Step {
+                    name: "roll back requirement edits".into(),
+                    ok: false,
+                    detail: e.to_string(),
+                },
+            });
+            summary.steps.push(Step {
+                name: "resolve dependencies".into(),
+                ok: false,
+                detail: format!(
+                    "With the edits above, uv finds no set of versions that installs: {} The edits were rolled back, so the manifests are as they were, and nothing else was changed.",
+                    problems.join(" | ")
+                ),
+            });
+            finish(&mut summary);
+            return Ok(summary);
         }
     }
 
@@ -402,6 +472,53 @@ async fn assess_with_imports<S: MetadataSource>(
         a.findings.extend(undeclared::finding(&missing));
     }
     a
+}
+
+/// Rounds of requirement edits [`run_with_mode`] runs, at most.
+const MAX_EDIT_ROUNDS: usize = 3;
+
+/// The manifests a requirement edit can change, as they were before it, so
+/// edits that leave the project unresolvable can be undone.
+struct ManifestSnapshot {
+    files: Vec<(PathBuf, Vec<u8>)>,
+}
+
+impl ManifestSnapshot {
+    fn take(workspace: &Path) -> ManifestSnapshot {
+        let files = ["pyproject.toml", "requirements.txt", "uv.lock"]
+            .iter()
+            .map(|name| workspace.join(name))
+            .filter_map(|path| exec::read(&path).ok().map(|bytes| (path, bytes)))
+            .collect();
+        ManifestSnapshot { files }
+    }
+
+    /// Write every changed file back as it was (a recorded write in a dry
+    /// run). Returns the names of the files restored.
+    fn restore(&self) -> std::io::Result<Vec<String>> {
+        let mut restored = Vec::new();
+        for (path, bytes) in &self.files {
+            if exec::read(path).ok().as_ref() == Some(bytes) {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            exec::write(
+                path,
+                bytes,
+                Effect::new(
+                    "roll back requirement edits",
+                    format!(
+                        "the edits left requirements uv cannot resolve; put {name} back as it was"
+                    ),
+                ),
+            )?;
+            restored.push(name);
+        }
+        Ok(restored)
+    }
 }
 
 /// The environment the fix works on: the project's venv wherever it lives
