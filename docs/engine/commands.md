@@ -37,6 +37,8 @@ pypilot doctor [--json | --markdown] [--fix [--dry-run]] [--path <dir>] [--pixi-
 | `--fix` <Badge type="tip" text="1.3" /> | Print the report, then run what the editor's **Fix environment** runs: <Badge type="tip" text="1.4" /> only the fixes the findings call for (sync, `uv lock`, reinstall a package, rebuild the environment in place on the Python it had), the full `setup` only when no environment exists, nothing for a healthy project. It then checks the result and imports the declared packages, and exits non-zero if any step or that check failed. With `--json` only the steps document is printed, with `command: "doctor --fix"`. |
 | `--fix --dry-run` <Badge type="tip" text="1.3" /> | Print the report, then the plan `--fix` would run. See [Dry runs](./dry-run). |
 
+<Badge type="tip" text="1.4" /> doctor also resolves the declared requirements with `uv pip compile` for the project's Python. When they cannot be installed together (`requests==2.31.0` with `urllib3<1.21`, or `boto3==1.26.0`, which needs `urllib3<1.27`, with `urllib3>=2`) the finding names the requirements that clash, quotes uv's explanation in full, and proposes the one edit that fixes it, checked by resolving again. A name PyPI does not know gets "did you mean", a version it does not have gets the nearest releases, and a package that does not support this operating system (uvloop on Windows) gets an environment marker. Imports the code makes that no dependency provides are listed with their distribution (`yaml` is PyYAML). `--fix` applies these edits first and stops before touching the environment when the requirements still cannot resolve.
+
 Sections: **Environment** (uv, the project environment, pixi, interpreters found, and <Badge type="tip" text="1.3" /> the data tables' refresh state), **Project** (files, `requires-python`, dependencies), **pixi** (in pixi projects: platforms, lock status, environments), **Compatibility** (the supported range, the recommendation, each dependency's range) and **Findings**.
 
 <TerminalDemo src="doctor" cmd="pypilot doctor" title="~/src/demo" />
@@ -142,6 +144,8 @@ Install one package and record it in the manifest.
 pypilot install <package> [--dry-run] [--json] [--path <dir>]
 ```
 
+<Badge type="tip" text="1.4" /> An import name is mapped to its distribution and the output says so: `pypilot install sklearn` installs scikit-learn (the `sklearn` distribution is a deprecated stub), `install yaml` installs PyYAML. `check` maps the same way. `pypilot <mode> --help` prints that mode's flags.
+
 | Mode | Command run |
 |---|---|
 | uv project | `uv add <package>` |
@@ -160,6 +164,14 @@ pypilot fix python [--dry-run] [--json] [--path <dir>]
 ```
 
 `pypilot fix` with no target means `fix python`.
+
+## fix requirements <Badge type="tip" text="1.4" />
+
+Apply the requirement edits doctor proposes, and nothing else: relax a pin uv cannot resolve, correct a misspelled name or a version that does not exist, add `; sys_platform != 'win32'` to a package that does not support Windows, and add undeclared imports (installed and recorded like `pypilot install`). Only the one requirement changes; comments and layout stay. Run `pypilot setup` afterwards.
+
+```bash
+pypilot fix requirements [--dry-run] [--json] [--path <dir>]
+```
 
 ## fix cuda
 

@@ -9,6 +9,7 @@ use colored::Colorize;
 
 use crate::core::project::ProjectDeps;
 use crate::core::solver;
+use crate::core::undeclared;
 use crate::core::Severity;
 use crate::pypi::MetadataSource;
 use crate::report::doctor::{DoctorReport, PixiSection};
@@ -22,7 +23,14 @@ pub async fn run<S: MetadataSource>(
     source: &S,
     format: OutputFormat,
 ) -> crate::Result<()> {
-    let a = solver::assess(workspace, settings, source).await;
+    let mut a = solver::assess(workspace, settings, source).await;
+    // The editor flags undeclared imports per open file; the CLI has none
+    // open, so it walks the workspace for them (core::undeclared).
+    if !a.project.is_pixi() {
+        let venv = a.probes.venv.as_ref().map(|v| (v.path.as_path(), v.python));
+        let missing = undeclared::find(workspace, &a.project, venv, source).await;
+        a.findings.extend(undeclared::finding(&missing));
+    }
 
     match format {
         OutputFormat::Text => {}

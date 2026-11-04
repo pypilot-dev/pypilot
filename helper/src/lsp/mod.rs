@@ -22,6 +22,8 @@ mod analysis;
 mod diagnostics;
 mod pixi;
 mod workspace_scan;
+// The CLI doctor walks the workspace like the LSP scan (core::undeclared).
+pub(crate) use workspace_scan::{collect_files_capped, notebook_python};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

@@ -106,6 +106,16 @@ _Fix: run `poetry install`._
                 s.push_str(
                     "\n_Fix: run \"Initialize pixi project\", or `pypilot migrate-to-pixi`._\n",
                 );
+            } else if let FixKind::EditRequirement(edit) = &f.fix {
+                s.push_str(&format!(
+                    "\n_Fix: change `{}` to `{}` (`pypilot fix requirements`)._\n",
+                    edit.old, edit.new
+                ));
+            } else if let FixKind::AddRequirements(names) = &f.fix {
+                s.push_str(&format!(
+                    "\n_Fix: add {} (`pypilot fix requirements`)._\n",
+                    names.join(", ")
+                ));
             }
             s.push('\n');
         }

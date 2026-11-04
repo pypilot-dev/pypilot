@@ -206,7 +206,7 @@ Every document starts with the same three keys, then the command's own:
 | Key | Meaning |
 |---|---|
 | `pypilot` | engine version that wrote it |
-| `command` | `doctor`, `check`, `setup`, `install`, `fix python`, `fix cuda`, `update-data`, `migrate-conda`, `migrate-to-pixi`, `install-pixi`, `version` |
+| `command` | `doctor`, `check`, `setup`, `install`, `fix python`, `fix cuda`, `fix requirements`, `update-data`, `migrate-conda`, `migrate-to-pixi`, `install-pixi`, `version` |
 | `ok` | the command's own verdict (see each command); a failed command also exits non-zero, except `doctor`, `check` and `update-data`, which only report (`update-data --check` exits 1 when stale, 2 when a fetch failed) |
 | `error` | only when the command failed before it had a report: `{ "pypilot", "command", "ok": false, "error": "..." }` |
 
@@ -223,7 +223,9 @@ Shared shapes:
   `python`), `migrate_conda`, `migrate_to_pixi`, `manual`, and since 1.4
   `sync_environment`, `relock`, `reinstall_packages` (with `packages`: a
   list of names), `repair_environment` (with `python`, `null` when
-  unknown), `migrate_conda_to_pixi` and `poetry_install`. Treat a kind you do not know as "run `pypilot doctor --fix`".
+  unknown), `migrate_conda_to_pixi`, `poetry_install`, `edit_requirement`
+  (with `edit`: `{ "file", "old", "new" }`) and `add_requirements` (with
+  `packages`). Treat a kind you do not know as "run `pypilot doctor --fix`".
 - **package analysis**: `{ "name", "version", "supported": [pythons], "has_platform_wheels", "sdist_only", "has_foreign_wheels", "no_files_for_platform", "wheel_platforms": [...], "requires_python" }`.
 - **conflict**: `{ "low": analysis, "high": analysis, "explanation" }`; `low`
   is the package with the lowest newest Python, `high` the one with the

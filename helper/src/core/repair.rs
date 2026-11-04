@@ -5,6 +5,11 @@
 //! [`RepairPlan`]; [`run_with_mode`] carries it out, smallest change first,
 //! in this order:
 //!
+//! 0. requirement edits ([`FixKind::EditRequirement`],
+//!    [`FixKind::AddRequirements`], run by [`req_edit::apply`]), then a
+//!    fresh assessment, since they change what everything after resolves;
+//!    requirements uv still cannot resolve stop the run here, before any
+//!    environment is touched ([`resolution::blocking_step_in`]);
 //! 1. nothing exists yet ([`FixKind::SetupEnvironment`]): the full bootstrap
 //!    ([`setup::run_with_mode`]), which honours `.python-version`;
 //! 2. rebuild the environment where it is ([`FixKind::RecreateWithPython`],
@@ -28,7 +33,10 @@ use std::path::{Path, PathBuf};
 
 use crate::core::exec::{self, Effect};
 use crate::core::setup::{self, SetupSummary, Step};
-use crate::core::{health, pip, pixi, solver, uv, Assessment, Finding, FixKind, Severity};
+use crate::core::{
+    health, pip, pixi, req_edit, resolution, solver, undeclared, uv, Assessment, Finding, FixKind,
+    Severity,
+};
 use crate::pypi::pyversion::PyVersion;
 use crate::pypi::MetadataSource;
 use crate::settings::{ResolvedMode, Settings};
@@ -50,6 +58,9 @@ pub struct RepairPlan {
     pub fixes: Vec<String>,
     /// Error and Warning findings PyPilot cannot fix itself.
     pub manual: Vec<Finding>,
+    /// Manifest edits to apply before anything else (see
+    /// [`req_edit::apply`]).
+    pub requirements: Vec<FixKind>,
 }
 
 /// A rebuild of the environment and why.
@@ -68,7 +79,11 @@ pub struct Rebuild {
 impl RepairPlan {
     /// True when there is nothing to run.
     pub fn is_empty(&self) -> bool {
-        !self.setup && self.rebuild.is_none() && !self.relock && !self.sync
+        !self.setup
+            && self.rebuild.is_none()
+            && !self.relock
+            && !self.sync
+            && self.requirements.is_empty()
     }
 
     fn rebuild_on(&mut self, python: Option<PyVersion>, required: bool, reason: &str) {
@@ -113,6 +128,13 @@ pub fn plan(findings: &[Finding]) -> RepairPlan {
                 }
             }
             FixKind::SyncEnvironment => p.sync = true,
+            // Requirement edits: applied first, then the project is assessed
+            // again (`run_with_mode`).
+            FixKind::EditRequirement(_) | FixKind::AddRequirements(_) => {
+                if !p.requirements.contains(&f.fix) {
+                    p.requirements.push(f.fix.clone());
+                }
+            }
             // Suggestions the user runs themselves (`migrate-conda`,
             // `migrate-to-pixi`), or guidance only.
             FixKind::Manual | FixKind::MigrateToPixi => {
@@ -156,25 +178,61 @@ pub async fn run_with_mode<S: MetadataSource>(
     } else {
         mode
     };
-    let assessment = solver::assess(workspace, settings, source).await;
-    // A stale pixi.lock is doctor's own check (`pixi lock --check`, too slow
-    // for every assessment), so ask for it here: `pixi install` fixes it.
-    let mut findings = assessment.findings.clone();
-    if let Some(project) = pixi::detect(workspace) {
-        let status = crate::core::pixi_envs::lock_status(workspace).await;
-        findings.extend(crate::core::pixi_envs::lock_finding(&project, &status));
+    let mut assessment = assess_with_imports(workspace, settings, source).await;
+    let mut plan = plan(&assessment.findings);
+    let first_why = describe(&plan);
+
+    // Requirement edits first: they change what the rest resolves, so the
+    // project is assessed again after them. Findings they fixed are dropped
+    // from the new assessment too, which is what keeps a dry run (where
+    // the files do not change) from planning them twice.
+    let mut edit_steps = Vec::new();
+    if !plan.requirements.is_empty() {
+        for fix in &plan.requirements {
+            match req_edit::apply(workspace, settings, fix).await {
+                Ok(steps) => edit_steps.extend(steps),
+                Err(e) => edit_steps.push(Step {
+                    name: format!("apply {}", fix.kind()),
+                    ok: false,
+                    detail: format!("{e:#}"),
+                }),
+            }
+        }
+        if edit_steps.iter().all(|s| s.ok) {
+            let applied = std::mem::take(&mut plan.requirements);
+            assessment = assess_with_imports(workspace, settings, source).await;
+            assessment.findings.retain(|f| !applied.contains(&f.fix));
+            plan = self::plan(&assessment.findings);
+            plan.requirements.clear();
+        }
     }
-    let plan = plan(&findings);
+
     let env = Target::of(workspace, &assessment);
     let mut summary = SetupSummary {
         package_manager: settings.package_manager,
         resolved_mode: mode,
         python: env.python,
         venv_path: env.dir.clone(),
-        why: describe(&plan),
-        steps: Vec::new(),
+        why: if edit_steps.is_empty() {
+            first_why
+        } else {
+            format!("{first_why} Then: {}", describe(&plan))
+        },
+        steps: edit_steps,
         ok: true,
     };
+    if summary.steps.iter().any(|s| !s.ok) {
+        finish(&mut summary);
+        return Ok(summary);
+    }
+
+    // Requirements uv cannot resolve would fail the sync after the
+    // environment was rebuilt: stop while nothing has changed.
+    if let Some(step) = resolution::blocking_step_in(&assessment.findings) {
+        summary.steps.push(step);
+        finish(&mut summary);
+        return Ok(summary);
+    }
 
     if plan.is_empty() {
         let blocking: Vec<&Finding> = plan
@@ -295,6 +353,30 @@ pub async fn run_with_mode<S: MetadataSource>(
     }
     finish(&mut summary);
     Ok(summary)
+}
+
+/// [`solver::assess`] plus the imports no dependency provides
+/// ([`undeclared`]), which only a workspace walk finds and so are not part
+/// of every assessment.
+async fn assess_with_imports<S: MetadataSource>(
+    workspace: &Path,
+    settings: &Settings,
+    source: &S,
+) -> Assessment {
+    let mut a = solver::assess(workspace, settings, source).await;
+    if let Some(project) = pixi::detect(workspace) {
+        // A stale pixi.lock is doctor's own check (`pixi lock --check`, too
+        // slow for every assessment), so ask for it here: `pixi install`
+        // fixes it.
+        let status = crate::core::pixi_envs::lock_status(workspace).await;
+        a.findings
+            .extend(crate::core::pixi_envs::lock_finding(&project, &status));
+    } else if !a.project.is_pixi() {
+        let venv = a.probes.venv.as_ref().map(|v| (v.path.as_path(), v.python));
+        let missing = undeclared::find(workspace, &a.project, venv, source).await;
+        a.findings.extend(undeclared::finding(&missing));
+    }
+    a
 }
 
 /// The environment the fix works on: the project's venv wherever it lives

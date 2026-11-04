@@ -689,40 +689,44 @@ pub async fn freeze_into_requirements(uv: &UvInfo, cwd: &Path) -> crate::Result<
     Ok(out)
 }
 
-/// `uv pip install --dry-run --system --python <X.Y> <pkgs...>` — fast
-/// resolvability check against a real interpreter, without needing a venv.
-///
-/// `--system` matters: without it uv refuses with "No virtual environment
-/// found" when no `.venv` exists yet, which is exactly the situation this
-/// confirmation is most useful in (before committing to a full setup). It
-/// still requires `version` to be an interpreter uv can actually find on the
-/// machine — callers should only call this once the target is known to exist,
-/// e.g. from [`crate::core::probe::Probes::interpreters`].
-pub async fn dry_run_resolve(
-    uv: &UvInfo,
-    version: PyVersion,
-    packages: &[String],
+/// `uv pip compile <requirements> --python-version <X.Y>`: resolve a set of
+/// requirements for one Python without installing anything or needing that
+/// interpreter or a venv. Read-only, so it runs even inside a dry run.
+/// Limited to a minute: a resolve that slow is not worth blocking doctor on.
+pub async fn pip_compile(
+    uv: &Path,
+    requirements: &Path,
+    python: Option<PyVersion>,
     cwd: &Path,
 ) -> crate::Result<Output> {
-    command::run(&uv.path, &dry_run_args(version, packages), Some(cwd)).await
+    command::run_with_timeout(
+        uv,
+        &compile_args(requirements, python),
+        Some(cwd),
+        std::time::Duration::from_secs(60),
+    )
+    .await
 }
 
-/// The argument vector for [`dry_run_resolve`], split out so a test can assert
-/// on it without needing a uv binary present. `--python <version>` pins the
-/// resolve to the caller-supplied target explicitly; `--system` only lifts the
-/// "must be inside a venv" requirement, it does not select an interpreter on
-/// its own, so this can never silently fall back to whatever Python is first
-/// on `$PATH`.
-fn dry_run_args(version: PyVersion, packages: &[String]) -> Vec<String> {
+/// The argument vector for [`pip_compile`], split out so a test can assert
+/// on it without a uv binary. `--python-version` pins the resolve to the
+/// caller's target; without it uv would resolve for whichever Python it
+/// finds first, which is often not the one the project runs on.
+fn compile_args(requirements: &Path, python: Option<PyVersion>) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "pip".into(),
-        "install".into(),
-        "--dry-run".into(),
-        "--system".into(),
-        "--python".into(),
-        version.to_string(),
+        "compile".into(),
+        requirements.display().to_string(),
+        "--no-header".into(),
+        "--no-annotate".into(),
+        "--quiet".into(),
+        "--color".into(),
+        "never".into(),
     ];
-    args.extend(packages.iter().cloned());
+    if let Some(py) = python {
+        args.push("--python-version".into());
+        args.push(py.to_string());
+    }
     args
 }
 
@@ -947,21 +951,16 @@ mod tests {
     }
 
     #[test]
-    fn dry_run_pins_the_given_target_not_whatever_system_python_is() {
-        // Regression guard for a real risk: if this ever dropped back to bare
-        // `--system` with no `--python`, uv would resolve against the first
-        // Python it finds on PATH, which is often the *wrong* one — the whole
-        // reason PyPilot exists is that the system default often isn't the
-        // interpreter the project's dependencies actually support.
-        let system_looking_default = PyVersion::py3(13);
-        let project_target = PyVersion::py3(9);
-        assert_ne!(system_looking_default, project_target);
-
-        let args = dry_run_args(project_target, &["mediapipe".to_string()]);
-        let python_idx = args.iter().position(|a| a == "--python").unwrap();
-        assert_eq!(args[python_idx + 1], project_target.to_string());
-        assert_ne!(args[python_idx + 1], system_looking_default.to_string());
-        assert!(args.iter().any(|a| a == "--system"));
+    fn compile_pins_the_given_target_not_whatever_system_python_is() {
+        // Regression guard: without `--python-version` uv resolves for the
+        // first Python it finds, often not the one the project supports.
+        let args = compile_args(Path::new("req.in"), Some(PyVersion::py3(9)));
+        let idx = args.iter().position(|a| a == "--python-version").unwrap();
+        assert_eq!(args[idx + 1], "3.9");
+        assert_eq!(&args[..3], ["pip", "compile", "req.in"]);
+        assert!(!compile_args(Path::new("req.in"), None)
+            .iter()
+            .any(|a| a == "--python-version"));
     }
 
     #[test]

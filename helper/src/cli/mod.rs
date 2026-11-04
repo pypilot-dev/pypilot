@@ -9,6 +9,7 @@ pub mod completions;
 mod doctor;
 mod explain;
 mod fix;
+mod fix_requirements;
 pub mod logs;
 mod migrate_conda;
 pub mod output;
@@ -96,6 +97,7 @@ async fn dispatch_mode(mode: &str, args: &[String]) -> crate::Result<()> {
             let Some(package) = positional(args) else {
                 anyhow::bail!("usage: pypilot check <package> [--suggest-alternatives]");
             };
+            let package = import_name_to_dist(&package, format);
             let suggest = args.iter().any(|a| a == "--suggest-alternatives");
             check::run(&workspace, &settings, &source, &package, suggest, format).await
         }
@@ -113,6 +115,7 @@ async fn dispatch_mode(mode: &str, args: &[String]) -> crate::Result<()> {
             let Some(package) = positional(args) else {
                 anyhow::bail!("usage: pypilot install <package>");
             };
+            let package = import_name_to_dist(&package, format);
             let result = fix::install_one(&workspace, &settings, &package, format, dry_run).await;
             if !dry_run {
                 crate::core::rescan::notify(&workspace, crate::core::rescan::Kind::Setup);
@@ -166,6 +169,25 @@ impl std::fmt::Display for Exit {
 }
 
 impl std::error::Error for Exit {}
+
+/// `package` with an import name swapped for its distribution (`sklearn` is
+/// scikit-learn; the `sklearn` dist is a deprecated stub), saying so: an
+/// install the user did not spell out is one they should see.
+fn import_name_to_dist(package: &str, format: OutputFormat) -> String {
+    match crate::core::undeclared::map_requirement(package) {
+        Some((mapped, dist)) => {
+            output::progress(
+                format,
+                format!(
+                    "`{}` is an import name; its distribution on PyPI is {dist}, so using `{mapped}`.",
+                    package.trim()
+                ),
+            );
+            mapped
+        }
+        None => package.to_string(),
+    }
+}
 
 /// First argument that is not a flag or a flag's value.
 fn positional(args: &[String]) -> Option<String> {

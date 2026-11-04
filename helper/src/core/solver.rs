@@ -13,13 +13,12 @@ use crate::core::project::ProjectDeps;
 #[cfg(test)]
 use crate::core::project::Requirement;
 use crate::core::toolchain::{self, Toolchain};
-use crate::core::uv;
 use crate::core::{Assessment, Finding, FixKind, Severity};
 use crate::matrix;
 use crate::pypi::metadata::{PackageAnalysis, SdistKind};
 use crate::pypi::pyversion::{PyVersion, PyVersionSet};
 use crate::pypi::{self, CompatReport, MetadataSource};
-use crate::settings::{PackageManager, Settings};
+use crate::settings::Settings;
 
 /// Flattened, process-free view of the environment for [`synthesize`].
 #[derive(Debug, Clone, Default)]
@@ -192,17 +191,22 @@ pub async fn assess<S: MetadataSource>(
         merge_pixi_findings(&mut findings, pixi_findings);
     }
 
-    // F3's hybrid confirmation: metadata explains which package would be the
-    // blocker; a real `uv --dry-run` resolve confirms the answer is actually
-    // installable, catching version conflicts wheel-tag analysis can't see
-    // (yanked releases, transitive pins, sdist build requirements). Only
-    // meaningful once the target interpreter exists on the machine, so this
-    // is opportunistic rather than blocking — most "no venv yet" scans skip it.
-    if let Some(finding) =
-        confirm_with_uv(&probes, settings, target_python, &project, workspace).await
-    {
-        findings.push(finding);
-    }
+    // Wheel tags cannot see two pins that exclude each other, or a
+    // transitive clash: resolve the requirements as written with uv for the
+    // Python they will run on, and name the one edit that fixes a failure
+    // (core::resolution). Also turns "could not resolve" into "did you
+    // mean", and an OS-only package into an environment marker.
+    let resolve_python = env.venv_python.or(target_python);
+    crate::core::resolution::diagnose_workspace(
+        workspace,
+        &project,
+        compat.as_ref(),
+        probes.uv.as_ref().map(|u| u.path.as_path()),
+        resolve_python,
+        source,
+        &mut findings,
+    )
+    .await;
 
     Assessment {
         probes,
@@ -251,50 +255,6 @@ fn same_problem(generic: &Finding, pixi: &Finding) -> bool {
         .strip_prefix("Python ")
         .and_then(|rest| rest.strip_suffix(UNSUPPORTED_SUFFIX))
         .is_some_and(|py| crate::core::pixi_compat::is_mismatch_title(&pixi.title, py))
-}
-
-/// Run `uv pip install --dry-run` for `target` against the project's declared
-/// dependencies, and surface a finding only when it disagrees with what the
-/// metadata-based intersection already concluded.
-async fn confirm_with_uv(
-    probes: &Probes,
-    settings: &Settings,
-    target: Option<PyVersion>,
-    project: &ProjectDeps,
-    workspace: &Path,
-) -> Option<Finding> {
-    // pixi resolves a pixi project (conda packages included), not uv.
-    if settings.package_manager != PackageManager::Uv || project.is_pixi() {
-        return None;
-    }
-    let uv_info = probes.uv.as_ref()?;
-    let target = target?;
-    if project.packages.is_empty() {
-        return None;
-    }
-    // uv needs the interpreter to actually exist to resolve against it.
-    probes.interpreters.iter().find(|i| i.version == target)?;
-
-    let names = project.names();
-    let out = uv::dry_run_resolve(uv_info, target, &names, workspace)
-        .await
-        .ok()?;
-    if out.success() {
-        return None; // Confirms the metadata answer; nothing new to say.
-    }
-
-    let reason = out.stderr.trim();
-    if reason.is_empty() {
-        return None;
-    }
-    Some(Finding {
-        severity: Severity::Warning,
-        title: format!("uv could not resolve dependencies for Python {target}"),
-        detail: format!(
-            "Package metadata suggested Python {target} would work, but `uv pip install --dry-run` disagrees, which usually means a version conflict metadata alone can't see: {reason}"
-        ),
-        fix: FixKind::Manual,
-    })
 }
 
 /// Pure decision logic: given a flattened environment, the project, and the

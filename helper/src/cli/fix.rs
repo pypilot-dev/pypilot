@@ -31,7 +31,12 @@ pub async fn run<S: MetadataSource>(
         "python" => fix_python(workspace, settings, source, format, dry_run).await,
         "cuda" if dry_run => plan_cuda(workspace, settings, format).await,
         "cuda" => fix_cuda(workspace, settings, format).await,
-        other => anyhow::bail!("unknown fix target `{other}` (expected `python` or `cuda`)"),
+        "requirements" => {
+            super::fix_requirements::run(workspace, settings, source, format, dry_run).await
+        }
+        other => anyhow::bail!(
+            "unknown fix target `{other}` (expected `python`, `cuda` or `requirements`)"
+        ),
     }
 }
 
