@@ -27,6 +27,15 @@ fn main() -> ExitCode {
     let mode = args.next().unwrap_or_else(|| "doctor".to_string());
     let rest: Vec<String> = args.collect();
 
+    // `pypilot doctor --help` prints doctor's help rather than running it.
+    let is_help = matches!(mode.as_str(), "help" | "--help" | "-h");
+    if !is_help && rest.iter().any(|a| a == "--help" || a == "-h") {
+        if let Some(text) = cli::completions::mode_help(&mode) {
+            print!("{text}");
+            return ExitCode::SUCCESS;
+        }
+    }
+
     match mode.as_str() {
         "lsp" => {
             // The LSP server owns its own multi-threaded runtime.

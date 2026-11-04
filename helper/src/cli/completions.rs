@@ -246,6 +246,53 @@ pub const COMMANDS: &[Cmd] = &[
     },
 ];
 
+/// `pypilot <mode> --help`: the mode's one-line summary, its argument and
+/// its flags, from [`COMMANDS`]. `None` for a mode the table does not know.
+pub fn mode_help(mode: &str) -> Option<String> {
+    let cmd = COMMANDS
+        .iter()
+        .find(|c| c.name == mode || c.aliases.contains(&mode))?;
+    let arg = match cmd.positional {
+        Val::None | Val::OptNumber => String::new(),
+        Val::Choices(choices) => format!(" <{}>", choices.join("|")),
+        Val::Dir | Val::Text => " <ARG>".to_string(),
+    };
+    let mut flags = flags_of(cmd);
+    if !flags.iter().any(|f| f.long == "--help") {
+        flags.push(GLOBAL[GLOBAL.len() - 1]);
+    }
+    let mut s = format!(
+        "pypilot {}: {}
+
+USAGE:
+    pypilot {}{arg} [FLAGS]
+
+FLAGS:
+",
+        cmd.name, cmd.help, cmd.name
+    );
+    for f in flags {
+        let value = match f.value {
+            Val::None => "",
+            Val::OptNumber => " [N]",
+            _ => " <value>",
+        };
+        let short = f.short.map(|s| format!("{s}, ")).unwrap_or_default();
+        let left = format!("{short}{}{value}", f.long);
+        s.push_str(&format!(
+            "    {left:<24} {}
+",
+            f.help
+        ));
+    }
+    s.push_str(
+        "
+Run `pypilot --help` for every mode.
+",
+    );
+    Some(s)
+}
+
 /// Run `pypilot completions <shell>`.
 pub fn run(args: &[String]) -> Result<(), String> {
     let shell = args.iter().find(|a| !a.starts_with('-'));
@@ -654,6 +701,22 @@ mod tests {
             .write_all(bash().as_bytes())
             .unwrap();
         assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn every_mode_has_its_own_help() {
+        let doctor = mode_help("doctor").unwrap();
+        assert!(doctor.starts_with("pypilot doctor: Read-only"));
+        assert!(doctor.contains("--fix"));
+        assert!(doctor.contains("-p, --path <value>"));
+        assert!(mode_help("fix")
+            .unwrap()
+            .contains("pypilot fix <python|cuda|requirements>"));
+        assert!(mode_help("logs").unwrap().contains("--help"));
+        for cmd in COMMANDS {
+            assert!(mode_help(cmd.name).is_some(), "{}", cmd.name);
+        }
+        assert!(mode_help("nope").is_none());
     }
 
     #[test]
