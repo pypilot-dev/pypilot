@@ -3,6 +3,62 @@
 All notable changes to PyPilot's engine and Zed extension. Releases and their
 full notes are on the [Releases page](https://github.com/pypilot-dev/pypilot/releases).
 
+## [1.4.0]
+
+`doctor --fix` now fixes what is actually wrong, instead of rebuilding the environment
+for every problem. A healthy project is left alone, the Python version moves only when a
+dependency forces it (and the output says which one), and every file PyPilot edits is
+named.
+
+- Targeted fixes, each only when a finding calls for it:
+  - `uv sync --locked` for drift or a missing package, `uv lock` for a stale lock;
+  - reinstalling only a half-installed package;
+  - repairing a damaged venv on the Python it had;
+  - raising `requires-python`;
+  - editing one requirement, then re-resolving it. An edit that leaves the project
+    unresolvable is rolled back.
+- The environment is checked against the project: a stale `uv.lock`, packages missing,
+  drifted or half-installed, a venv leaking system site-packages, a `VIRTUAL_ENV` that
+  points at another project, and `requires-python` or `.python-version` that the venv
+  breaks. An impossible `requires-python` (`>=3.16`, `>=3.10,<=3.9`) is an error, and
+  nothing is built.
+- The Python a fix chooses is written to `.python-version`, so a later `uv sync` keeps
+  it. An existing pin wins unless a dependency forces a change.
+- Conflicts are resolved before anything changes:
+  - unsatisfiable pins get a relaxed pin, checked with uv before it is offered;
+  - a typo gets "did you mean";
+  - a version that does not exist gets the nearest releases;
+  - a package with no build for this OS gets an environment marker (`uvloop` on Windows).
+- A new data table, `known_breakages.json`, refreshed like the others, for breakages
+  metadata does not show:
+  - compiled packages that break under numpy 2 (pandas before 2.2.2);
+  - uncapped dependencies that later removed an API: markupsafe/jinja2, werkzeug/flask,
+    itsdangerous/flask, urllib3/requests-toolbelt, sqlalchemy/flask-sqlalchemy,
+    importlib-metadata/flake8, and setuptools 82 and `pkg_resources`;
+  - packages that shadow each other or the standard library (`jwt` and `PyJWT`, `enum34`,
+    `typing`), and yanked pins;
+  - stdlib modules removed in newer Pythons (`distutils`, `imp`, the 3.13 removals);
+  - removed APIs used in the project's own code (`np.float`, `collections.Mapping`,
+    `asyncio.coroutine`, `pydantic.BaseSettings`, SQLAlchemy 2 `engine.execute`, pandas 2
+    `DataFrame.append`), reported by file and line with the replacement.
+- More project layouts are handled with their own tools:
+  - pixi: doctor's `pixi add python=X.Y` is applied, and a broken prefix is repaired;
+  - a conda `environment.yml` moves to pixi and keeps its Python;
+  - Poetry projects are read (`^`/`~` constraints, groups) and installed with Poetry;
+  - an environment in `venv/` or `env/` is fixed in place.
+- In the CLI, doctor reports undeclared imports (notebooks included) and adds the right
+  distribution (`yaml` to PyYAML, `sklearn` to scikit-learn). `install` and `check` accept
+  import names too. New command: `pypilot fix requirements`.
+- requirements.txt lines with an obvious mistake are fixed, and the rest are reported by
+  line number. requirements.txt no longer overwrites pyproject.toml pins; a disagreement
+  between them is reported.
+- `--dry-run` lists exactly what the real run does. `<mode> --help` prints that mode's
+  help. A fix with a failed step no longer reports "Done".
+- New `fix.kind` values in the JSON output: `sync_environment`, `relock`,
+  `reinstall_packages`, `repair_environment`, `raise_requires_python`, `edit_requirement`,
+  `add_requirements`, `replace_dist`, `migrate_conda_to_pixi` and `poetry_install`. Older
+  kinds serialize as before.
+
 ## [1.3.0]
 
 - pixi: `pixi_environment` and `--pixi-env` choose the environment; doctor checks
