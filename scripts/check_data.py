@@ -28,6 +28,10 @@ Checks:
               the newest torch ships wheels for (informational)
   nvidia      every CUDA version torch builds target needs a driver row in
               nvidia.json; plus a reminder to check NVIDIA's release notes
+  breakages   known_breakages.json: every row has its required fields with
+              the right types, ids are unique, versions and Pythons parse,
+              and (online) every package, fixed_in release and replacement
+              it names exists on PyPI
 
 Exit codes: 0 current, 1 stale (or schema break), 2 network error and nothing
 found stale. Stdlib only, Python 3.9+.
@@ -50,7 +54,7 @@ from typing import Any, Dict, List, Optional, Tuple
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "helper" / "data"
 FILES = ["nvidia.json", "frameworks.json", "import_map.json", "cuda_extensions.json",
-         "conda_forge_packages.json"]
+         "conda_forge_packages.json", "known_breakages.json"]
 
 PYPI = "https://pypi.org/pypi/{}/json"
 PYPI_VERSION = "https://pypi.org/pypi/{}/{}/json"
@@ -616,6 +620,139 @@ def check_nvidia(nvidia: Dict, fw: Dict) -> List[Dict]:
 
 
 # --------------------------------------------------------------------------
+# known_breakages.json
+
+# Required fields per section and their JSON types. The engine skips a row
+# missing one of these, so a row that fails here is a row that does nothing.
+BREAKAGE_SCHEMA: Dict[str, Dict[str, str]] = {
+    "api_removals": {"id": "string", "kind": "string", "package": "string",
+                     "fixed_in": "string", "dependency": "string",
+                     "breaks_from": "string", "constraint": "string",
+                     "symptom": "string", "source": "string"},
+    "python_removals": {"id": "string", "package": "string", "python_min": "string",
+                        "symptom": "string", "source": "string"},
+    "shadowing": {"id": "string", "kind": "string", "dist": "string", "module": "string",
+                  "symptom": "string", "source": "string"},
+    "module_removals": {"id": "string", "module": "string", "dependency": "string",
+                        "breaks_from": "string", "constraint": "string",
+                        "symptom": "string", "source": "string"},
+    "stdlib_removals": {"module": "string", "removed_in": "string", "source": "string"},
+}
+BREAKAGE_OPTIONAL: Dict[str, str] = {
+    "fixed_in": "string", "python_min": "string", "python_below": "string",
+    "prefer": "string", "replacement": "string", "drop_in": "bool", "other": "string",
+    "keep": "string", "stdlib_since": "string", "severity": "string", "migrate": "string",
+}
+BREAKAGE_KINDS = {"api_removals": {"abi", "api"},
+                  "shadowing": {"clash", "backport", "deprecated"}}
+_PYTHON_RE = re.compile(r"^3\.\d+$")
+_VERSION_FIELDS = ("fixed_in", "breaks_from")
+_PYTHON_FIELDS = ("python_min", "python_below", "stdlib_since", "removed_in")
+
+
+def breakage_problems(table: Dict) -> List[str]:
+    """Structural problems in known_breakages.json (offline)."""
+    problems: List[str] = []
+    ids: set = set()
+    for section, required in BREAKAGE_SCHEMA.items():
+        rows = table.get(section)
+        if not isinstance(rows, list):
+            problems.append(f"{section}: missing or not an array")
+            continue
+        for i, row in enumerate(rows):
+            where = f"{section}[{i}]"
+            if not isinstance(row, dict):
+                problems.append(f"{where}: not an object")
+                continue
+            for key, kind in required.items():
+                if key not in row:
+                    problems.append(f"{where}.{key}: required field missing")
+                elif json_type(row[key]) != kind:
+                    problems.append(f"{where}.{key}: expected {kind}, got {json_type(row[key])}")
+            for key, kind in BREAKAGE_OPTIONAL.items():
+                if key in row and key not in required and json_type(row[key]) != kind:
+                    problems.append(f"{where}.{key}: expected {kind}, got {json_type(row[key])}")
+            if section in BREAKAGE_KINDS and row.get("kind") not in BREAKAGE_KINDS[section]:
+                problems.append(f"{where}.kind: {row.get('kind')!r} is not one of "
+                                f"{sorted(BREAKAGE_KINDS[section])}")
+            if section == "shadowing":
+                if row.get("kind") == "clash" and "other" not in row:
+                    problems.append(f"{where}.other: a clash names the other dist")
+                if row.get("kind") == "backport" and "stdlib_since" not in row:
+                    problems.append(f"{where}.stdlib_since: a backport names its Python")
+                if row.get("kind") == "deprecated" and "keep" not in row:
+                    problems.append(f"{where}.keep: a deprecated dist names its replacement")
+            for key in _VERSION_FIELDS:
+                value = row.get(key)
+                if isinstance(value, str) and not _VERSION_RE.match(value):
+                    problems.append(f"{where}.{key}: {value!r} is not a version")
+            for key in _PYTHON_FIELDS:
+                value = row.get(key)
+                if isinstance(value, str) and not _PYTHON_RE.match(value):
+                    problems.append(f"{where}.{key}: {value!r} is not a \"3.N\" Python")
+            if row.get("severity") not in (None, "info", "warning", "error"):
+                problems.append(f"{where}.severity: {row.get('severity')!r}")
+            key = row.get("id") or row.get("module")
+            if key in ids:
+                problems.append(f"{where}: duplicate id {key!r}")
+            ids.add(key)
+    return problems
+
+
+def breakage_names(table: Dict) -> Dict[str, set]:
+    """Every PyPI name the table names, with the releases it must have."""
+    wanted: Dict[str, set] = {}
+    for row in table.get("api_removals", []) + table.get("python_removals", []):
+        wanted.setdefault(row["package"], set())
+        if "fixed_in" in row:
+            wanted[row["package"]].add(row["fixed_in"])
+        for key in ("dependency", "replacement"):
+            if key in row:
+                wanted.setdefault(row[key], set())
+    for row in table.get("shadowing", []):
+        for key in ("dist", "other", "keep"):
+            if key in row:
+                wanted.setdefault(row[key], set())
+    for row in table.get("module_removals", []) + table.get("stdlib_removals", []):
+        for key in ("dependency", "replacement"):
+            if key in row:
+                wanted.setdefault(row[key], set())
+    return wanted
+
+
+def check_breakages(table: Dict) -> List[Dict]:
+    problems = breakage_problems(table)
+    if problems:
+        return [result("breakages", STALE,
+                       f"known_breakages.json: {len(problems)} structural problem(s)",
+                       problems=problems)]
+    out = [result("breakages", OK, "known_breakages.json: every row is well formed")]
+    # Every name a fix would install or compare against must exist, and every
+    # fixed_in must be a real release, or the advice points at nothing.
+    wanted = breakage_names(table)
+    missing: List[str] = []
+    for name in sorted(wanted):
+        try:
+            releases = fetch_json(PYPI.format(name)).get("releases", {})
+        except NetworkError as exc:
+            if "404" in str(exc):
+                missing.append(f"{name}: not on PyPI")
+                continue
+            raise
+        for version in sorted(wanted[name]):
+            if version not in releases:
+                missing.append(f"{name} {version}: no such release")
+    if missing:
+        out.append(result("breakages", STALE,
+                          f"known_breakages.json names {len(missing)} thing(s) PyPI does not have",
+                          problems=missing))
+    else:
+        out.append(result("breakages", OK,
+                          f"{len(wanted)} packages and their fixed_in releases exist on PyPI"))
+    return out
+
+
+# --------------------------------------------------------------------------
 
 
 def run_checks() -> List[Dict]:
@@ -625,6 +762,7 @@ def run_checks() -> List[Dict]:
     nvidia = tables.get("nvidia.json")
     ext = tables.get("cuda_extensions.json")
     conda = tables.get("conda_forge_packages.json")
+    breakages = tables.get("known_breakages.json")
 
     def guarded(name: str, fn, *args) -> None:
         try:
@@ -650,6 +788,8 @@ def run_checks() -> List[Dict]:
         guarded("extensions", check_extensions, ext)
     if conda is not None:
         guarded("conda-forge", check_conda_forge, conda)
+    if breakages is not None:
+        guarded("breakages", check_breakages, breakages)
     guarded("python", check_cpython)
     if torch_pypi is not None:
         guarded("python", check_python, torch_pypi)
@@ -732,6 +872,19 @@ def self_test() -> int:
     assert problems == [], problems
     compare_shape(old_t, {"packages": [{"version": 2, "builds": [{"python": []}]}]}, "t", problems)
     assert len(problems) == 2, problems
+    # known_breakages.json: the bundled table is clean, and broken rows are caught.
+    bundled = json.loads((DATA_DIR / "known_breakages.json").read_text(encoding="utf-8"))
+    assert breakage_problems(bundled) == [], breakage_problems(bundled)
+    broken: Dict[str, Any] = {k: [] for k in BREAKAGE_SCHEMA}
+    broken["api_removals"] = [{"id": "x", "kind": "magic", "package": "p", "fixed_in": "one",
+                               "dependency": "d", "breaks_from": 2, "constraint": "d<2",
+                               "symptom": "s", "source": "u", "python_min": "3"}]
+    broken["stdlib_removals"] = [{"module": "imp", "removed_in": "3.12", "source": "u"},
+                                 {"module": "imp", "removed_in": "3.12", "source": "u"}]
+    got = breakage_problems(broken)
+    # kind, fixed_in format, breaks_from type, python_min format, duplicate.
+    assert len(got) == 5, got
+    assert "numpy" in breakage_names(bundled) and "2.2.2" in breakage_names(bundled)["pandas"]
     print("self-test passed")
     return 0
 
