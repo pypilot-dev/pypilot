@@ -115,6 +115,47 @@ fn a_required_python_outranks_a_repair_and_a_rebuild_drops_reinstalls() {
 }
 
 #[test]
+fn requirement_edits_are_planned_first_and_once() {
+    let edit = FixKind::EditRequirement(crate::core::RequirementEdit {
+        file: "pyproject.toml".into(),
+        old: "urllib3<1.21".into(),
+        new: "urllib3>=1.21.1,<3".into(),
+    });
+    let add = FixKind::AddRequirements(vec!["PyYAML".into()]);
+    let p = plan(&[
+        finding(Severity::Error, "conflict", edit.clone()),
+        finding(Severity::Error, "conflict again", edit.clone()),
+        finding(Severity::Warning, "undeclared", add.clone()),
+        finding(
+            Severity::Info,
+            "advice",
+            FixKind::AddRequirements(vec!["x".into()]),
+        ),
+    ]);
+    assert!(!p.is_empty());
+    assert_eq!(p.requirements, [edit, add]);
+    // The sync comes from the assessment after the edits, not from here.
+    assert!(!p.sync && p.rebuild.is_none() && p.manual.is_empty());
+}
+
+#[test]
+fn unresolvable_requirements_stop_before_anything_changes() {
+    let conflict = finding(
+        Severity::Error,
+        &format!("{}: `a` and `b`", resolution::CONFLICT_TITLE),
+        FixKind::Manual,
+    );
+    let step = resolution::blocking_step_in(&[conflict]).unwrap();
+    assert!(!step.ok && step.detail.contains("Nothing was changed"));
+    assert!(resolution::blocking_step_in(&[finding(
+        Severity::Warning,
+        "missing",
+        FixKind::SyncEnvironment
+    )])
+    .is_none());
+}
+
+#[test]
 fn nothing_there_runs_the_bootstrap() {
     let p = plan(&[finding(
         Severity::Warning,

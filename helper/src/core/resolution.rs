@@ -821,7 +821,12 @@ pub fn blocks_install(f: &Finding) -> bool {
 /// cannot install, the failed step to stop on, before any venv is touched.
 /// Its detail names every problem and its fix.
 pub fn blocking_step(a: &Assessment) -> Option<Step> {
-    let blocking: Vec<&Finding> = a.findings.iter().filter(|f| blocks_install(f)).collect();
+    blocking_step_in(&a.findings)
+}
+
+/// [`blocking_step`] over a list of findings.
+pub fn blocking_step_in(findings: &[Finding]) -> Option<Step> {
+    let blocking: Vec<&Finding> = findings.iter().filter(|f| blocks_install(f)).collect();
     if blocking.is_empty() {
         return None;
     }
