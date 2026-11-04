@@ -33,6 +33,8 @@ pub struct Effect {
     pub name: String,
     pub writes: Vec<PathBuf>,
     pub why: String,
+    /// Environment variables the command runs with, beyond PyPilot's own.
+    pub env: Vec<(String, String)>,
 }
 
 impl Effect {
@@ -41,7 +43,14 @@ impl Effect {
             name: name.into(),
             writes: Vec::new(),
             why: why.into(),
+            env: Vec::new(),
         }
+    }
+
+    /// Run the command with `key=value` in its environment.
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Effect {
+        self.env.push((key.into(), value.into()));
+        self
     }
 
     /// Add a file or directory this action creates or changes.
@@ -61,6 +70,8 @@ pub struct PlannedStep {
     /// Files and directories it would create or change.
     pub writes: Vec<PathBuf>,
     pub why: String,
+    /// Environment variables set for the command (`{}` for none).
+    pub env: std::collections::BTreeMap<String, String>,
 }
 
 impl PlannedStep {
@@ -72,15 +83,23 @@ impl PlannedStep {
             '<', '>', '|', '&', ';', '\'', '"', '$', '`', '*', '?', '(', ')', '[', ']', '{', '}',
             '#', '~', '!',
         ];
-        self.command
+        // `NAME=value` prefixes, in POSIX shell syntax.
+        self.env
             .iter()
-            .map(|a| {
+            .map(|(k, v)| {
+                if v.contains(char::is_whitespace) || v.contains(SPECIAL) {
+                    format!("{k}=\"{v}\"")
+                } else {
+                    format!("{k}={v}")
+                }
+            })
+            .chain(self.command.iter().map(|a| {
                 if a.is_empty() || a.contains(char::is_whitespace) || a.contains(SPECIAL) {
                     format!("\"{a}\"")
                 } else {
                     a.clone()
                 }
-            })
+            }))
             .collect::<Vec<_>>()
             .join(" ")
     }
@@ -253,10 +272,15 @@ where
             command,
             writes: effect.writes,
             why: effect.why,
+            env: effect.env.into_iter().collect(),
         });
         return Ok(planned_output());
     }
-    command::run(program, args, cwd).await
+    if effect.env.is_empty() {
+        command::run(program, args, cwd).await
+    } else {
+        command::run_env(program, args, cwd, &effect.env).await
+    }
 }
 
 /// Write `contents` to `path`, or record it in a dry run. `path` is added to
@@ -299,6 +323,7 @@ pub fn remove_dir_all(path: &Path, effect: Effect) -> std::io::Result<()> {
             command: Vec::new(),
             writes: vec![path.to_path_buf()],
             why: effect.why,
+            env: Default::default(),
         };
         let _ = RECORDER.try_with(|r| {
             let mut r = r.borrow_mut();
@@ -320,6 +345,7 @@ pub fn note(effect: Effect) -> bool {
         command: Vec::new(),
         writes: effect.writes,
         why: effect.why,
+        env: Default::default(),
     })
 }
 

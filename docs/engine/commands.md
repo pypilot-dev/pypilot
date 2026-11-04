@@ -34,7 +34,7 @@ pypilot doctor [--json | --markdown] [--fix [--dry-run]] [--path <dir>] [--pixi-
 | Flag | Meaning |
 |---|---|
 | `--json`, `--markdown` <Badge type="tip" text="1.3" /> | The same report as one JSON document, or as the Markdown the editors show. See [Machine-readable output](./output). |
-| `--fix` <Badge type="tip" text="1.3" /> | Print the report, then run what the editor's **Fix environment** runs (`setup`). With `--json` only setup's document is printed, with `command: "doctor --fix"`. |
+| `--fix` <Badge type="tip" text="1.3" /> | Print the report, then run what the editor's **Fix environment** runs: <Badge type="tip" text="1.4" /> only the fixes the findings call for (sync, `uv lock`, reinstall a package, rebuild the environment in place on the Python it had), the full `setup` only when no environment exists, nothing for a healthy project. It then checks the result and imports the declared packages, and exits non-zero if any step or that check failed. With `--json` only the steps document is printed, with `command: "doctor --fix"`. |
 | `--fix --dry-run` <Badge type="tip" text="1.3" /> | Print the report, then the plan `--fix` would run. See [Dry runs](./dry-run). |
 
 Sections: **Environment** (uv, the project environment, pixi, interpreters found, and <Badge type="tip" text="1.3" /> the data tables' refresh state), **Project** (files, `requires-python`, dependencies), **pixi** (in pixi projects: platforms, lock status, environments), **Compatibility** (the supported range, the recommendation, each dependency's range) and **Findings**.

@@ -193,7 +193,7 @@ also shown with `window/showMessage`.
 
 | Command | Arguments | Result | Does |
 | --- | --- | --- | --- |
-| `pypilot.fixEverything` | none | `{ "ok": bool }` | set up the environment (`pypilot setup`); may first ask to install uv, see below |
+| `pypilot.fixEverything` | none | `{ "ok": bool }` | run the fixes the findings call for (`pypilot doctor --fix`: a sync, `uv lock`, a reinstall or an in-place rebuild; the full `pypilot setup` only when no environment exists); may first ask to install uv, see below |
 | `pypilot.showDetails` | `[package?]` | `null` | write the report to `<temp>/pypilot-report.md` and `window/showDocument` it (falls back to `showMessage`); with a package (or requirement like `numpy>=2`), adds a `pypilot check` section |
 | `pypilot.ignore` | none | `null` | nothing (the toast's Ignore) |
 | `pypilot.neverForProject` | none | `null` | write `[state] never = true` to `.zed/pypilot.toml`; the onboarding toast stops |

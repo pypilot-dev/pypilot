@@ -324,6 +324,112 @@ pub async fn sync(uv: &UvInfo, cwd: &Path) -> crate::Result<Output> {
     exec::run(&uv.path, &["sync"], Some(cwd), effect).await
 }
 
+/// How [`sync_with`] runs `uv sync`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SyncOptions {
+    /// `--locked`: install exactly `uv.lock`, failing rather than updating it.
+    pub locked: bool,
+    /// `--python X.Y`: keep the environment on this Python. Without it (and
+    /// without a `.python-version`) uv may rebuild the venv on another one.
+    pub python: Option<PyVersion>,
+    /// `--reinstall-package X` for each: reinstall these even though their
+    /// metadata says they are installed.
+    pub reinstall: Vec<String>,
+    /// The environment directory when it is not `.venv`
+    /// (`UV_PROJECT_ENVIRONMENT`), so uv syncs the one the project has.
+    pub env_dir: Option<PathBuf>,
+}
+
+/// `uv sync` with [`SyncOptions`], for targeted repairs.
+pub async fn sync_with(uv: &UvInfo, opts: &SyncOptions, cwd: &Path) -> crate::Result<Output> {
+    let env_dir = opts.env_dir.clone().unwrap_or_else(|| cwd.join(".venv"));
+    let mut why = if opts.locked {
+        "install exactly what uv.lock records into the existing environment".to_string()
+    } else {
+        "install what pyproject.toml declares into the existing environment, updating uv.lock if needed".to_string()
+    };
+    if !opts.reinstall.is_empty() {
+        why.push_str(&format!(", reinstalling {}", opts.reinstall.join(", ")));
+    }
+    let mut effect = Effect::new(sync_step_name(opts), why).writes(&env_dir);
+    if !opts.locked {
+        effect = effect.writes(cwd.join("uv.lock"));
+    }
+    if let Some(dir) = &opts.env_dir {
+        effect = effect.env("UV_PROJECT_ENVIRONMENT", dir.to_string_lossy());
+    }
+    exec::run(&uv.path, &sync_args(opts), Some(cwd), effect).await
+}
+
+/// The step name for [`sync_with`]: the command without paths.
+pub fn sync_step_name(opts: &SyncOptions) -> String {
+    let mut name = "uv sync".to_string();
+    if opts.locked {
+        name.push_str(" --locked");
+    }
+    for p in &opts.reinstall {
+        name.push_str(&format!(" --reinstall-package {p}"));
+    }
+    name
+}
+
+/// The argument vector for [`sync_with`].
+fn sync_args(opts: &SyncOptions) -> Vec<String> {
+    let mut args = vec!["sync".to_string()];
+    if opts.locked {
+        args.push("--locked".into());
+    }
+    if let Some(py) = opts.python {
+        args.push("--python".into());
+        args.push(py.to_string());
+    }
+    for p in &opts.reinstall {
+        args.push("--reinstall-package".into());
+        args.push(p.clone());
+    }
+    args
+}
+
+/// `uv lock`: bring `uv.lock` up to date with `pyproject.toml`.
+pub async fn lock(uv: &UvInfo, cwd: &Path) -> crate::Result<Output> {
+    let effect = Effect::new(
+        "uv lock",
+        "update uv.lock to match pyproject.toml (keeps every locked version that still fits)",
+    )
+    .writes(cwd.join("uv.lock"));
+    exec::run(&uv.path, &["lock"], Some(cwd), effect).await
+}
+
+/// `uv pip install --python <python> <args...>`: install into a specific
+/// environment (a `venv/` or `env/` as well as `.venv`), for projects that
+/// do not use a uv lock. `args` is `-r requirements.txt` or package names,
+/// plus any `--reinstall-package X`.
+pub async fn pip_install_into(
+    uv: &UvInfo,
+    python: &Path,
+    args: &[String],
+    env_dir: &Path,
+    cwd: &Path,
+) -> crate::Result<Output> {
+    let mut argv: Vec<String> = vec![
+        "pip".into(),
+        "install".into(),
+        "--python".into(),
+        python.to_string_lossy().into_owned(),
+    ];
+    argv.extend(args.iter().cloned());
+    let shown: Vec<&str> = args.iter().map(String::as_str).collect();
+    let effect = Effect::new(
+        format!("uv pip install {}", shown.join(" ")),
+        format!(
+            "install the declared dependencies into {}",
+            env_dir.display()
+        ),
+    )
+    .writes(env_dir);
+    exec::run(&uv.path, &argv, Some(cwd), effect).await
+}
+
 /// `uv init` — scaffold a new pyproject.toml in the current directory.
 ///
 /// Only called when no `pyproject.toml` exists yet (fresh project or a project

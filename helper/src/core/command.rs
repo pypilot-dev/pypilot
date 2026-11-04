@@ -55,6 +55,25 @@ where
     collect(cmd, program.as_ref()).await
 }
 
+/// [`run`] with extra environment variables for the child
+/// (`UV_PROJECT_ENVIRONMENT`), on top of this process's own.
+pub async fn run_env<S, A>(
+    program: S,
+    args: &[A],
+    cwd: Option<&Path>,
+    env: &[(String, String)],
+) -> crate::Result<Output>
+where
+    S: AsRef<OsStr>,
+    A: AsRef<OsStr>,
+{
+    let mut cmd = build(program.as_ref(), args, cwd);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    collect(cmd, program.as_ref()).await
+}
+
 /// [`run`], but give up after `limit`. The child is killed rather than left
 /// running, so a hung probe (a GPU driver stuck initializing, say) cannot
 /// outlive the step that asked for it. A timeout is an `Err`, like a failed

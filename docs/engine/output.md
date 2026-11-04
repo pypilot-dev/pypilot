@@ -48,7 +48,7 @@ Every document starts with the same three keys, then the command's own fields:
 
 ### Shared shapes
 
-- **finding**: `{ "severity": "error" | "warning" | "info", "title", "detail", "fix": { "kind", "python"? } }`. `fix.kind` is `setup_environment`, `recreate_with_python` (with `python`), `migrate_conda`, `migrate_to_pixi` or `manual`.
+- **finding**: `{ "severity": "error" | "warning" | "info", "title", "detail", "fix": { "kind", "python"? } }`. `fix.kind` is `setup_environment`, `recreate_with_python` (with `python`), `migrate_conda`, `migrate_to_pixi` or `manual`, and <Badge type="tip" text="1.4" /> `sync_environment`, `relock`, `reinstall_packages` (with `packages`, a list of names) or `repair_environment` (with `python`, `null` when unknown). A client that meets a kind it does not know should offer **Fix environment** (`pypilot doctor --fix`), which handles every kind.
 - **package analysis**: `{ "name", "version", "supported", "has_platform_wheels", "sdist_only", "has_foreign_wheels", "no_files_for_platform", "wheel_platforms", "requires_python" }`.
 - **conflict**: `{ "low": analysis, "high": analysis, "explanation" }`. `low` is the package with the lowest newest Python, `high` the one with the highest oldest Python.
 - **summary** (what `setup`, `install` and `fix python` ran): `{ "package_manager", "resolved_mode": "uv_full" | "uv_pip_compat" | "pure_pip" | "pixi", "python", "venv_path", "why", "steps": [{ "name", "ok", "detail" }], "ok" }`.
@@ -60,7 +60,7 @@ With `--dry-run`, `setup`, `install`, `fix python`, `fix cuda` and `doctor --fix
 ```json
 { "pypilot": "1.3.0", "command": "setup", "ok": true, "dry_run": true,
   "plan": { "mode": "uv_full", "python": "3.12", "why": "…",
-            "steps": [{ "name", "command": [argv], "writes": [paths], "why" }],
+            "steps": [{ "name", "command": [argv], "writes": [paths], "why", "env": {} }],
             "notes": [{ "name", "ok", "detail" }], "blocked": null } }
 ```
 

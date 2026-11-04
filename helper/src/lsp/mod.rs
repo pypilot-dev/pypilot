@@ -946,10 +946,18 @@ async fn run_fix(client: &Client, source: &PyPiClient, root: &Path) -> bool {
     };
 
     client
-        .show_message(MessageType::INFO, "PyPilot: setting up the environment…")
+        .show_message(MessageType::INFO, "PyPilot: fixing the environment…")
         .await;
 
-    match setup::run_with_mode(root, &settings, source, mode).await {
+    // The same targeted plan as `pypilot doctor --fix`: only what the
+    // findings call for, the full setup only when nothing exists yet.
+    match crate::core::repair::run_with_mode(root, &settings, source, mode).await {
+        Ok(summary) if summary.ok && summary.steps.is_empty() => {
+            client
+                .show_message(MessageType::INFO, format!("PyPilot: {}", summary.why))
+                .await;
+            true
+        }
         Ok(summary) if summary.ok => {
             let py = summary
                 .python

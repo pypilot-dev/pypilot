@@ -153,6 +153,17 @@ The toast's "Fix environment" button and the task of the same name call the
 identical function, so they can't drift apart. From a terminal,
 `pypilot doctor --fix` prints the report and then runs that same fix.
 
+The fix fits the findings. A healthy project gets no steps at all. A missing
+or drifted package gets one `uv sync` into the existing environment
+(`--locked` when `uv.lock` is current), a stale lock gets `uv lock` first, a
+damaged package gets `--reinstall-package`, and a broken environment is
+rebuilt where it is (`venv/` and `env/` too) on the Python it had. The
+Python only changes when a finding requires it, and the step that changes
+`.python-version` says which finding forced it. Only a project with no
+environment at all gets the full `pypilot setup`. After the fix, the checks
+run again and every declared package is imported; if anything still fails,
+the command says so and exits non-zero.
+
 ## Previewing changes: `--dry-run`
 
 `setup`, `install <package>`, `fix python`, `fix cuda` and `doctor --fix`
@@ -209,7 +220,10 @@ Shared shapes:
 
 - **finding**: `{ "severity": "error"|"warning"|"info", "title", "detail", "fix": { "kind": ..., "python"? } }`.
   `fix.kind` is one of `setup_environment`, `recreate_with_python` (with
-  `python`), `migrate_conda`, `migrate_to_pixi`, `manual`.
+  `python`), `migrate_conda`, `migrate_to_pixi`, `manual`, and since 1.4
+  `sync_environment`, `relock`, `reinstall_packages` (with `packages`: a
+  list of names) and `repair_environment` (with `python`, `null` when
+  unknown). Treat a kind you do not know as "run `pypilot doctor --fix`".
 - **package analysis**: `{ "name", "version", "supported": [pythons], "has_platform_wheels", "sdist_only", "has_foreign_wheels", "no_files_for_platform", "wheel_platforms": [...], "requires_python" }`.
 - **conflict**: `{ "low": analysis, "high": analysis, "explanation" }`; `low`
   is the package with the lowest newest Python, `high` the one with the
@@ -235,7 +249,7 @@ Per command:
 
 With `--dry-run`, `setup`, `install`, `fix python`, `fix cuda` and
 `doctor --fix` print a plan instead (`command` is `doctor --fix` for the
-last): `{ "pypilot", "command", "ok", "dry_run": true, "plan": { "mode", "python", "why", "steps": [{ "name", "command": [argv], "writes": [paths], "why" }], "notes": [{ "name", "ok", "detail" }], "blocked" } }`.
+last): `{ "pypilot", "command", "ok", "dry_run": true, "plan": { "mode", "python", "why", "steps": [{ "name", "command": [argv], "writes": [paths], "why", "env": {name: value} }], "notes": [{ "name", "ok", "detail" }], "blocked" } }`.
 `mode` is a `resolved_mode` value; `command` is the exact argument vector,
 program first, and empty for a step that is not a process (writing the
 PyTorch index into pyproject.toml, downloading uv, the GPU self-test);

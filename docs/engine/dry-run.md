@@ -55,4 +55,4 @@ With `--json` the plan replaces the command's usual document. `command` is the c
 
 ## In the editors
 
-The editors' buttons (**Fix environment**, quick fixes) run the same code without `--dry-run`. To see what one of them would do, run the matching command with `--dry-run` in the project folder: **Fix environment** is `pypilot setup` (or `pypilot doctor --fix`), an install quick fix is `pypilot install <package>`, and `pypilot fix python` shows the rebuild onto the recommended Python that a "Rebuild environment on Python X.Y" quick fix starts with.
+The editors' buttons (**Fix environment**, quick fixes) run the same code without `--dry-run`. To see what one of them would do, run the matching command with `--dry-run` in the project folder: **Fix environment** is `pypilot doctor --fix` (the targeted fixes; `pypilot setup` is the full bootstrap), an install quick fix is `pypilot install <package>`, and `pypilot fix python` shows the rebuild onto the recommended Python that a "Rebuild environment on Python X.Y" quick fix starts with.

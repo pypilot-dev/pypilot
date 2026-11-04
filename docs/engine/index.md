@@ -8,7 +8,7 @@ pypilot <MODE> [ARG] [--path <dir>]
 
 | Mode | Changes things? | Does |
 |---|---|---|
-| [`doctor`](./commands#doctor) | no | Environment and compatibility report (the default mode); `--fix` <Badge type="tip" text="1.3" /> then runs setup |
+| [`doctor`](./commands#doctor) | no | Environment and compatibility report (the default mode); `--fix` <Badge type="tip" text="1.3" /> then runs the fixes the findings call for |
 | [`check <package>`](./commands#check) | no | Can this package run on this project's Python? |
 | [`explain [package]`](./commands#explain) <Badge type="tip" text="1.3" /> | no | Why these Pythons: `requires_python` vs wheels per platform |
 | [`setup`](./commands#setup) | yes | Build the environment on the recommended Python |

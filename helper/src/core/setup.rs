@@ -129,6 +129,25 @@ pub async fn run_with_mode<S: MetadataSource>(
         ok: true,
     };
 
+    // Refuse a requires-python no Python satisfies (`>=3.16`, `>=3.10,<=3.9`):
+    // building anything would leave an empty or wrong environment behind.
+    if let Some(problem) = assessment
+        .project
+        .declared_requires_python
+        .as_deref()
+        .filter(|_| mode != ResolvedMode::Pixi)
+        .and_then(solver::requires_python_problem)
+    {
+        summary.ok = false;
+        summary.python = None;
+        summary.steps.push(Step {
+            name: "resolve Python version".into(),
+            ok: false,
+            detail: format!("{} {}", problem.title, problem.detail),
+        });
+        return Ok(summary);
+    }
+
     // Refuse when dependencies fundamentally conflict — there's no interpreter to
     // pick, so installing anything would just fail confusingly.
     if let Some(compat) = &assessment.compat {
@@ -180,7 +199,42 @@ pub async fn run_with_mode<S: MetadataSource>(
     {
         verify_gpu(workspace, &mut summary).await;
     }
+    // Report the Python the environment really ended up on: uv can rebuild
+    // it on another one when a pin or requires-python says so.
+    if !exec::is_dry_run() {
+        if let Some(py) = venv_python(&venv_path) {
+            summary.python = Some(py);
+        }
+    }
     Ok(summary)
+}
+
+/// Remove a venv directory whose `pyvenv.cfg` is gone (see
+/// [`crate::core::health::damaged_venv`]): `uv venv --clear` refuses a
+/// directory that is not a virtual environment. Returns false when that
+/// failed (recorded as a failed step).
+fn clear_damaged_venv(workspace: &Path, venv_path: &Path, summary: &mut SetupSummary) -> bool {
+    if crate::core::health::damaged_venv(workspace).as_deref() != Some(venv_path) {
+        return true;
+    }
+    let effect = Effect::new(
+        "remove damaged venv",
+        "its pyvenv.cfg is gone, so it is no longer a virtual environment and uv refuses to reuse it",
+    );
+    match exec::remove_dir_all(venv_path, effect) {
+        Ok(()) => {
+            step_ok(
+                summary,
+                "remove damaged venv",
+                &venv_path.display().to_string(),
+            );
+            true
+        }
+        Err(e) => {
+            fail(summary, "remove damaged venv", &e.to_string());
+            false
+        }
+    }
 }
 
 /// Set up a pixi project with the pixi binary at `pixi`: `pixi install`, then
@@ -439,7 +493,7 @@ async fn run_uv_full(
             ),
             Err(e) => fail(summary, &format!("uv python install {py}"), &e.to_string()),
         }
-        if summary.failed() {
+        if summary.failed() || !clear_damaged_venv(workspace, venv_path, summary) {
             return;
         }
 
@@ -453,9 +507,13 @@ async fn run_uv_full(
         if summary.failed() {
             return;
         }
-        // `uv init` above pinned a new project already.
-        if has_pyproject {
+        // `uv init` above pinned a new project already, and a pin that
+        // already names this Python stays as the user wrote it.
+        if has_pyproject && crate::core::probe::read_python_pin(workspace) != Some(py) {
             pin_python(summary, &uv_info, py, workspace).await;
+            if summary.failed() {
+                return;
+            }
         }
     }
 
@@ -487,7 +545,13 @@ async fn install_deps_uv(
     } else if has_pyproject {
         // Use `uv sync` which reads pyproject.toml / uv.lock and installs the
         // declared dependencies.
-        match uv::sync(uv_info, workspace).await {
+        // `--python` keeps the venv just built: without a pin, uv may
+        // otherwise rebuild it on a different Python.
+        let opts = uv::SyncOptions {
+            python: summary.python,
+            ..Default::default()
+        };
+        match uv::sync_with(uv_info, &opts, workspace).await {
             Ok(out) if out.success() => step_ok(summary, "uv sync", "dependencies installed"),
             Ok(out) => fail(summary, "uv sync", out.stderr.trim()),
             Err(e) => fail(summary, "uv sync", &e.to_string()),
@@ -564,7 +628,7 @@ async fn run_uv_pip_compat(
             ),
             Err(e) => fail(summary, &format!("uv python install {py}"), &e.to_string()),
         }
-        if summary.failed() {
+        if summary.failed() || !clear_damaged_venv(workspace, venv_path, summary) {
             return;
         }
 
@@ -683,7 +747,9 @@ async fn run_pip(
     // Unlike `uv venv --clear`, `python -m venv` reuses an existing directory,
     // keeping the dead interpreter's links and site-packages (and failing on a
     // dangling `bin/python`). Start a broken venv from scratch.
-    if broken_venv(assessment, venv_path).is_some() {
+    if broken_venv(assessment, venv_path).is_some()
+        || crate::core::health::damaged_venv(workspace).as_deref() == Some(venv_path)
+    {
         let effect = Effect::new(
             "remove broken venv",
             "its Python is gone, and `python -m venv` would keep the dead links",
@@ -761,6 +827,22 @@ async fn freeze_into_requirements(venv: &Path, workspace: &Path, summary: &mut S
 
 pub(crate) fn derive_why(assessment: &crate::core::Assessment) -> String {
     match (&assessment.compat, assessment.target_python) {
+        (Some(compat), Some(py)) if assessment.probes.python_pin == Some(py) => format!(
+            "Python {py} chosen: pinned in .python-version; dependencies support {}.",
+            compat.intersection.to_range_string()
+        ),
+        (Some(compat), Some(py))
+            if assessment.probes.venv.as_ref().and_then(|v| v.python) == Some(py)
+                && compat.intersection.max() != Some(py) =>
+        {
+            format!(
+                "Python {py} chosen: the environment already runs it; dependencies support {}.",
+                compat.intersection.to_range_string()
+            )
+        }
+        (None, Some(py)) if assessment.probes.python_pin == Some(py) => {
+            format!("Python {py} chosen: pinned in .python-version.")
+        }
         (Some(compat), Some(py)) => {
             let range = compat.intersection.to_range_string();
             let limiter = compat
@@ -783,8 +865,8 @@ pub(crate) fn derive_why(assessment: &crate::core::Assessment) -> String {
 
 /// Pin a uv project to `py`, the Python its `.venv` was just built on, so
 /// the `uv sync` / `uv add` that follow keep that environment instead of
-/// rebuilding it on an older pin or a global `uv python pin`. A failure is
-/// reported but does not stop the run.
+/// rebuilding it on an older pin or a global `uv python pin`. A failure
+/// fails the run: what follows would land on another Python.
 pub(crate) async fn pin_python(
     summary: &mut SetupSummary,
     uv_info: &uv::UvInfo,
@@ -794,8 +876,8 @@ pub(crate) async fn pin_python(
     let name = format!("uv python pin {py}");
     match uv::pin(uv_info, py, workspace).await {
         Ok(out) if out.success() => step_ok(summary, &name, ".python-version updated"),
-        Ok(out) => soft_fail(summary, &name, out.stderr.trim()),
-        Err(e) => soft_fail(summary, &name, &e.to_string()),
+        Ok(out) => fail(summary, &name, out.stderr.trim()),
+        Err(e) => fail(summary, &name, &e.to_string()),
     }
 }
 
