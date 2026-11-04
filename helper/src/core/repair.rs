@@ -94,6 +94,14 @@ pub fn plan(findings: &[Finding]) -> RepairPlan {
     for f in findings.iter().filter(|f| f.severity != Severity::Info) {
         match &f.fix {
             FixKind::SetupEnvironment => p.setup = true,
+            // A project uv cannot set up as it stands: the bootstrap hands it
+            // to its own tool (`core::foreign_setup`): pixi or a pyproject.toml
+            // migration for a conda-only environment.yml, `poetry install`
+            // for a Poetry project. A plain "conda detected" note is Info,
+            // so it never gets here.
+            FixKind::MigrateCondaToPixi | FixKind::MigrateConda | FixKind::PoetryInstall => {
+                p.setup = true
+            }
             FixKind::RecreateWithPython(py) => p.rebuild_on(Some(*py), true, &f.title),
             FixKind::RepairEnvironment { python } => p.rebuild_on(*python, false, &f.title),
             FixKind::Relock => p.relock = true,
@@ -107,11 +115,7 @@ pub fn plan(findings: &[Finding]) -> RepairPlan {
             FixKind::SyncEnvironment => p.sync = true,
             // Suggestions the user runs themselves (`migrate-conda`,
             // `migrate-to-pixi`), or guidance only.
-            FixKind::Manual
-            | FixKind::MigrateConda
-            | FixKind::MigrateToPixi
-            | FixKind::MigrateCondaToPixi
-            | FixKind::PoetryInstall => {
+            FixKind::Manual | FixKind::MigrateToPixi => {
                 p.manual.push(f.clone());
                 continue;
             }
@@ -192,7 +196,9 @@ pub async fn run_with_mode<S: MetadataSource>(
         if !plan.fixes.is_empty() {
             s.why = format!("{} {}", describe(&plan), s.why);
         }
-        if mode != ResolvedMode::Pixi {
+        // A conda-only project the bootstrap just moved to pixi is pixi's
+        // now, like any pixi project.
+        if s.resolved_mode != ResolvedMode::Pixi {
             verify(workspace, settings, &mut s).await;
         }
         finish(&mut s);

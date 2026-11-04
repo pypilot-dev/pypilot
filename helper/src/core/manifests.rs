@@ -705,8 +705,8 @@ fn imports_finding(
         |p: &project::ImportedPackage| project.packages.iter().any(|r| r.name == p.package);
     let (fix, next) = if missing.iter().all(declared) {
         (
-            FixKind::SetupEnvironment,
-            "They are declared, so setting the environment up installs them.".to_string(),
+            FixKind::SyncEnvironment,
+            "They are declared, so syncing the environment installs them.".to_string(),
         )
     } else {
         let names: Vec<&str> = missing.iter().map(|p| p.package.as_str()).collect();
