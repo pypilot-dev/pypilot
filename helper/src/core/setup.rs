@@ -584,6 +584,19 @@ async fn install_deps_uv(
             Ok(out) => fail(summary, &step, out.stderr.trim()),
             Err(e) => fail(summary, &step, &e.to_string()),
         }
+    } else if has_pyproject && assessment.project.from_imports {
+        // No manifest declared anything: record what the code imports.
+        let names = assessment.project.names();
+        let step = format!("uv add {}", names.join(" "));
+        match uv::add(uv_info, &names, None, workspace).await {
+            Ok(out) if out.success() => step_ok(
+                summary,
+                &step,
+                "the packages the code imports, recorded in pyproject.toml and installed",
+            ),
+            Ok(out) => fail(summary, &step, out.stderr.trim()),
+            Err(e) => fail(summary, &step, &e.to_string()),
+        }
     } else if has_pyproject {
         if requirements.is_file() {
             note_kept_pins(summary, &merge);

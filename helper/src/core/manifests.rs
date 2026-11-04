@@ -64,6 +64,9 @@ pub async fn apply<S: MetadataSource>(
             findings.push(f);
         }
     }
+    if let Some(f) = imports_finding(workspace, project, venv) {
+        findings.push(f);
+    }
     if is_conda_only(workspace, project) {
         let pixi = conda_goes_to_pixi(settings).await;
         apply_conda(findings, project, venv.is_some(), pixi);
@@ -659,6 +662,92 @@ async fn oldest_release_floor<S: MetadataSource>(
     Some((oldest.raw, rp, min))
 }
 
+// --- imports ------------------------------------------------------------------
+
+/// What the code imports that no manifest records (a project read from its
+/// imports, see [`ProjectDeps::from_imports`]), or, in a project with an
+/// environment, what its notebooks import that is not installed there.
+fn imports_finding(
+    workspace: &Path,
+    project: &ProjectDeps,
+    venv: Option<&VenvInfo>,
+) -> Option<Finding> {
+    let installed = venv.map(|v| crate::core::installed::scan(&v.path));
+    if project.from_imports {
+        let imported = project::imported_packages(workspace, false);
+        let missing = installed
+            .as_ref()
+            .map(|i| imported.iter().filter(|p| !i.contains(&p.package)).count())
+            .unwrap_or(imported.len());
+        return Some(Finding {
+            severity: if venv.is_some() && missing > 0 {
+                Severity::Warning
+            } else {
+                Severity::Info
+            },
+            title: "Dependencies read from the code's imports".to_string(),
+            detail: format!(
+                "No pyproject.toml or requirements.txt declares this project's dependencies, so PyPilot read them from its .py files and notebooks: {}. Setup records them in pyproject.toml and installs them; check the names first.",
+                import_list(&imported)
+            ),
+            fix: FixKind::SetupEnvironment,
+        });
+    }
+    let installed = installed?;
+    let missing: Vec<project::ImportedPackage> = project::imported_packages(workspace, true)
+        .into_iter()
+        .filter(|p| !installed.contains(&p.package))
+        .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    let declared =
+        |p: &project::ImportedPackage| project.packages.iter().any(|r| r.name == p.package);
+    let (fix, next) = if missing.iter().all(declared) {
+        (
+            FixKind::SetupEnvironment,
+            "They are declared, so setting the environment up installs them.".to_string(),
+        )
+    } else {
+        let names: Vec<&str> = missing.iter().map(|p| p.package.as_str()).collect();
+        (
+            FixKind::Manual,
+            format!("Install them with `pypilot install {}`.", names.join(" ")),
+        )
+    };
+    Some(Finding {
+        severity: Severity::Warning,
+        title: format!(
+            "Notebooks import packages the environment lacks: {}",
+            missing
+                .iter()
+                .map(|p| p.package.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        detail: format!(
+            "The notebooks import {}, which the environment does not have, so those cells fail with ModuleNotFoundError. {next}",
+            import_list(&missing)
+        ),
+        fix,
+    })
+}
+
+/// `requests, pyyaml (imported as yaml), numpy`.
+fn import_list(imports: &[project::ImportedPackage]) -> String {
+    imports
+        .iter()
+        .map(|p| {
+            if project::normalize_name(&p.module) == p.package {
+                p.package.clone()
+            } else {
+                format!("{} (imported as {})", p.package, p.module)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 // --- environment.yml -------------------------------------------------------------
 
 /// An `environment.yml` is the project's only manifest: no pyproject.toml,
@@ -1029,6 +1118,51 @@ dependencies = [\"requests==2.31.0\", \"pyyaml==6.0.1\"]
         assert_eq!(f.severity, Severity::Info);
         assert_eq!(f.fix, FixKind::MigrateConda);
         assert!(f.detail.contains("`pypilot migrate-conda`"));
+    }
+
+    #[test]
+    fn notebook_imports_are_reported() {
+        let dir = std::env::temp_dir().join(format!("pypilot-nb-imports-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("nb.ipynb"),
+            r#"{"cells":[{"cell_type":"code","source":["import requests\n","import yaml\n"]}],"metadata":{}}"#,
+        )
+        .unwrap();
+
+        // No manifest: the imports are the dependencies.
+        let project = project::scan(&dir);
+        let f = imports_finding(&dir, &project, None).unwrap();
+        assert_eq!(f.severity, Severity::Info);
+        assert_eq!(f.fix, FixKind::SetupEnvironment);
+        assert!(
+            f.detail.contains("pyyaml (imported as yaml), requests"),
+            "{}",
+            f.detail
+        );
+
+        // A manifest and a venv without them: a warning naming both.
+        std::fs::write(dir.join("requirements.txt"), "requests\n").unwrap();
+        let venv = dir.join(".venv");
+        std::fs::create_dir_all(venv.join("Lib").join("site-packages")).unwrap();
+        std::fs::write(venv.join("pyvenv.cfg"), "version = 3.12.1\n").unwrap();
+        let info = VenvInfo {
+            path: venv.clone(),
+            python: Some(PyVersion::py3(12)),
+            broken: None,
+            kind: Default::default(),
+        };
+        let project = project::scan(&dir);
+        let f = imports_finding(&dir, &project, Some(&info)).unwrap();
+        assert_eq!(f.severity, Severity::Warning);
+        assert_eq!(
+            f.title,
+            "Notebooks import packages the environment lacks: pyyaml, requests"
+        );
+        assert_eq!(f.fix, FixKind::Manual);
+        assert!(f.detail.contains("`pypilot install pyyaml requests`"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

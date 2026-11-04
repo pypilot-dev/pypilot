@@ -65,6 +65,10 @@ pub struct ProjectDeps {
     /// The pixi default environment's `python` spec as written in the
     /// manifest (`3.12.*`), which decides the interpreter pixi installs.
     pub pixi_python: Option<String>,
+    /// No manifest declares anything, so [`ProjectDeps::packages`] are the
+    /// PyPI packages the project's `.py` files and notebooks import (see
+    /// [`imported_packages`]).
+    pub from_imports: bool,
 }
 
 impl ProjectDeps {
@@ -165,6 +169,15 @@ pub fn scan(workspace: &Path) -> ProjectDeps {
             deps.sources.push(workspace.join("*.py"));
         } else if has_notebooks(workspace) {
             deps.sources.push(workspace.join("*.ipynb"));
+        }
+        // With nothing declared, what the code imports is the best account
+        // of what it needs: setup installs that rather than an empty project.
+        if !deps.sources.is_empty() && deps.pixi_manifest.is_none() {
+            names = imported_packages(workspace, false)
+                .into_iter()
+                .map(|i| Requirement::any(i.package))
+                .collect();
+            deps.from_imports = !names.is_empty();
         }
     }
 
@@ -592,6 +605,113 @@ fn has_python_file(dir: &Path) -> bool {
     };
     rd.flatten()
         .any(|e| e.path().extension().is_some_and(|x| x == "py"))
+}
+
+/// A PyPI package the project's code imports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedPackage {
+    /// Normalized PyPI name (`pyyaml`).
+    pub package: String,
+    /// The module imported (`yaml`).
+    pub module: String,
+}
+
+/// Most files [`imported_packages`] reads, and the largest it reads.
+const IMPORT_SCAN_FILES: usize = 200;
+const IMPORT_SCAN_BYTES: u64 = 4 * 1024 * 1024;
+
+/// The third-party packages imported by the workspace's root `.py` files and
+/// its notebooks (found as [`has_notebooks`] finds them), or by the
+/// notebooks alone with `notebooks_only`. Standard-library modules and the
+/// project's own modules are left out, and import names map to PyPI names
+/// through the data table (`yaml` is PyYAML). Sorted by package, each once.
+pub fn imported_packages(workspace: &Path, notebooks_only: bool) -> Vec<ImportedPackage> {
+    let mut files = notebook_files(workspace);
+    if !notebooks_only {
+        if let Ok(rd) = std::fs::read_dir(workspace) {
+            let mut py: Vec<PathBuf> = rd
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == "py"))
+                .collect();
+            py.sort();
+            files.extend(py);
+        }
+    }
+    files.truncate(IMPORT_SCAN_FILES);
+
+    let local = crate::core::guardian::local_modules(workspace, None);
+    let mut out: Vec<ImportedPackage> = Vec::new();
+    for file in files {
+        if std::fs::metadata(&file).map_or(true, |m| m.len() > IMPORT_SCAN_BYTES) {
+            continue;
+        }
+        let Some(text) = read_manifest(&file) else {
+            continue;
+        };
+        let code = if file.extension().is_some_and(|x| x == "ipynb") {
+            match crate::core::imports::notebook_code(&text) {
+                Some(code) => code,
+                None => continue,
+            }
+        } else {
+            text
+        };
+        // A notebook's own folder is on its kernel's path too.
+        let beside = file
+            .parent()
+            .filter(|d| *d != workspace)
+            .map(|d| crate::core::guardian::local_modules(d, None))
+            .unwrap_or_default();
+        for import in crate::core::imports::extract(&code) {
+            let module = import.module;
+            if crate::core::stdlib::is_stdlib(&module)
+                || local.contains(&module)
+                || beside.contains(&module)
+            {
+                continue;
+            }
+            let package = normalize_name(&crate::matrix::resolve_package(&module));
+            if !out.iter().any(|i| i.package == package) {
+                out.push(ImportedPackage { package, module });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.package.cmp(&b.package));
+    out
+}
+
+/// The notebooks [`has_notebooks`] would find, every one of them, sorted.
+fn notebook_files(workspace: &Path) -> Vec<PathBuf> {
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut entries: Vec<_> = rd.flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
+            if out.len() >= IMPORT_SCAN_FILES {
+                return;
+            }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let path = entry.path();
+            if kind.is_file() && path.extension().is_some_and(|x| x == "ipynb") {
+                out.push(path);
+            } else if kind.is_dir() && depth > 0 {
+                let name = entry.file_name();
+                let skip = NOTEBOOK_SKIP_DIRS.iter().any(|s| name == *s)
+                    || path.join("pyvenv.cfg").is_file();
+                if !skip {
+                    walk(&path, depth - 1, out);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(workspace, NOTEBOOK_SEARCH_DEPTH, &mut out);
+    out
 }
 
 /// How deep [`has_notebooks`] looks below the workspace root. Notebooks live in
@@ -1095,6 +1215,36 @@ black = "*"
 
         let deps = scan(&dir);
         assert!(deps.is_python_project());
+        assert!(deps.packages.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_project_without_manifests_depends_on_what_it_imports() {
+        let dir = fresh_dir("pypilot-scan-imports");
+        std::fs::write(
+            dir.join("nb.ipynb"),
+            r#"{"cells":[{"cell_type":"code","source":["import requests\n","import yaml\n","import numpy as np\n","import helpers\n"]}],"metadata":{"kernelspec":{"name":"python3"}}}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.join("helpers.py"), "import os\nimport rich\n").unwrap();
+        let deps = scan(&dir);
+        assert!(deps.from_imports);
+        assert_eq!(
+            deps.names(),
+            ["numpy", "pyyaml", "requests", "rich"],
+            "stdlib and the project's own helpers.py are not packages"
+        );
+        let only_nb: Vec<String> = imported_packages(&dir, true)
+            .into_iter()
+            .map(|i| format!("{}:{}", i.package, i.module))
+            .collect();
+        assert_eq!(only_nb, ["numpy:numpy", "pyyaml:yaml", "requests:requests"]);
+
+        // A manifest, even an empty one, is the declaration.
+        std::fs::write(dir.join("requirements.txt"), "").unwrap();
+        let deps = scan(&dir);
+        assert!(!deps.from_imports);
         assert!(deps.packages.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
