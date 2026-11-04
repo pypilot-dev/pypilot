@@ -51,6 +51,8 @@ pub struct Probes {
     pub uv: Option<UvInfo>,
     pub venv: Option<VenvInfo>,
     pub interpreters: Vec<Interpreter>,
+    /// The Python `.python-version` pins (see [`read_python_pin`]).
+    pub python_pin: Option<PyVersion>,
 }
 
 /// Run all probes concurrently for `workspace`.
@@ -65,7 +67,26 @@ pub async fn run(workspace: &Path, settings: &Settings) -> Probes {
         uv,
         venv,
         interpreters,
+        python_pin: read_python_pin(workspace),
     }
+}
+
+/// The minor version `<workspace>/.python-version` pins: its first line that
+/// is a version (`3.12`, `3.12.4`, `cpython-3.12`), `None` without one.
+pub fn read_python_pin(workspace: &Path) -> Option<PyVersion> {
+    let text = std::fs::read_to_string(workspace.join(".python-version")).ok()?;
+    parse_python_pin(&text)
+}
+
+fn parse_python_pin(text: &str) -> Option<PyVersion> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .find_map(|l| {
+            let l = l.strip_prefix("cpython-").unwrap_or(l);
+            let v = PyVersion::parse(l.split(['-', '+']).next()?)?;
+            (v.major == 3).then_some(v)
+        })
 }
 
 /// The project's environment: its pixi prefix in a pixi project, else a
@@ -179,6 +200,18 @@ pub(crate) fn parse_pyvenv_version(text: &str) -> Option<PyVersion> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn python_pin_forms() {
+        assert_eq!(parse_python_pin("3.12\n"), Some(PyVersion::py3(12)));
+        assert_eq!(parse_python_pin("# c\n3.11.9\n"), Some(PyVersion::py3(11)));
+        assert_eq!(
+            parse_python_pin("cpython-3.13-windows-x86_64-none\n"),
+            Some(PyVersion::py3(13))
+        );
+        assert_eq!(parse_python_pin("pypy\n"), None);
+        assert_eq!(parse_python_pin(""), None);
+    }
 
     #[test]
     fn parse_pyvenv_cfg_version() {

@@ -44,6 +44,13 @@ pub struct EnvSummary {
     /// [`matrix::HardwareReport::explained_source_builds`]). They get no
     /// generic "Will compile from source" finding on top.
     pub explained_source_builds: Vec<String>,
+    /// The venv directory, when there is one (`.venv`, `venv`, `env`).
+    pub venv_path: Option<PathBuf>,
+    /// The Python `.python-version` pins, when it names one.
+    pub python_pin: Option<PyVersion>,
+    /// A venv directory whose `pyvenv.cfg` is gone (see
+    /// [`crate::core::health::damaged_venv`]), when there is no usable one.
+    pub damaged_venv: Option<PathBuf>,
 }
 
 impl EnvSummary {
@@ -63,6 +70,13 @@ impl EnvSummary {
             }),
             toolchain: None,
             explained_source_builds: Vec::new(),
+            venv_path: p.venv.as_ref().map(|v| v.path.clone()),
+            python_pin: p.python_pin,
+            damaged_venv: p
+                .venv
+                .is_none()
+                .then(|| crate::core::health::damaged_venv(workspace))
+                .flatten(),
         }
     }
 }
@@ -122,6 +136,17 @@ pub async fn assess<S: MetadataSource>(
     }
     let (target_python, mut findings) = synthesize(&env, &project, compat.as_ref());
     findings.extend(hardware.findings);
+
+    // What is installed against what is declared and locked: missing,
+    // drifted, half-installed packages, a stale uv.lock (file reads only).
+    if project.is_python_project() {
+        findings.extend(crate::core::health::check(
+            workspace,
+            probes.venv.as_ref(),
+            settings.package_manager,
+            project.is_pixi(),
+        ));
+    }
 
     // Walls pip and uv cannot climb but conda-forge can (system libraries,
     // nvcc): say pixi would help. Skips pixi projects.
@@ -287,15 +312,7 @@ pub fn synthesize(
             fix: FixKind::SetupEnvironment,
         });
     } else if let Some(missing) = broken {
-        findings.push(Finding {
-            severity: Severity::Error,
-            title: format!(
-                "The .venv is broken: its Python at {} no longer exists",
-                missing.display()
-            ),
-            detail: "The interpreter this environment was built on was moved or removed (a uv-managed Python upgraded or uninstalled, a system Python removed, or the project copied from another machine), so every command run through it fails. Rebuild the environment to recreate it on an installed Python.".to_string(),
-            fix: FixKind::SetupEnvironment,
-        });
+        findings.push(broken_venv_finding(env, missing));
     }
 
     // Notebooks run on whatever kernel Jupyter can find, and an environment
@@ -311,7 +328,8 @@ pub fn synthesize(
                 "Notebooks can't use .venv yet".to_string()
             },
             detail: "This project has Jupyter notebooks, but its environment has no usable ipykernel (on Python 3.14, ipykernel 7.0.0 and releases before 6.30.1 cannot connect), so VS Code and Jupyter can't offer it as a kernel and fall back to another Python where the project's packages are missing. Set up the environment to install ipykernel.".to_string(),
-            fix: FixKind::SetupEnvironment,
+            // The environment exists: installing into it is enough.
+            fix: FixKind::SyncEnvironment,
         });
     }
 
@@ -319,6 +337,47 @@ pub fn synthesize(
     if !project.is_python_project() {
         return (None, findings);
     }
+
+    // A venv directory that lost its pyvenv.cfg is not "no environment":
+    // it has to be removed before anything can be built there.
+    let damaged = env.damaged_venv.as_ref().filter(|_| !env.has_venv && !pixi);
+    if let Some(dir) = damaged {
+        let label = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| ".venv".into());
+        findings.push(Finding {
+            severity: Severity::Error,
+            title: format!("The {label} is damaged: its pyvenv.cfg is missing"),
+            detail: format!(
+                "{label} still holds an interpreter and packages, but without pyvenv.cfg Python no longer treats it as a virtual environment: it runs without the project's packages, and uv refuses to reuse the directory. Remove it and rebuild it{}.",
+                env.python_pin
+                    .map(|p| format!(" on Python {p} (from .python-version)"))
+                    .unwrap_or_default()
+            ),
+            fix: FixKind::RepairEnvironment {
+                python: env.python_pin,
+            },
+        });
+    }
+    let has_env_dir = env.has_venv || damaged.is_some();
+
+    // `requires-python` that no Python satisfies: nothing can be built, and
+    // every recommendation would contradict the project. pixi's own spec is
+    // judged by the pixi checks.
+    let declared_rp = project
+        .declared_requires_python
+        .as_deref()
+        .filter(|_| !pixi)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(problem) = declared_rp.and_then(requires_python_problem) {
+        findings.push(problem);
+        return (None, findings);
+    }
+    let rp_set = declared_rp
+        .map(crate::pypi::pyversion::parse_requires_python)
+        .unwrap_or_else(PyVersionSet::universe);
 
     // Conda projects: detect + offer migration, don't fight conda in v1.
     // pixi already manages a pixi project's conda packages.
@@ -333,11 +392,28 @@ pub fn synthesize(
 
     let Some(compat) = compat else {
         // Python files but no declared dependencies to check.
+        // With no dependencies the only Python worth keeping is one the
+        // project already chose: its pin, or the venv's.
+        let mut keep = None;
+        if broken.is_none() && !pixi {
+            let existing = [env.python_pin, env.venv_python]
+                .into_iter()
+                .flatten()
+                .find(|p| rp_set.contains(*p));
+            let target = existing.or_else(|| rp_set.max());
+            match version_findings(env, declared_rp, &rp_set, &rp_set, target, None) {
+                Some(f) => {
+                    findings.push(f);
+                    keep = target;
+                }
+                None => keep = existing,
+            }
+        }
         if !env.has_venv && pixi {
             findings.push(pixi_not_installed(
                 "This pixi project's environment has not been installed yet, so nothing in it can run. Run `pixi install` to create it.".to_string(),
             ));
-        } else if !env.has_venv {
+        } else if !has_env_dir {
             findings.push(Finding {
                 severity: Severity::Warning,
                 title: "No virtual environment".to_string(),
@@ -345,7 +421,7 @@ pub fn synthesize(
                 fix: FixKind::SetupEnvironment,
             });
         }
-        return (None, findings);
+        return (keep, findings);
     };
 
     // A lookup that failed for another reason (offline, a proxy) says
@@ -433,18 +509,62 @@ pub fn synthesize(
         return (None, findings);
     }
 
-    let target = pick_target(project, compat);
+    // What the project itself allows on top of what the dependencies do.
+    let allowed = compat.intersection.intersect(&rp_set);
+    if allowed.is_empty() && !pixi {
+        findings.push(Finding {
+            severity: Severity::Error,
+            title: format!(
+                "requires-python `{}` excludes every Python the dependencies support",
+                declared_rp.unwrap_or_default()
+            ),
+            detail: format!(
+                "The dependencies support Python {}{}, but pyproject.toml's requires-python allows none of those, so no environment can satisfy both. Widen requires-python or change the dependency that caps it.",
+                compat.intersection.to_range_string(),
+                capping_clause(compat)
+            ),
+            fix: FixKind::Manual,
+        });
+        return (None, findings);
+    }
 
-    // The broken-venv finding already asks for a rebuild, which lands on
-    // `target`; judging the dead interpreter's version would only add noise.
+    // An existing choice wins over "newest": the pinned Python, then the one
+    // the environment already runs, as long as the project allows it.
+    let healthy_venv = env.venv_python.filter(|_| broken.is_none());
+    let target = if pixi {
+        pick_target(project, compat)
+    } else {
+        choose(&allowed, &[env.python_pin, healthy_venv])
+    };
+
+    // A rebuild must land on a Python the project allows.
+    for f in &mut findings {
+        if let FixKind::RepairEnvironment { python } = &mut f.fix {
+            if !python.is_some_and(|p| allowed.contains(p)) {
+                *python = target;
+            }
+        }
+    }
+
+    // The broken-venv finding already asks for a rebuild; judging the dead
+    // interpreter's version would only add noise.
     if broken.is_some() {
         return (target, findings);
     }
 
     // Determine the interpreter currently in effect: the venv's, else nothing.
     match env.venv_python {
-        // Venv exists and is compatible → all good (stay silent).
-        Some(current) if compat.is_compatible(current) => {}
+        // Venv exists and the dependencies support it: still check it
+        // against the project's own requires-python and pin.
+        Some(current) if compat.is_compatible(current) => {
+            if !pixi {
+                if let Some(f) =
+                    version_findings(env, declared_rp, &rp_set, &allowed, target, Some(compat))
+                {
+                    findings.push(f);
+                }
+            }
+        }
 
         // Venv exists but its Python is unsupported → recreate on the right version.
         Some(current) => {
@@ -494,10 +614,16 @@ pub fn synthesize(
             )));
         }
 
+        // The damaged-venv finding already asks for the rebuild.
+        None if damaged.is_some() => {}
+
         // No venv (or unknown version) → set one up on the correct interpreter.
         None => {
             let range = compat.intersection.to_range_string();
             let why = match target {
+                Some(t) if env.python_pin == Some(t) => format!(
+                    "Dependencies support Python {range}. It will use Python {t}, pinned in .python-version."
+                ),
                 Some(t) => format!(
                     "Dependencies support Python {range}. Recommended: {t}{}.",
                     capping_clause(compat)
@@ -514,6 +640,164 @@ pub fn synthesize(
     }
 
     (target, findings)
+}
+
+/// The first of `prefer` that `allowed` contains, else its newest.
+fn choose(allowed: &PyVersionSet, prefer: &[Option<PyVersion>]) -> Option<PyVersion> {
+    prefer
+        .iter()
+        .flatten()
+        .find(|p| allowed.contains(**p))
+        .copied()
+        .or_else(|| allowed.max())
+}
+
+/// How text names the venv: its directory name (`.venv`, `venv`, `env`).
+fn venv_label(env: &EnvSummary) -> String {
+    env.venv_path
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".venv".into())
+}
+
+/// The finding for a venv whose interpreter is gone. When the missing file
+/// is the venv's own `python`, the base Python is fine and only the
+/// environment needs rebuilding, so the wording says that rather than
+/// blaming a removed install.
+fn broken_venv_finding(env: &EnvSummary, missing: &Path) -> Finding {
+    let label = venv_label(env);
+    let own = env
+        .venv_path
+        .as_ref()
+        .is_some_and(|venv| missing.starts_with(venv));
+    let python = env.venv_python.or(env.python_pin);
+    let on = python
+        .map(|p| format!(" on Python {p}, the version it was made with"))
+        .unwrap_or_default();
+    let (title, detail) = if own {
+        (
+            format!(
+                "The {label} is broken: its own interpreter {} is missing",
+                missing.display()
+            ),
+            format!(
+                "The environment's python executable was deleted (by hand, a cleanup tool or an interrupted install), so nothing can run in it. The Python it was built from is not affected. Rebuild the environment in place{on}."
+            ),
+        )
+    } else {
+        (
+            format!(
+                "The {label} is broken: its Python at {} no longer exists",
+                missing.display()
+            ),
+            format!(
+                "The interpreter this environment was built on was moved or removed (a uv-managed Python upgraded or uninstalled, a system Python removed, or the project copied from another machine), so every command run through it fails. Rebuild the environment{on} (uv downloads it again if needed)."
+            ),
+        )
+    };
+    Finding {
+        severity: Severity::Error,
+        title,
+        detail,
+        fix: FixKind::RepairEnvironment { python },
+    }
+}
+
+/// An Error finding when `spec` (a project's `requires-python`) matches no
+/// Python at all: an empty range (`>=3.10,<=3.9`), or only versions newer
+/// than any CPython release (`>=3.16`).
+pub fn requires_python_problem(spec: &str) -> Option<Finding> {
+    use crate::pypi::pyversion::{parse_requires_python, MAX_MINOR};
+    if !parse_requires_python(spec).is_empty() {
+        return None;
+    }
+    let newest = PyVersion::py3(MAX_MINOR);
+    let future = spec.split(',').any(|clause| {
+        let c = clause.trim();
+        let lower = c.starts_with('>') || c.starts_with("==") || c.starts_with("~=");
+        lower
+            && PyVersion::parse(c.trim_start_matches(['>', '=', '~', ' ']))
+                .is_some_and(|v| v.major == 3 && v.minor > MAX_MINOR)
+    });
+    let (title, detail) = if future {
+        (
+            format!("requires-python `{spec}` asks for a Python that does not exist yet"),
+            format!(
+                "The newest CPython PyPilot knows is {newest}, and `{spec}` excludes it, so no interpreter can be installed for this project. Lower requires-python (for example `>=3.9`); PyPilot builds nothing until it does."
+            ),
+        )
+    } else {
+        (
+            format!("requires-python `{spec}` matches no Python version"),
+            "Its bounds contradict each other, so no interpreter satisfies it and uv refuses the project. Fix requires-python in pyproject.toml (often only the lower bound is meant, such as `>=3.10`); PyPilot builds nothing until it does.".to_string(),
+        )
+    };
+    Some(Finding {
+        severity: Severity::Error,
+        title,
+        detail,
+        fix: FixKind::Manual,
+    })
+}
+
+/// A healthy venv's Python against the project's own choices: outside its
+/// `requires-python` (Error), or not the version `.python-version` pins
+/// (Warning). `allowed` is what the project and its dependencies allow;
+/// `target` the Python a rebuild would use.
+fn version_findings(
+    env: &EnvSummary,
+    declared_rp: Option<&str>,
+    rp_set: &PyVersionSet,
+    allowed: &PyVersionSet,
+    target: Option<PyVersion>,
+    compat: Option<&CompatReport>,
+) -> Option<Finding> {
+    let current = env.venv_python?;
+    let label = venv_label(env);
+    if !rp_set.contains(current) {
+        let spec = declared_rp.unwrap_or_default();
+        let then = match target {
+            Some(t) => format!(
+                " Recreate the environment with Python {t}, the newest that requires-python and the dependencies allow{}.",
+                compat.map(capping_clause).unwrap_or_default()
+            ),
+            None => String::new(),
+        };
+        return Some(Finding {
+            severity: Severity::Error,
+            title: format!("Python {current} is outside the project's requires-python `{spec}`"),
+            detail: format!(
+                "pyproject.toml says the project runs on `{spec}`, but {label} is on Python {current}, so uv will not install the project there and the code may use features this Python lacks.{then}"
+            ),
+            fix: target
+                .map(FixKind::RecreateWithPython)
+                .unwrap_or(FixKind::Manual),
+        });
+    }
+    let pin = env.python_pin?;
+    if pin == current {
+        return None;
+    }
+    if allowed.contains(pin) {
+        return Some(Finding {
+            severity: Severity::Warning,
+            title: format!("{label} runs Python {current}, but .python-version pins {pin}"),
+            detail: format!(
+                "The project pins Python {pin}, so `uv sync` and `uv run` would rebuild {label} on it, and tools that read the pin disagree with the environment. Recreate the environment on Python {pin}; the pin stays as it is."
+            ),
+            fix: FixKind::RecreateWithPython(pin),
+        });
+    }
+    Some(Finding {
+        severity: Severity::Warning,
+        title: format!(".python-version pins Python {pin}, which this project cannot use"),
+        detail: format!(
+            "requires-python and the dependencies allow Python {}, not {pin}, so uv commands that follow the pin fail. Point the pin at the environment's Python with `uv python pin {current}`.",
+            allowed.to_range_string()
+        ),
+        fix: FixKind::Manual,
+    })
 }
 
 /// The Pythons a pixi project's `python` spec allows, when it is a pixi
@@ -823,7 +1107,7 @@ mod tests {
             .find(|f| f.title == "Notebooks can't use .venv yet")
             .unwrap();
         assert_eq!(f.severity, Severity::Warning);
-        assert_eq!(f.fix, FixKind::SetupEnvironment);
+        assert_eq!(f.fix, FixKind::SyncEnvironment);
         assert!(f.detail.contains("ipykernel"));
 
         // Already a kernel: silent again.
@@ -875,6 +1159,159 @@ mod tests {
             interpreters: vec![PyVersion::py3(py)],
             ..Default::default()
         }
+    }
+
+    fn requests_project(rp: Option<&str>) -> ProjectDeps {
+        ProjectDeps {
+            sources: vec!["pyproject.toml".into()],
+            packages: vec![Requirement::any("requests")],
+            declared_requires_python: rp.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn venv_outside_requires_python_is_an_error_with_a_rebuild_inside_it() {
+        let compat = report(vec![analysis("requests", &[10, 11, 12, 13, 14, 15])]);
+        let env = compat_venv(15);
+        let (target, findings) =
+            synthesize(&env, &requests_project(Some(">=3.9,<3.13")), Some(&compat));
+        assert_eq!(target, Some(PyVersion::py3(12)));
+        let f = &findings[0];
+        assert_eq!(f.severity, Severity::Error);
+        assert!(f
+            .title
+            .contains("outside the project's requires-python `>=3.9,<3.13`"));
+        assert_eq!(f.fix, FixKind::RecreateWithPython(PyVersion::py3(12)));
+    }
+
+    #[test]
+    fn pin_wins_over_newest_and_a_venv_off_the_pin_is_reported() {
+        let compat = report(vec![analysis("requests", &[10, 11, 12, 13, 14, 15])]);
+        let env = EnvSummary {
+            python_pin: Some(PyVersion::py3(12)),
+            ..compat_venv(13)
+        };
+        let (target, findings) = synthesize(&env, &requests_project(None), Some(&compat));
+        assert_eq!(target, Some(PyVersion::py3(12)));
+        let f = &findings[0];
+        assert_eq!(f.severity, Severity::Warning);
+        assert_eq!(
+            f.title,
+            ".venv runs Python 3.13, but .python-version pins 3.12"
+        );
+        assert_eq!(f.fix, FixKind::RecreateWithPython(PyVersion::py3(12)));
+
+        // On the pin: silent, and the target stays the pin, not 3.15.
+        let on_pin = EnvSummary {
+            python_pin: Some(PyVersion::py3(12)),
+            ..compat_venv(12)
+        };
+        let (target, findings) = synthesize(&on_pin, &requests_project(None), Some(&compat));
+        assert_eq!(target, Some(PyVersion::py3(12)));
+        assert!(findings.is_empty(), "{findings:?}");
+
+        // No venv: setup uses the pin and says so.
+        let none = EnvSummary {
+            python_pin: Some(PyVersion::py3(12)),
+            ..Default::default()
+        };
+        let (target, findings) = synthesize(&none, &requests_project(None), Some(&compat));
+        assert_eq!(target, Some(PyVersion::py3(12)));
+        assert!(findings[0].detail.contains("pinned in .python-version"));
+    }
+
+    #[test]
+    fn pin_the_dependencies_exclude_is_not_used() {
+        let compat = report(vec![analysis("numpy", &[12, 13, 14, 15])]);
+        let env = EnvSummary {
+            python_pin: Some(PyVersion::py3(8)),
+            ..compat_venv(13)
+        };
+        let (target, findings) = synthesize(&env, &requests_project(None), Some(&compat));
+        // The healthy venv's 3.13 is kept rather than jumping to 3.15.
+        assert_eq!(target, Some(PyVersion::py3(13)));
+        assert!(findings[0]
+            .title
+            .contains("pins Python 3.8, which this project cannot use"));
+        assert_eq!(findings[0].fix, FixKind::Manual);
+    }
+
+    #[test]
+    fn impossible_requires_python_is_an_error_and_picks_nothing() {
+        for (spec, words) in [
+            (">=3.16", "does not exist yet"),
+            (">=3.10,<=3.9", "matches no Python version"),
+        ] {
+            let compat = report(vec![analysis("requests", &[10, 11, 12, 13, 14, 15])]);
+            let (target, findings) = synthesize(
+                &EnvSummary::default(),
+                &requests_project(Some(spec)),
+                Some(&compat),
+            );
+            assert_eq!(target, None, "{spec}");
+            assert_eq!(findings.len(), 1, "{findings:?}");
+            assert_eq!(findings[0].severity, Severity::Error);
+            assert!(findings[0].title.contains(spec), "{}", findings[0].title);
+            assert!(findings[0].title.contains(words), "{}", findings[0].title);
+            assert_eq!(findings[0].fix, FixKind::Manual);
+        }
+    }
+
+    #[test]
+    fn requires_python_excluding_every_supported_python_is_an_error() {
+        let compat = report(vec![analysis("numpy", &[12, 13, 14, 15])]);
+        let (target, findings) = synthesize(
+            &EnvSummary::default(),
+            &requests_project(Some("<3.11")),
+            Some(&compat),
+        );
+        assert_eq!(target, None);
+        assert!(findings[0]
+            .title
+            .contains("excludes every Python the dependencies support"));
+    }
+
+    #[test]
+    fn venv_without_pyvenv_cfg_is_damaged_not_missing() {
+        let compat = report(vec![analysis("requests", &[10, 11, 12, 13, 14, 15])]);
+        let env = EnvSummary {
+            damaged_venv: Some(PathBuf::from("/ws/.venv")),
+            python_pin: Some(PyVersion::py3(12)),
+            ..Default::default()
+        };
+        let (_t, findings) = synthesize(&env, &requests_project(None), Some(&compat));
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(
+            findings[0].title,
+            "The .venv is damaged: its pyvenv.cfg is missing"
+        );
+        assert_eq!(
+            findings[0].fix,
+            FixKind::RepairEnvironment {
+                python: Some(PyVersion::py3(12))
+            }
+        );
+        // Without dependencies too: no "No virtual environment" beside it.
+        let (_t, findings) = synthesize(&env, &requests_project(None), None);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+    }
+
+    #[test]
+    fn no_dependencies_keeps_the_existing_python() {
+        let env = EnvSummary {
+            python_pin: Some(PyVersion::py3(12)),
+            ..compat_venv(12)
+        };
+        let project = ProjectDeps {
+            sources: vec!["main.py".into()],
+            ..Default::default()
+        };
+        let (target, findings) = synthesize(&env, &project, None);
+        assert_eq!(target, Some(PyVersion::py3(12)));
+        assert!(findings.is_empty());
+        let (target, _) = synthesize(&EnvSummary::default(), &project, None);
+        assert_eq!(target, None);
     }
 
     fn sdist_findings(findings: &[Finding]) -> Vec<&Finding> {
@@ -1028,14 +1465,42 @@ mod tests {
         assert_eq!(findings.len(), 1, "{findings:?}");
         let f = &findings[0];
         assert_eq!(f.severity, Severity::Error);
-        assert_eq!(f.fix, FixKind::SetupEnvironment);
+        // Rebuilt in place, on a Python the dependencies support rather than
+        // the 3.13 it had.
+        assert_eq!(
+            f.fix,
+            FixKind::RepairEnvironment {
+                python: Some(PyVersion::py3(12))
+            }
+        );
         assert!(f.title.contains("broken"));
         assert!(f.title.contains(&missing.display().to_string()));
+        assert!(f.detail.contains("moved or removed"));
 
-        // Reported even outside a recognised Python project.
+        // Reported even outside a recognised Python project, keeping its
+        // version when nothing rules it out.
         let (_t, findings) = synthesize(&env, &ProjectDeps::default(), None);
         assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].fix, FixKind::SetupEnvironment);
+        assert_eq!(
+            findings[0].fix,
+            FixKind::RepairEnvironment {
+                python: Some(PyVersion::py3(13))
+            }
+        );
+
+        // Its own python.exe deleted: the base Python is not blamed.
+        let own = EnvSummary {
+            venv_path: Some(PathBuf::from("/ws/.venv")),
+            venv_missing_python: Some(PathBuf::from("/ws/.venv/bin/python")),
+            ..env.clone()
+        };
+        let (_t, findings) = synthesize(&own, &ProjectDeps::default(), None);
+        assert!(
+            findings[0].title.contains("its own interpreter"),
+            "{}",
+            findings[0].title
+        );
+        assert!(findings[0].detail.contains("not affected"));
     }
 
     fn pixi_project() -> ProjectDeps {
