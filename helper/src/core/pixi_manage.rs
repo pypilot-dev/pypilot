@@ -98,11 +98,48 @@ pub fn default_env_path(root: &Path) -> PathBuf {
     root.join(".pixi").join("envs").join(selected_env(root))
 }
 
+/// The Python a finding asks the project to move to, and that finding's
+/// title: an environment Python the PyPI dependencies rule out, or no Python
+/// at all. Setup applies it with [`set_python`] instead of a plain install,
+/// which would fail on (or keep) the excluded Python.
+pub fn python_fix(findings: &[crate::core::Finding]) -> Option<(PyVersion, String)> {
+    findings.iter().find_map(|f| match f.fix {
+        crate::core::FixKind::RecreateWithPython(py) => Some((py, f.title.clone())),
+        _ => None,
+    })
+}
+
+/// Step name for deleting an environment whose Python is gone.
+pub const REMOVE_BROKEN_STEP: &str = "remove broken pixi environment";
+
+/// Step name for the check that the installed environment has its Python.
+pub const VERIFY_STEP: &str = "verify pixi environment";
+
 /// Install the project's default environment (`pixi install`).
+///
+/// An environment whose Python is gone is deleted first: pixi treats the
+/// prefix as installed and leaves it broken otherwise. Afterwards the
+/// environment's interpreter must exist, or the run fails rather than
+/// reporting a success nothing can run in.
 pub async fn install(pixi: Option<&Path>, root: &Path, summary: &mut SetupSummary) {
     let Some(pixi) = located(pixi, root, summary) else {
         return;
     };
+    if let Some(env) = crate::core::env::project_env(root)
+        .filter(|e| e.broken.is_some() && e.path.components().any(|c| c.as_os_str() == ".pixi"))
+    {
+        let effect = Effect::new(
+            REMOVE_BROKEN_STEP,
+            "its Python is missing, and `pixi install` counts the prefix as installed; pixi rebuilds it from the lock",
+        );
+        let result = exec::remove_dir_all(&env.path, effect)
+            .map(|()| env.path.display().to_string())
+            .map_err(|e| e.to_string());
+        record(summary, REMOVE_BROKEN_STEP, result);
+        if !summary.ok {
+            return;
+        }
+    }
     let effect = Effect::new(
         "pixi install",
         "install the project's environment from its pixi manifest",
@@ -119,6 +156,20 @@ pub async fn install(pixi: Option<&Path>, root: &Path, summary: &mut SetupSummar
         "pixi install",
         result.map(|_| "environment installed".into()),
     );
+    if summary.ok && !exec::is_dry_run() {
+        if let Some(missing) = crate::core::env::project_env(root).and_then(|e| e.broken) {
+            let env = default_env_path(root);
+            record(
+                summary,
+                VERIFY_STEP,
+                Err(format!(
+                    "pixi install finished, but the environment's Python at {} is still missing. Delete {} and run `pixi install` again.",
+                    missing.display(),
+                    env.display()
+                )),
+            );
+        }
+    }
 }
 
 /// Add PyPI packages (`pixi add --pypi`), which records them in the manifest
@@ -390,6 +441,62 @@ mod tests {
         let mut s = summary(root);
         add_pypi(None, root, &[], &mut s).await;
         assert!(s.ok && s.steps.is_empty());
+    }
+
+    #[test]
+    fn python_fix_comes_from_the_finding_that_asks_for_it() {
+        use crate::core::{Finding, FixKind, Severity};
+        let finding = |title: &str, fix| Finding {
+            severity: Severity::Error,
+            title: title.into(),
+            detail: String::new(),
+            fix,
+        };
+        let findings = [
+            finding(
+                "Pixi environment not installed yet",
+                FixKind::SetupEnvironment,
+            ),
+            finding(
+                "numba does not support Python 3.15 in this pixi environment",
+                FixKind::RecreateWithPython(PyVersion::py3(11)),
+            ),
+        ];
+        assert_eq!(
+            python_fix(&findings),
+            Some((
+                PyVersion::py3(11),
+                "numba does not support Python 3.15 in this pixi environment".to_string()
+            ))
+        );
+        assert_eq!(python_fix(&findings[..1]), None);
+    }
+
+    /// A prefix whose python.exe was deleted: `pixi install` alone reports
+    /// success and leaves it broken, so the plan deletes it first.
+    #[tokio::test]
+    async fn a_broken_prefix_is_removed_before_the_install() {
+        let root = std::env::temp_dir().join(format!("pypilot-pixi-broken-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let prefix = root.join(".pixi").join("envs").join("default");
+        std::fs::create_dir_all(prefix.join("conda-meta")).unwrap();
+        std::fs::write(
+            root.join("pixi.toml"),
+            "[workspace]\nname = \"d\"\nchannels = [\"conda-forge\"]\nplatforms = [\"win-64\"]\n\n[dependencies]\npython = \"3.12.*\"\n",
+        )
+        .unwrap();
+        assert!(crate::core::env::project_env(&root)
+            .unwrap()
+            .broken
+            .is_some());
+
+        let mut s = summary(&root);
+        let ((), steps) = exec::dry_run(install(Some(Path::new("pixi")), &root, &mut s)).await;
+        let names: Vec<&str> = steps.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, [REMOVE_BROKEN_STEP, "pixi install"]);
+        assert!(s.ok, "{:?}", s.steps);
+        assert!(prefix.exists(), "a dry run deletes nothing");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

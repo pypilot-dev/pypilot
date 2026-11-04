@@ -114,7 +114,19 @@ pub async fn run_with_mode<S: MetadataSource>(
         {
             return Ok(summary);
         }
-        run_pixi(workspace, pixi_bin.as_deref(), &mut summary).await;
+        // A Python the dependencies rule out: `pixi install` alone fails (or
+        // keeps it), so apply the `pixi add python=X.Y` doctor recommends.
+        match pixi_manage::python_fix(&assessment.findings) {
+            Some((py, why)) => {
+                summary.why = format!(
+                    "pixi project: {why}, so it moves to Python {py}, as doctor recommends (`pixi add python={py}`)."
+                );
+                summary.python = Some(py);
+                pixi_manage::set_python(pixi_bin.as_deref(), workspace, py, &mut summary).await;
+                finish_pixi(workspace, pixi_bin.as_deref(), &mut summary).await;
+            }
+            None => run_pixi(workspace, pixi_bin.as_deref(), &mut summary).await,
+        }
         if assessment
             .project
             .packages
@@ -250,6 +262,12 @@ fn clear_damaged_venv(workspace: &Path, venv_path: &Path, summary: &mut SetupSum
 /// and nothing on disk changes.
 pub(crate) async fn run_pixi(workspace: &Path, pixi: Option<&Path>, summary: &mut SetupSummary) {
     pixi_manage::install(pixi, workspace, summary).await;
+    finish_pixi(workspace, pixi, summary).await;
+}
+
+/// What follows an install in a pixi project: report the environment, and
+/// add ipykernel when notebooks need it.
+async fn finish_pixi(workspace: &Path, pixi: Option<&Path>, summary: &mut SetupSummary) {
     if let Some(env) = env::project_env(workspace) {
         summary.python = env.python;
         summary.venv_path = env.path;

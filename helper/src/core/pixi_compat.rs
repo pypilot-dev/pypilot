@@ -137,7 +137,8 @@ pub fn pixi_findings(
             "{from}, but {}. {consequence} Run `pixi add python={target}` to move the environment to Python {target}, the newest version every PyPI dependency supports.{skipped}",
             reasons.join("; ")
         ),
-        fix: FixKind::Manual,
+        // Setup runs that `pixi add` (see `pixi_manage::python_fix`).
+        fix: FixKind::RecreateWithPython(target),
     }]
 }
 
