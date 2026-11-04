@@ -866,7 +866,7 @@ fn pydantic_2_base_settings_adds_pydantic_settings() {
     assert_eq!(after[0].fix, FixKind::Manual);
     assert!(after[0]
         .detail
-        .contains("Fix: change app.py:1 to `from pydantic_settings import BaseSettings`"));
+        .contains("Fix: change app.py:1 to `from pydantic_settings import BaseSettings` (from the pydantic-settings package). PyPilot does not edit source"), "{}", after[0].detail);
     assert_eq!(
         rules::code_changes(&bundled(), &ctx),
         vec!["`from pydantic import BaseSettings` fails: pydantic 2 removed it: change app.py:1 to `from pydantic_settings import BaseSettings` (from the pydantic-settings package)".to_string()]

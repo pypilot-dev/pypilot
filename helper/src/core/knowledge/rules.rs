@@ -1210,7 +1210,7 @@ fn dist_symbol_finding(hits: &[(&SymbolRemoval, &CodeUse)], ctx: &Context) -> Op
             }
             None => {
                 detail.push_str(&format!(
-                    "The project requires {dep}{spec}, which rules out `{constraint}`, so the code has to change. Fix: {} (PyPilot does not edit source).",
+                    "The project requires {dep}{spec}, which rules out `{constraint}`, so the code has to change. Fix: {}. PyPilot does not edit source, so this stays reported until the code changes.",
                     code_fix(hits)
                 ));
                 FixKind::Manual
