@@ -759,7 +759,9 @@ fn note_kept_pins(summary: &mut SetupSummary, merge: &crate::core::manifests::Re
             each.join(", ")
         )
     };
-    soft_fail(summary, "requirements.txt not applied", &detail);
+    // An ok step: what was asked for (the project's declared pins) is
+    // installed, and doctor keeps reporting the disagreement.
+    step_ok(summary, "keep pyproject.toml pins", &detail);
 }
 
 /// Run `uv pip freeze > requirements.txt` and record the step.
