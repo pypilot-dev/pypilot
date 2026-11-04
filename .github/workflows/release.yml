@@ -44,10 +44,10 @@ jobs:
         include:
           - { slug: linux-x64, os: ubuntu-latest, target: x86_64-unknown-linux-gnu, ext: tar.gz }
           # Retired images (macos-13, and macos-14 since 2026-11-02) leave jobs
-          # queued indefinitely rather than failing. macos-15 is Apple Silicon
-          # hardware, but its toolchain cross-links x86_64-apple-darwin
-          # natively, so the produced binary is unchanged, only the build host is.
-          - { slug: darwin-x64, os: macos-15, target: x86_64-apple-darwin, ext: tar.gz }
+          # queued indefinitely rather than failing. The Intel binary is built
+          # on the Intel image, which keeps it off the scarce Apple Silicon
+          # runners; the target and the binary are the same either way.
+          - { slug: darwin-x64, os: macos-15-intel, target: x86_64-apple-darwin, ext: tar.gz }
           - { slug: darwin-arm64, os: macos-15, target: aarch64-apple-darwin, ext: tar.gz }
           - { slug: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, ext: zip }
     steps:
