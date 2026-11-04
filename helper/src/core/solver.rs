@@ -157,12 +157,13 @@ pub async fn assess<S: MetadataSource>(
         }
         // An existing venv: a version range is judged by the release the
         // installer picks on its Python, not by the newest release. With a
-        // current lock that release is the locked one, already judged.
+        // current lock that is usually the locked release, already judged;
+        // a package locked at several versions (a fork across Pythons, c12c:
+        // numpy 2.2 below 3.12, 2.5 from there) is fitted here too. This
+        // does nothing when the report already admits the venv's Python.
         if let Some(venv) = probes.venv.as_ref() {
             if let Some(py) = venv.python {
-                if locked.is_none() {
-                    pypi::fit_report_to_python(source, &mut report, &project.packages, py).await;
-                }
+                pypi::fit_report_to_python(source, &mut report, &project.packages, py).await;
                 // What is installed there installed on that Python.
                 let installed = crate::core::installed::scan(&venv.path).versions;
                 pypi::trust_installed(&mut report, &installed, py);
