@@ -29,7 +29,7 @@ PyPilot reads both signals. It takes `requires_python` as the starting range and
 | **VS Code extension** | Downloads and manages the engine, adds commands, a report panel, a status bar item, tasks and interpreter selection. | [pypilot-dev/pypilot-vscode](https://github.com/pypilot-dev/pypilot-vscode) |
 | **pypilot-cli** | `pip install pypilot-cli`: a small Python package that runs the engine (bundled in its platform wheels, or downloaded), plus a tiny Python API. | [pypilot-dev/pypilot-pip](https://github.com/pypilot-dev/pypilot-pip) |
 
-Because the editor extensions hold no business logic, the terminal and the editors cannot disagree: the "Fix environment" button and `pypilot setup` call the same function.
+Because the editor extensions hold no business logic, the terminal and the editors cannot disagree: the "Fix environment" button and `pypilot doctor --fix` call the same function.
 
 ## What it is not
 

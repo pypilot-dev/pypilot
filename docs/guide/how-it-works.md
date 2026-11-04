@@ -34,7 +34,7 @@ The engine's tests run every platform on any machine, from recorded PyPI release
 ## Caching and the network
 
 - PyPI metadata is cached on disk in the platform cache directory. A specific release's file list never changes, so it is cached forever; "what is the newest release" is cached for 24 hours.
-- The data tables (`nvidia.json`, `frameworks.json`, `cuda_extensions.json`, `import_map.json`, `conda_forge_packages.json`) are compiled into the engine and refreshed from the repository's `main` branch every `data_refresh_days` (7 by default). Set it to `0` to stay offline. See [Data tables](/reference/data-tables).
+- The data tables (`nvidia.json`, `frameworks.json`, `cuda_extensions.json`, `import_map.json`, `conda_forge_packages.json`, `known_breakages.json`) are compiled into the engine and refreshed from the repository's `main` branch every `data_refresh_days` (7 by default). Set it to `0` to stay offline. See [Data tables](/reference/data-tables).
 - Nothing else leaves your machine. There is no telemetry.
 
 ## Two surfaces in the editor

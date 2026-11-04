@@ -96,7 +96,7 @@ Titles look like ``Install `numpy` ``, `Install 3 packages: a, b, c`, ``Create e
 
 | Command | Arguments | Result | Does |
 |---|---|---|---|
-| `pypilot.fixEverything` | none | `{ ok }` | Same as `pypilot setup` (asks how to proceed first when uv is missing in `auto` mode) |
+| `pypilot.fixEverything` | none | `{ ok }` | Same as `pypilot doctor --fix`: the targeted fixes, and setup only when no environment exists (asks how to proceed first when uv is missing in `auto` mode) |
 | `pypilot.showDetails` | `[package?]` | `null` | Writes the report to `<temp>/pypilot-report.md` and opens it with `window/showDocument`; with a package (or a requirement such as `numpy>=2`), adds a `pypilot check` section. Falls back to `window/showMessage` |
 | `pypilot.ignore` | none | `null` | Nothing (dismisses) |
 | `pypilot.neverForProject` | none | `null` | Writes `[state] never = true` to `.zed/pypilot.toml` |

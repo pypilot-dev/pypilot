@@ -17,7 +17,7 @@ The shim uses a `pypilot` on your `PATH` when its version is new enough; otherwi
 
 ## Commands as tasks
 
-Zed extensions cannot add command-palette entries, so PyPilot's commands ship as tasks. Copy [`tasks/pypilot.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/pypilot.json) into your project's `.zed/tasks.json`, or into your global tasks file (`~/.config/zed/tasks.json`; on Windows `%APPDATA%\Zed\tasks.json`). Run them with `task: spawn`.
+Zed extensions cannot add command-palette entries, so PyPilot's commands ship as tasks. Copy [`tasks/pypilot.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/pypilot.json) into your project's `.zed/tasks.json`, or into your global tasks file (`~/.config/zed/tasks.json`; on Windows `%APPDATA%\Zed\tasks.json`). Run them with `task: spawn`. The fix environment task runs the full `pypilot setup`. For the targeted fix, run `pypilot doctor --fix` in a terminal, see [What doctor --fix fixes](/guide/fixing).
 
 | Task | Runs |
 |---|---|

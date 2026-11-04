@@ -103,3 +103,5 @@ See the tip on the [Zed page](/zed/#commands-as-tasks).
 **Does it support PyPy, or Python 2?** It reasons about CPython 3.7 and later.
 
 **Why does it pick the newest Python in range?** The newest supported interpreter gets the longest support window, and the range already guarantees every dependency has a wheel for it. Your `requires-python` or a pixi `python` spec caps it.
+
+**What does `doctor --fix` change?** Only what the report flags, and it names every file it edits. A healthy project is left alone. See [What doctor --fix fixes](/guide/fixing).

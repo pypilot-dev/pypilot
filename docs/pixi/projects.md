@@ -25,7 +25,8 @@ If the selected environment does not exist in the manifest, doctor says so, name
 
 | You run | PyPilot runs |
 |---|---|
-| `pypilot setup`, **Fix environment** | `pixi install` |
+| `pypilot setup` | `pixi install` |
+| `pypilot doctor --fix`, **Fix environment** | `pixi add python=X.Y` when doctor asks for it, or a prefix repair; nothing for a healthy project |
 | `pypilot install httpx`, an import quick fix | `pixi add --pypi httpx` |
 | `pypilot fix python`, the "recreate on Python X.Y" quick fix | `pixi add python=X.Y` |
 | `pypilot fix cuda` | nothing: pixi projects are never re-pinned to a PyTorch index |

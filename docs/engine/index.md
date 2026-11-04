@@ -8,12 +8,13 @@ pypilot <MODE> [ARG] [--path <dir>]
 
 | Mode | Changes things? | Does |
 |---|---|---|
-| [`doctor`](./commands#doctor) | no | Environment and compatibility report (the default mode); `--fix` <Badge type="tip" text="1.3" /> then runs the fixes the findings call for |
+| [`doctor`](./commands#doctor) | no | Environment and compatibility report (the default mode); `--fix` <Badge type="tip" text="1.3" /> then runs only the fixes the findings call for (see [What doctor --fix fixes](/guide/fixing)) |
 | [`check <package>`](./commands#check) | no | Can this package run on this project's Python? |
 | [`explain [package]`](./commands#explain) <Badge type="tip" text="1.3" /> | no | Why these Pythons: `requires_python` vs wheels per platform |
 | [`setup`](./commands#setup) | yes | Build the environment on the recommended Python |
 | [`install <package>`](./commands#install) | yes | Install one package and record it in the manifest |
 | [`fix python`](./commands#fix-python) | yes | Rebuild the environment on the right Python |
+| [`fix requirements`](./commands#fix-requirements) <Badge type="tip" text="1.4" /> | yes | Fix requirement mistakes and add undeclared imports |
 | [`fix cuda`](./commands#fix-cuda) | yes | Re-pin torch/tensorflow to the build for your driver |
 | [`update-data`](./commands#update-data) | cache only | Refresh the bundled data tables now; `--check` <Badge type="tip" text="1.3" /> only compares |
 | [`migrate-conda`](./commands#migrate-conda) | writes a file | `environment.yml` to `pyproject.toml` (or `pixi.toml` <Badge type="tip" text="1.3" />) |

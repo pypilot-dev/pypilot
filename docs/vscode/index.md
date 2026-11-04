@@ -21,8 +21,8 @@ A **PyPilot** item sits to the left of the Python interpreter picker:
 | Shows | Meaning | Click |
 |---|---|---|
 | `✓ PyPilot` | Environment looks good | Opens the doctor report |
-| `⚠ PyPilot: …` (warning background) | Something needs attention | Runs setup |
-| `⊗ PyPilot: …` (error background) | Environment error | Runs setup |
+| `⚠ PyPilot: …` (warning background) | Something needs attention | Runs Fix environment (`doctor --fix`) |
+| `⊗ PyPilot: …` (error background) | Environment error | Runs Fix environment (`doctor --fix`) |
 | `PyPilot: checking…` (spinning) | Scan in progress | none |
 | `⚠ PyPilot`, no command | The engine could not be found or downloaded | See the error notification |
 

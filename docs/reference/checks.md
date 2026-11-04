@@ -6,7 +6,7 @@ Every finding PyPilot can raise, as `doctor` prints it and as the editor shows i
 
 | Finding | Severity | Fix |
 |---|---|---|
-| No environment set up yet | Warning | **Fix environment** / `pypilot setup` on the recommended Python |
+| No environment set up yet | Warning | **Fix environment** (`pypilot doctor --fix` runs setup when there is no environment) / `pypilot setup` on the recommended Python |
 | Python X.Y is not supported by this project | Error | **Fix environment** / `pypilot fix python` |
 | Dependencies conflict on Python version | Error | Manual: no single Python works. `pypilot explain` shows what blocks each version |
 | Could not resolve `name` | Warning | Manual: a typo or a private package. PyPI answered that it has no such project, or no release matches the pin |
