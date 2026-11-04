@@ -176,7 +176,8 @@ The helper binary also runs directly in any shell:
 
 ```
 pypilot doctor            Inspect the environment and print a status report
-                          (--fix then runs setup, like the editor's Fix environment)
+                          (--fix applies only the fixes the findings call for, like
+                          the editor's Fix environment)
 pypilot setup             Configure the virtual environment and install dependencies
 pypilot check <package>   Check whether a package runs on the current Python version
                           (accepts a requirement, e.g. mediapipe==0.10.14)
@@ -185,6 +186,8 @@ pypilot explain [pkg]     Show why: requires_python vs the wheels per platform f
 pypilot install <pkg>     Install a package and update the project manifest
 pypilot fix python        Rebuild the virtual environment on a compatible Python version
 pypilot fix cuda          Re-pin torch and tensorflow to the system driver build
+pypilot fix requirements  Fix obvious mistakes in requirements.txt and add undeclared
+                          imports (yaml to PyYAML, sklearn to scikit-learn)
 pypilot update-data       Update the bundled driver and framework data tables
                           (--check: compare with main without writing; exit 0 current,
                           1 stale, 2 network error)
@@ -199,7 +202,7 @@ pypilot version           Engine version, commit, target and data tables
 pypilot lsp               Start the language server (launched automatically by Zed)
 ```
 
-`explain`, `migrate-to-pixi`, `install-pixi`, `logs`, `completions` and `version`, `doctor --fix`, `update-data --check`, `migrate-conda --to pixi` and the options below are new in 1.3.0.
+`explain`, `migrate-to-pixi`, `install-pixi`, `logs`, `completions` and `version`, `doctor --fix`, `update-data --check`, `migrate-conda --to pixi` and the options below are new in 1.3.0. `fix requirements` and the targeted `doctor --fix` are new in 1.4.0.
 
 - `--json` on every mode but `lsp`: one stable JSON document on stdout, for scripts and bug reports. Fields are only ever added, never renamed or removed; they are listed in [USAGE.md](USAGE.md#json-output).
 - `--markdown` on `doctor` and `check`: the editor's report, ready to paste into an issue.
@@ -211,6 +214,21 @@ pypilot lsp               Start the language server (launched automatically by Z
 More in [USAGE.md](USAGE.md) and the [command reference](https://pypilot-dev.github.io/pypilot/engine/commands).
 
 Running `pypilot doctor` or `pypilot setup` from a Zed task also writes a request file to the cache directory. The running language server reads this file and presents the results as interactive editor notifications.
+
+### What `doctor --fix` does
+
+Since 1.4.0 `doctor --fix` fixes what is wrong and nothing else. It does not rebuild the environment for every problem.
+
+- A healthy project is left alone.
+- Each finding gets its own fix: `uv sync --locked` for drift or a missing package, `uv lock` for a stale lock, a reinstall of one half-installed package, a repair of a damaged venv on the Python it had, a higher `requires-python`, or an edit to one requirement.
+- The Python moves only when a dependency forces it, and the output names that dependency. An existing `.python-version` pin wins otherwise. The Python a fix picks is written to `.python-version`.
+- Every file PyPilot edits is named. An edit that leaves the project unresolvable is rolled back.
+- Conflicts are resolved before anything changes: an unsatisfiable pin gets a relaxed pin that uv has checked, a typo gets "did you mean", a version that does not exist gets the nearest releases, and a package with no build for this OS gets an environment marker.
+- Known breakages come from `known_breakages.json`, a data table refreshed like the others: compiled packages that break under numpy 2, uncapped dependencies that later removed an API, packages that shadow each other, yanked pins, stdlib modules removed in newer Pythons, and removed APIs your own code uses (reported by file and line, with the replacement). PyPilot never edits your source code.
+- If `requires-python` can never be met (`>=3.16`), it is reported as an error and nothing is built.
+- pixi, conda `environment.yml`, Poetry and `venv/` or `env/` projects are fixed with their own tools.
+
+`--dry-run` lists exactly what the real run does. See [What doctor --fix fixes](https://pypilot-dev.github.io/pypilot/guide/fixing) for the full table. In a test of 54 deliberately broken environments, 45 got the right targeted fix, none got a wrong one and none were missed.
 
 ## Configuration
 
