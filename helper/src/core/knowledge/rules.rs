@@ -690,8 +690,9 @@ fn python_finding(rule: &PythonRemoval, ctx: &Context) -> Option<Finding> {
             })
             .unwrap_or_default();
         detail.push_str(&format!(
-            " No release of {} fixes it. Fix: rebuild the environment on Python {last}, the last it works on, which the project's requires-python and .python-version allow; this is the smaller change, since the code stays as it is.{other}",
-            rule.package
+            " No release of {} fixes it. Fix: rebuild the environment on Python {last}, the last it works on, {}; this is the smaller change, since the code stays as it is.{other}",
+            rule.package,
+            allowed_by(ctx)
         ));
         ctx.fix(FixKind::RecreateWithPython(last))
     } else {
@@ -726,6 +727,18 @@ fn python_finding(rule: &PythonRemoval, ctx: &Context) -> Option<Finding> {
         detail,
         fix,
     })
+}
+
+/// What lets the project move to another Python, naming only the files that
+/// exist: "which the project's requires-python allows" with no
+/// `.python-version`, and so on.
+fn allowed_by(ctx: &Context) -> String {
+    match (ctx.requires_python.is_some(), ctx.python_pin.is_some()) {
+        (true, true) => "which the project's requires-python and .python-version allow".into(),
+        (true, false) => "which the project's requires-python allows".into(),
+        (false, true) => "which the project's .python-version allows".into(),
+        (false, false) => "which nothing in the project rules out".into(),
+    }
 }
 
 fn installed_only(ctx: &Context, names: &[&str]) -> Vec<String> {

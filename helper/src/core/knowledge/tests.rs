@@ -310,6 +310,11 @@ fn packages_dead_on_new_python_get_upgrade_or_replacement() {
         FixKind::RecreateWithPython(PyVersion::py3(11))
     );
     assert!(found[0].detail.contains("pytest") && found[0].detail.contains("3.11"));
+    // No .python-version exists, so the reason names requires-python alone.
+    assert!(found[0]
+        .detail
+        .contains("which the project's requires-python allows;"));
+    assert!(!found[0].detail.contains(".python-version"));
 
     // .python-version pins 3.12, or requires-python excludes 3.11: advice only.
     ctx.python_pin = Some(PyVersion::py3(12));
