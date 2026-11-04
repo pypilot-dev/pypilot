@@ -1091,11 +1091,13 @@ fn incompat_reason(compat: &CompatReport, current: PyVersion, target: Option<PyV
     } else {
         names.join(", ")
     };
+    // One package "does not", several (or "some dependencies") "do not".
+    let verb = if names.len() == 1 { "does" } else { "do" };
     match target {
         Some(t) => format!(
-            "{who} do not support Python {current}. Recreate the environment with Python {t}."
+            "{who} {verb} not support Python {current}. Recreate the environment with Python {t}."
         ),
-        None => format!("{who} do not support Python {current}."),
+        None => format!("{who} {verb} not support Python {current}."),
     }
 }
 
@@ -1199,6 +1201,23 @@ mod tests {
             packages: vec![Requirement::any("mediapipe")],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn the_unsupported_python_reason_agrees_with_the_number_of_packages() {
+        // A s4: one package "does not", two "do not".
+        let one = report(vec![analysis("numpy", &[8, 9, 10, 11])]);
+        let why = incompat_reason(&one, PyVersion::py3(12), Some(PyVersion::py3(11)));
+        assert!(
+            why.contains("numpy 1.0 (supports 3.8–3.11) does not support Python 3.12."),
+            "{why}"
+        );
+        let two = report(vec![
+            analysis("numpy", &[8, 9, 10, 11]),
+            analysis("pandas", &[9, 10, 11]),
+        ]);
+        let why = incompat_reason(&two, PyVersion::py3(12), None);
+        assert!(why.contains(") do not support Python 3.12."), "{why}");
     }
 
     #[test]

@@ -1009,7 +1009,7 @@ mod tests {
         let mut findings = vec![Finding {
             severity: Severity::Error,
             title: "Python 3.13 is not supported by this project".into(),
-            detail: "gdal (supports 3.10-3.12) do not support Python 3.13.".into(),
+            detail: "gdal (supports 3.10-3.12) does not support Python 3.13.".into(),
             fix: FixKind::RecreateWithPython(PyVersion::py3(12)),
         }];
         advise(
