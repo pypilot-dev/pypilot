@@ -538,7 +538,11 @@ async fn install_deps_uv(
     let has_pyproject = exec::exists(&workspace.join("pyproject.toml"));
     let requirements = workspace.join("requirements.txt");
 
-    if has_pyproject && requirements.is_file() {
+    // `uv add -r` rewrites the pyproject.toml entry of every package it
+    // names, so requirements.txt lines for packages pyproject.toml already
+    // declares are left out rather than allowed to replace its pins.
+    let merge = crate::core::manifests::requirements_merge(workspace);
+    if has_pyproject && requirements.is_file() && !merge.overlaps {
         // If requirements.txt exists and pyproject.toml exists (whether newly created by
         // `uv init` or pre-existing), add and resolve dependencies using `uv add -r requirements.txt`.
         match uv::add_requirements(uv_info, &requirements, None, workspace).await {
@@ -550,7 +554,22 @@ async fn install_deps_uv(
             Ok(out) => fail(summary, "uv add -r requirements.txt", out.stderr.trim()),
             Err(e) => fail(summary, "uv add -r requirements.txt", &e.to_string()),
         }
+    } else if has_pyproject && requirements.is_file() && !merge.extra.is_empty() {
+        note_kept_pins(summary, &merge);
+        let step = format!("uv add {}", merge.extra.join(" "));
+        match uv::add(uv_info, &merge.extra, None, workspace).await {
+            Ok(out) if out.success() => step_ok(
+                summary,
+                &step,
+                "requirements.txt's other packages added to pyproject.toml and installed",
+            ),
+            Ok(out) => fail(summary, &step, out.stderr.trim()),
+            Err(e) => fail(summary, &step, &e.to_string()),
+        }
     } else if has_pyproject {
+        if requirements.is_file() {
+            note_kept_pins(summary, &merge);
+        }
         // Use `uv sync` which reads pyproject.toml / uv.lock and installs the
         // declared dependencies.
         // `--python` keeps the venv just built: without a pin, uv may
@@ -686,6 +705,30 @@ async fn run_uv_pip_compat(
             "no manifest to install from",
         );
     }
+}
+
+/// Say that requirements.txt was not copied over pyproject.toml's pins, and
+/// which ones disagree. Non-fatal: pyproject.toml's are installed.
+fn note_kept_pins(summary: &mut SetupSummary, merge: &crate::core::manifests::RequirementsMerge) {
+    let detail = if merge.conflicts.is_empty() {
+        "pyproject.toml already declares requirements.txt's packages, so its constraints are installed and requirements.txt does not replace them".to_string()
+    } else {
+        let each: Vec<String> = merge
+            .conflicts
+            .iter()
+            .map(|c| {
+                format!(
+                    "{}{} (pyproject.toml has {})",
+                    c.name, c.requirements, c.pyproject
+                )
+            })
+            .collect();
+        format!(
+            "requirements.txt pins {}; pyproject.toml's pins were kept and installed. Update requirements.txt (`uv export --format requirements-txt --no-hashes -o requirements.txt`) or pyproject.toml so they agree",
+            each.join(", ")
+        )
+    };
+    soft_fail(summary, "requirements.txt not applied", &detail);
 }
 
 /// Run `uv pip freeze > requirements.txt` and record the step.

@@ -284,6 +284,47 @@ fn pin_conflict_finding(conflicts: &[PinConflict]) -> Option<Finding> {
     })
 }
 
+/// How requirements.txt relates to pyproject.toml when setup installs both.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RequirementsMerge {
+    /// Some requirements.txt package is already declared in pyproject.toml.
+    pub overlaps: bool,
+    /// requirements.txt lines for packages pyproject.toml does not declare,
+    /// as `uv add` arguments.
+    pub extra: Vec<String>,
+    /// Pins that disagree (see [`pin_conflicts`]).
+    pub conflicts: Vec<PinConflict>,
+}
+
+/// [`RequirementsMerge`] for the project at `workspace`. A pyproject.toml
+/// that does not exist yet (a dry run's `uv init`) declares nothing.
+pub fn requirements_merge(workspace: &Path) -> RequirementsMerge {
+    let Some(req) = read(&workspace.join("requirements.txt")) else {
+        return RequirementsMerge::default();
+    };
+    let py = read(&workspace.join("pyproject.toml")).unwrap_or_default();
+    let (declared, _) = project::parse_pyproject(&py);
+    let mut merge = RequirementsMerge {
+        conflicts: pin_conflicts(&py, &req),
+        ..RequirementsMerge::default()
+    };
+    for line in req.lines() {
+        let Some(r) = project::parse_requirement(line) else {
+            continue;
+        };
+        if declared.iter().any(|d| d.name == r.name) {
+            merge.overlaps = true;
+            continue;
+        }
+        let text = match line.find(" #") {
+            Some(i) => &line[..i],
+            None => line,
+        };
+        merge.extra.push(text.trim().to_string());
+    }
+    merge
+}
+
 // --- lock files ---------------------------------------------------------------
 
 /// Lock files PyPilot recognizes, and the tool that writes each.
@@ -742,6 +783,44 @@ mod tests {
             "requests is `==2.31.0` in pyproject.toml but `==2.25.0` in requirements.txt"
         ));
         assert!(pin_conflict_finding(&pin_conflicts(pyproject, "requests>=2\n")).is_none());
+    }
+
+    #[test]
+    fn requirements_never_replace_declared_pins() {
+        let dir = std::env::temp_dir().join(format!("pypilot-req-merge-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("requirements.txt"),
+            "requests==2.25.0
+pyyaml==5.4.1  # old
+attrs>=23
+-r more.txt
+",
+        )
+        .unwrap();
+        // No pyproject.toml yet (uv init in a dry run): everything is new.
+        let merge = requirements_merge(&dir);
+        assert!(!merge.overlaps);
+        assert_eq!(
+            merge.extra,
+            ["requests==2.25.0", "pyyaml==5.4.1", "attrs>=23"]
+        );
+
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]
+name = \"x\"
+dependencies = [\"requests==2.31.0\", \"pyyaml==6.0.1\"]
+",
+        )
+        .unwrap();
+        let merge = requirements_merge(&dir);
+        assert!(merge.overlaps);
+        assert_eq!(merge.extra, ["attrs>=23"]);
+        let names: Vec<&str> = merge.conflicts.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["requests", "pyyaml"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
