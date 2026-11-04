@@ -134,6 +134,33 @@ fn a_required_python_outranks_a_repair_and_a_rebuild_drops_reinstalls() {
 }
 
 #[test]
+fn a_forced_python_is_pinned_unless_uv_would_pick_it_anyway() {
+    let py = |m| PyVersion::py3(m);
+    let forced = Rebuild {
+        python: Some(py(12)),
+        required: true,
+        reason: "Python 3.15 is not supported by this project".into(),
+    };
+    // A s4: no pin, uv's default is 3.15, the dependencies need 3.12: pin.
+    let why = pin_change(None, py(12), &forced, Some(py(15))).unwrap();
+    assert!(why.contains("wrote .python-version (3.12)"), "{why}");
+    assert!(why.contains("Python 3.15"), "{why}");
+    // uv picks 3.12 by itself: nothing to write.
+    assert_eq!(pin_change(None, py(12), &forced, Some(py(12))), None);
+    // uv finds no default: pin, to be sure.
+    assert!(pin_change(None, py(12), &forced, None).is_some());
+    // A pin moves only when a finding requires the new Python, and says so.
+    let why = pin_change(Some(py(9)), py(14), &forced, None).unwrap();
+    assert!(why.starts_with(".python-version: 3.9 -> 3.14, because:"));
+    let repair = Rebuild {
+        required: false,
+        ..forced.clone()
+    };
+    assert_eq!(pin_change(Some(py(11)), py(12), &repair, None), None);
+    assert_eq!(pin_change(Some(py(12)), py(12), &forced, None), None);
+}
+
+#[test]
 fn requirement_edits_are_planned_first_and_once() {
     let edit = FixKind::EditRequirement(crate::core::RequirementEdit {
         file: "pyproject.toml".into(),

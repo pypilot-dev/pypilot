@@ -674,23 +674,21 @@ async fn rebuild_env(
                 Ok(out) => return step(summary, "uv venv", false, out.stderr.trim()),
                 Err(e) => return step(summary, "uv venv", false, &e.to_string()),
             }
-            // Move the pin only when it disagrees with a version a finding
-            // requires; a repair keeps whatever the project pinned.
+            // Keep the next plain `uv sync` on this Python (A s4, E s04):
+            // see `pin_change`.
             let pin = assessment.probes.python_pin;
-            if mode == ResolvedMode::UvFull
-                && exec::exists(&workspace.join("pyproject.toml"))
-                && pin.is_some_and(|p| p != py)
-            {
-                let name = format!("uv python pin {py}");
-                let why = format!(
-                    ".python-version: {} -> {py}, because: {}",
-                    pin.map(|p| p.to_string()).unwrap_or_default(),
-                    rebuild.reason
-                );
-                match uv::pin(uv_info, py, workspace).await {
-                    Ok(out) if out.success() => step(summary, &name, true, &why),
-                    Ok(out) => step(summary, &name, false, out.stderr.trim()),
-                    Err(e) => step(summary, &name, false, &e.to_string()),
+            if mode == ResolvedMode::UvFull && exec::exists(&workspace.join("pyproject.toml")) {
+                let uv_default = match pin {
+                    None => uv::default_python(uv_info, workspace).await,
+                    Some(_) => None,
+                };
+                if let Some(why) = pin_change(pin, py, rebuild, uv_default) {
+                    let name = format!("uv python pin {py}");
+                    match uv::pin(uv_info, py, workspace).await {
+                        Ok(out) if out.success() => step(summary, &name, true, &why),
+                        Ok(out) => step(summary, &name, false, out.stderr.trim()),
+                        Err(e) => step(summary, &name, false, &e.to_string()),
+                    }
                 }
             }
         }
@@ -719,6 +717,40 @@ async fn rebuild_env(
                 Ok(out) => step(summary, "python -m venv", false, out.stderr.trim()),
                 Err(e) => step(summary, "python -m venv", false, &e.to_string()),
             }
+        }
+    }
+}
+
+/// Whether a rebuild on `py` writes `.python-version`, and the step's
+/// detail when it does. uv rebuilds `.venv` on whatever the pin asks for,
+/// else on its own default (`uv_default`, a global `uv python pin` or the
+/// first Python it finds), so a rebuild on any other Python lasts only until
+/// the next plain `uv sync` unless it is pinned, as setup does. An existing
+/// pin moves only when a finding requires the new Python; a plain repair
+/// keeps what the project pinned.
+fn pin_change(
+    pin: Option<PyVersion>,
+    py: PyVersion,
+    rebuild: &Rebuild,
+    uv_default: Option<PyVersion>,
+) -> Option<String> {
+    match pin {
+        Some(p) if p == py => None,
+        Some(p) if rebuild.required => Some(format!(
+            ".python-version: {p} -> {py}, because: {}",
+            rebuild.reason
+        )),
+        Some(_) => None,
+        None if uv_default == Some(py) => None,
+        None => {
+            let otherwise = match uv_default {
+                Some(d) => format!("uv's default here, Python {d}"),
+                None => "another Python".to_string(),
+            };
+            Some(format!(
+                "wrote .python-version ({py}), because: {}; without it a plain `uv sync` would move the environment to {otherwise}",
+                rebuild.reason
+            ))
         }
     }
 }

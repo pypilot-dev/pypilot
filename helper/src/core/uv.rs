@@ -509,6 +509,24 @@ pub async fn pin(uv: &UvInfo, version: PyVersion, cwd: &Path) -> crate::Result<O
     .await
 }
 
+/// The Python uv uses for this project when nothing pins one locally:
+/// `uv python find --system --show-version`, which follows a global
+/// `uv python pin` and the project's requires-python but not its `.venv`.
+/// `None` when uv finds none. Read-only, so it runs in a dry run too.
+pub async fn default_python(uv: &UvInfo, cwd: &Path) -> Option<PyVersion> {
+    let out = command::run(
+        &uv.path,
+        &["python", "find", "--system", "--show-version"],
+        Some(cwd),
+    )
+    .await
+    .ok()?;
+    if !out.success() {
+        return None;
+    }
+    out.stdout.lines().next().and_then(PyVersion::parse)
+}
+
 /// `uv add <pkgs...>` and migrate any existing `requirements.txt` entries.
 ///
 /// When a `requirements.txt` exists alongside the newly-created `pyproject.toml`,
