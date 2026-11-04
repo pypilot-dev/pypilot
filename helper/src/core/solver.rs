@@ -114,7 +114,13 @@ pub async fn assess<S: MetadataSource>(
     let compat = if project.packages.is_empty() {
         None
     } else {
-        Some(pypi::analyze(source, Platform::current(), &project.packages).await)
+        let mut report = pypi::analyze(source, Platform::current(), &project.packages).await;
+        // An existing venv: a version range is judged by the release the
+        // installer picks on its Python, not by the newest release.
+        if let Some(py) = probes.venv.as_ref().and_then(|v| v.python) {
+            pypi::fit_report_to_python(source, &mut report, &project.packages, py).await;
+        }
+        Some(report)
     };
 
     // Hardware advice only makes sense for packages that can be installed here.

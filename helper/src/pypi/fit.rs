@@ -127,6 +127,48 @@ pub async fn fit_ranges<S: MetadataSource>(
     changed
 }
 
+/// For an environment that already runs `python`: replace the analysis of
+/// each dependency with an explicit, non-exact range that excludes it by
+/// the newest older release of the range that supports it. `requirements[i]`
+/// is the requirement behind `per_package[i]` (`None` when unknown).
+/// Returns whether anything changed.
+pub async fn fit_to_python<S: MetadataSource>(
+    source: &S,
+    platform: Platform,
+    requirements: &[Option<Requirement>],
+    per_package: &mut [PackageAnalysis],
+    python: crate::pypi::pyversion::PyVersion,
+) -> bool {
+    let mut changed = false;
+    for (current, req) in per_package.iter_mut().zip(requirements) {
+        let Some(req) = req else {
+            continue;
+        };
+        if req.spec.trim().is_empty()
+            || is_exact_pin(&req.spec)
+            || current.no_files_for_platform
+            || current.supported.contains(python)
+        {
+            continue;
+        }
+        let Ok(latest) = source.fetch(&req.name).await else {
+            continue;
+        };
+        for version in candidates(&latest.versions, &req.spec, &current.version) {
+            let Ok(meta) = source.fetch_version(&req.name, &version).await else {
+                continue;
+            };
+            let analysis = meta.analyze(&platform);
+            if !analysis.no_files_for_platform && analysis.supported.contains(python) {
+                *current = analysis;
+                changed = true;
+                break;
+            }
+        }
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

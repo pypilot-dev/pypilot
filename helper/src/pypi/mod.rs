@@ -184,6 +184,22 @@ pub async fn analyze<S: MetadataSource>(
         fit::fit_ranges(source, platform, &fitted_from, &mut per_package).await;
     }
 
+    let (intersection, conflicts) = summarize(&per_package);
+
+    CompatReport {
+        platform,
+        per_package,
+        unresolved,
+        unreachable,
+        intersection,
+        conflicts,
+        sdist_warnings,
+    }
+}
+
+/// The shared Python set of `per_package`, and the conflicting pairs when
+/// there is none.
+fn summarize(per_package: &[PackageAnalysis]) -> (PyVersionSet, Vec<ConflictPair>) {
     let intersection = per_package
         .iter()
         .map(|p| p.supported.clone())
@@ -208,15 +224,48 @@ pub async fn analyze<S: MetadataSource>(
     } else {
         Vec::new()
     };
+    (intersection, conflicts)
+}
 
-    CompatReport {
+/// Re-judge `report` for an environment that already runs `python`: each
+/// dependency with a version range that excludes it is judged by the
+/// newest release of its range that supports it, as the installer in that
+/// environment picks. `numpy>=2` on a 3.11 venv is numpy 2.3, not the
+/// newest numpy that needs 3.12. Exact pins and unconstrained dependencies
+/// keep their release. Does nothing when `python` is already supported.
+pub async fn fit_report_to_python<S: MetadataSource>(
+    source: &S,
+    report: &mut CompatReport,
+    packages: &[Requirement],
+    python: PyVersion,
+) {
+    if report.is_compatible(python) {
+        return;
+    }
+    let requirements: Vec<Option<Requirement>> = report
+        .per_package
+        .iter()
+        .map(|a| {
+            let key = crate::core::project::normalize_name(&a.name);
+            packages
+                .iter()
+                .find(|r| crate::core::project::normalize_name(&r.name) == key)
+                .cloned()
+        })
+        .collect();
+    let platform = report.platform;
+    if fit::fit_to_python(
+        source,
         platform,
-        per_package,
-        unresolved,
-        unreachable,
-        intersection,
-        conflicts,
-        sdist_warnings,
+        &requirements,
+        &mut report.per_package,
+        python,
+    )
+    .await
+    {
+        let (intersection, conflicts) = summarize(&report.per_package);
+        report.intersection = intersection;
+        report.conflicts = conflicts;
     }
 }
 
@@ -547,6 +596,46 @@ mod tests {
         src.insert("numpy==2.4.0", n24);
         let report = analyze(&src, linux(), &pinned).await;
         assert_eq!(report.conflicts.len(), 1);
+    }
+
+    /// C s5 after its fix: `numpy>=2` in a 3.11 venv. The newest numpy needs
+    /// 3.12, but the venv's installer picks numpy 2.2, so 3.11 is fine and no
+    /// rebuild is called for. Unconstrained and exact requirements keep the
+    /// release they resolved to.
+    #[tokio::test]
+    async fn an_existing_venv_judges_a_range_by_its_own_python() {
+        let mut src = FixtureSource::new();
+        let mut numpy = pkg(
+            "numpy",
+            Some(">=3.12"),
+            vec![wheel("numpy-2.4.0-cp312-cp312-manylinux_2_17_x86_64.whl")],
+        );
+        numpy.info.version = "2.4.0".into();
+        numpy.versions = ["2.2.6", "2.4.0"].map(String::from).to_vec();
+        src.insert("numpy", numpy);
+        let mut n22 = pkg(
+            "numpy",
+            Some(">=3.10"),
+            vec![wheel("numpy-2.2.6-cp311-cp311-manylinux_2_17_x86_64.whl")],
+        );
+        n22.info.version = "2.2.6".into();
+        src.insert("numpy==2.2.6", n22);
+
+        let range = [Requirement {
+            name: "numpy".into(),
+            spec: ">=2".into(),
+        }];
+        let mut report = analyze(&src, linux(), &range).await;
+        assert!(!report.is_compatible(PyVersion::py3(11)));
+        fit_report_to_python(&src, &mut report, &range, PyVersion::py3(11)).await;
+        assert!(report.is_compatible(PyVersion::py3(11)));
+        assert_eq!(report.per_package[0].version, "2.2.6");
+
+        // Unconstrained: still judged by the newest release.
+        let any = [Requirement::any("numpy")];
+        let mut report = analyze(&src, linux(), &any).await;
+        fit_report_to_python(&src, &mut report, &any, PyVersion::py3(11)).await;
+        assert!(!report.is_compatible(PyVersion::py3(11)));
     }
 
     #[tokio::test]
