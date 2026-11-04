@@ -17,7 +17,8 @@ The last column is the `fix.kind` value in the [JSON output](/engine/output).
 
 | Problem | What PyPilot does | Fix kind |
 |---|---|---|
-| Damaged venv (broken interpreter, system site-packages leaking in, `VIRTUAL_ENV` pointing at another project) | Repairs the venv on the Python it already had | `repair_environment` |
+| Damaged venv (broken interpreter, missing `pyvenv.cfg`, system site-packages leaking in) | Repairs the venv on the Python it already had | `repair_environment` |
+| `VIRTUAL_ENV` pointing at another project | Says so; the shell setting is yours to change | `manual` |
 | Venv in `venv/` or `env/` | Fixes it in place | `repair_environment` |
 | Package missing or drifted from the lock | `uv sync --locked` | `sync_environment` |
 | Package half-installed | Reinstalls only that package | `reinstall_packages` |
@@ -32,15 +33,15 @@ The last column is the `fix.kind` value in the [JSON output](/engine/output).
 | Uncapped dependency that later removed an API (markupsafe/jinja2, werkzeug/flask, itsdangerous/flask, urllib3/requests-toolbelt, sqlalchemy/flask-sqlalchemy, importlib-metadata/flake8, setuptools 82 and `pkg_resources`) | Reports it and edits the requirement, then re-resolves | `edit_requirement` |
 | Packages that shadow each other or the standard library (`jwt` and `PyJWT`, `enum34`, `typing`) | Replaces the package with the right distribution | `replace_dist` |
 | Yanked pin | Edits the requirement | `edit_requirement` |
-| Stdlib module removed in a newer Python (`distutils`, `imp`, the 3.13 removals) | Reports the module and the Python that removed it | none (report only) |
-| Removed API used in your own code (`np.float`, `collections.Mapping`, `asyncio.coroutine`, `pydantic.BaseSettings`, SQLAlchemy 2 `engine.execute`, pandas 2 `DataFrame.append`) | Reports file, line and the replacement | none (report only) |
+| Stdlib module removed in a newer Python (`distutils`, `imp`, the 3.13 removals) | Names the Python that removed it and adds the replacement package where there is one (`setuptools` for `distutils`). A dead package with no replacement (nose on 3.12) gets a Python that still has the module, when the project allows it | `add_requirements`, `edit_requirement` or `recreate_with_python` |
+| Removed API used in your own code (`np.float`, `collections.Mapping`, `asyncio.coroutine`, `pydantic.BaseSettings`, SQLAlchemy 2 `engine.execute`, pandas 2 `DataFrame.append`) | Reports file, line and the code to write instead, and keeps reporting it until the code changes. Adds a package when the replacement needs one (`pydantic-settings`) | `manual`, or `add_requirements` |
 | Import with no declared package (`yaml`, `sklearn`) | Adds the right distribution (PyYAML, scikit-learn) | `add_requirements` |
-| Obvious mistake in a `requirements.txt` line | Fixes the line. Reports the rest by line number | `add_requirements` |
+| Obvious mistake in a `requirements.txt` line (`requests=2.31`) | Fixes the line. Reports the rest by line number | `edit_requirement` |
 | pixi project, wrong Python or broken prefix | Applies `pixi add python=X.Y`, repairs the prefix | see the output |
 | conda `environment.yml` | Moves to pixi and keeps its Python | `migrate_conda_to_pixi` |
 | Poetry project | Reads `^`/`~` constraints and groups, installs with Poetry | `poetry_install` |
 
-`pypilot fix requirements` runs the requirements.txt and undeclared-import fixes on their own. `requirements.txt` no longer overwrites `pyproject.toml` pins. A disagreement between them is reported.
+`pypilot fix requirements` applies only doctor's requirement edits, without touching the environment. `requirements.txt` no longer overwrites `pyproject.toml` pins. A disagreement between them is reported.
 
 ## Known breakages
 
@@ -54,4 +55,4 @@ Some breakages do not show in package metadata. They live in the `known_breakage
 
 ## How well it works
 
-PyPilot was run on 54 deliberately broken environments. 45 got the right targeted fix, none got a wrong one and none were missed. Version 1.3.0 got 13 right, 9 wrong and 21 missed on the same set.
+PyPilot was run on 54 deliberately broken environments. 45 got the right targeted fix, none got a wrong one and none were missed. Before these changes, the same set had 13 right, 9 wrong and 21 missed.
