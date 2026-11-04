@@ -198,6 +198,8 @@ fn pixi_sentence(
     } else {
         format!("with its native libraries ({})", row.system_libs.join(", "))
     };
+    let version = row.version_for(platform);
+    let lag = lag_note(row, platform);
     let sentence = match row.availability(platform, python) {
         Availability::No => return None,
         Availability::Yes => {
@@ -206,19 +208,28 @@ fn pixi_sentence(
                 .map(|py| format!(" and Python {py}"))
                 .unwrap_or_default();
             format!(
-                "pixi installs {what} {} from conda-forge {libs}, built for {subdir}{on_py}.",
-                row.version
+                "pixi installs {what} {version} from conda-forge {libs}, built for {subdir}{on_py}{lag}."
             )
         }
         Availability::OtherPythons(pys) => format!(
-            "pixi installs {what} {} from conda-forge {libs}, built for {subdir} with Python {}.",
-            row.version,
+            "pixi installs {what} {version} from conda-forge {libs}, built for {subdir} with Python {}{lag}.",
             PyVersionSet::from_versions(pys).to_range_string()
         ),
     };
     Some(format!(
         "{sentence} Run `{MIGRATE_COMMAND}` to set the project up with pixi."
     ))
+}
+
+/// " (0.5.14 is not built for linux-64 yet)" when the newest conda-forge
+/// release has not reached this platform, so pixi installs an older one.
+fn lag_note(row: &CondaPackage, platform: Platform) -> String {
+    match (row.lagging_version(platform), conda_subdir(platform)) {
+        (Some(_), Some(subdir)) => {
+            format!(" ({} is not built for {subdir} yet)", row.version)
+        }
+        _ => String::new(),
+    }
 }
 
 fn nvcc_sentence(row: &CondaPackage, machine: &Machine) -> String {
@@ -433,8 +444,10 @@ pub fn check_advice(
             ),
         };
         Some(format!(
-            "conda-forge: {} {} available for {subdir}{pythons} → {MIGRATE_COMMAND}",
-            row.conda, row.version
+            "conda-forge: {} {} available for {subdir}{pythons}{} → {MIGRATE_COMMAND}",
+            row.conda,
+            row.version_for(machine.platform),
+            lag_note(row, machine.platform)
         ))
     });
     CheckAdvice {
@@ -1176,6 +1189,59 @@ mod tests {
             vec!["no wheel for Linux x64: pip and uv build it from source"]
         );
         assert_eq!(unknown.alternative, None);
+    }
+
+    #[test]
+    fn a_release_still_uploading_names_the_version_pixi_installs_here() {
+        let t = CondaForgeTable::load(
+            r#"{"packages": [{
+                "pypi": "lap", "conda": "lap", "version": "0.5.14",
+                "builds": [
+                    {"platform": "linux-64", "python": ["3.12", "3.13"], "version": "0.5.13"},
+                    {"platform": "win-64", "python": ["3.12", "3.13"]}
+                ],
+                "why": "its source build needs a C++ compiler"
+            }]}"#,
+        )
+        .unwrap();
+        let compat = report(vec![sdist("lap", "0.5.14")]);
+        let mut findings = vec![generic_sdist("lap", "0.5.14")];
+        advise(
+            &mut findings,
+            &t,
+            Some(&compat),
+            &machine(None),
+            &RepoScan::default(),
+        );
+        let f = &findings[0];
+        assert_eq!(f.fix, FixKind::MigrateToPixi, "{findings:#?}");
+        assert!(
+            f.detail.contains(
+                "pixi installs lap 0.5.13 from conda-forge prebuilt, built for linux-64 and Python 3.13 (0.5.14 is not built for linux-64 yet)."
+            ),
+            "{}",
+            f.detail
+        );
+
+        let advice = check_advice(&sdist("lap", "0.5.14"), &t, &machine(Some(13)));
+        assert_eq!(
+            advice.alternative.as_deref(),
+            Some("conda-forge: lap 0.5.13 available for linux-64/python 3.13 (0.5.14 is not built for linux-64 yet) → pypilot migrate-to-pixi")
+        );
+
+        // On a platform the newest release has reached, nothing changes.
+        let win = Machine {
+            platform: Platform {
+                os: Os::Windows,
+                arch: Arch::X86_64,
+            },
+            ..machine(Some(13))
+        };
+        let advice = check_advice(&sdist("lap", "0.5.14"), &t, &win);
+        assert_eq!(
+            advice.alternative.as_deref(),
+            Some("conda-forge: lap 0.5.14 available for win-64/python 3.13 → pypilot migrate-to-pixi")
+        );
     }
 
     // --- build failures (recorded installer output) --------------------------

@@ -30,7 +30,9 @@ pub struct CondaPackage {
     pub pypi: String,
     /// conda-forge package name (`pytables` for `tables`).
     pub conda: String,
-    /// Newest conda-forge version when the table was generated.
+    /// Newest conda-forge version when the table was generated. A platform
+    /// whose build of it has not landed yet names its own version
+    /// ([`CondaPackage::version_for`]).
     pub version: String,
     builds: Vec<Build>,
     /// conda-forge names of the native libraries it needs.
@@ -51,6 +53,11 @@ struct Build {
     /// CPython minors built for. Empty: not tied to a Python ABI.
     #[serde(default)]
     python: Vec<String>,
+    /// The version these builds are of, when it is not the row's newest
+    /// (conda-forge uploads a release platform by platform, and pixi
+    /// installs the previous one until it lands). Absent in older tables.
+    #[serde(default)]
+    version: Option<String>,
 }
 
 /// What a failed build can name, and the conda-forge package providing it.
@@ -177,6 +184,26 @@ impl CondaPackage {
             .unwrap_or_default()
     }
 
+    /// The version pixi installs on `platform`: the row's newest unless the
+    /// table names an older one for this platform.
+    pub fn version_for(&self, platform: Platform) -> &str {
+        self.lagging_version(platform).unwrap_or(&self.version)
+    }
+
+    /// The version built for `platform` when it is older than the newest
+    /// one (the newest has no build there yet).
+    pub fn lagging_version(&self, platform: Platform) -> Option<&str> {
+        if self.builds.iter().any(|b| b.platform == "noarch") {
+            return None;
+        }
+        let subdir = conda_subdir(platform)?;
+        self.builds
+            .iter()
+            .find(|b| b.platform == subdir)
+            .and_then(|b| b.version.as_deref())
+            .filter(|v| *v != self.version)
+    }
+
     /// The conda platforms it is built for (`noarch` for pure packages).
     pub fn platforms(&self) -> Vec<&str> {
         self.builds.iter().map(|b| b.platform.as_str()).collect()
@@ -233,6 +260,41 @@ mod tests {
         };
         let fa = t.get("flash-attn").unwrap();
         assert_eq!(fa.availability(mac, None), Availability::No);
+    }
+
+    const MID_UPLOAD: &str = r#"{"packages": [{
+        "pypi": "lap", "conda": "lap", "version": "0.5.14",
+        "builds": [
+            {"platform": "linux-64", "python": ["3.10", "3.13"], "version": "0.5.13"},
+            {"platform": "osx-arm64", "python": ["3.11", "3.13"], "version": "0.5.14"},
+            {"platform": "win-64", "python": ["3.11"]}
+        ]
+    }]}"#;
+
+    #[test]
+    fn a_platform_the_newest_release_has_not_reached_keeps_its_older_build() {
+        let t = CondaForgeTable::load(MID_UPLOAD).unwrap();
+        let lap = t.get("lap").unwrap();
+        assert_eq!(lap.availability(linux(), None), Availability::Yes);
+        assert_eq!(
+            lap.availability(linux(), Some(PyVersion::py3(13))),
+            Availability::Yes
+        );
+        assert_eq!(lap.version_for(linux()), "0.5.13");
+        assert_eq!(lap.lagging_version(linux()), Some("0.5.13"));
+        // A build naming the newest version, or none, is the newest.
+        let mac = Platform {
+            os: Os::Macos,
+            arch: Arch::Aarch64,
+        };
+        let win = Platform {
+            os: Os::Windows,
+            arch: Arch::X86_64,
+        };
+        assert_eq!(lap.version_for(mac), "0.5.14");
+        assert_eq!(lap.lagging_version(mac), None);
+        assert_eq!(lap.version_for(win), "0.5.14");
+        assert_eq!(lap.lagging_version(win), None);
     }
 
     #[test]

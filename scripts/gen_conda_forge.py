@@ -13,8 +13,11 @@ painful. Everything else is looked up:
                     (https://github.com/prefix-dev/parselmouth), unless
                     PACKAGES overrides it
   version, builds   prefix.dev's GraphQL API (https://prefix.dev/api/graphql):
-                    the newest conda-forge version, the platforms it is built
-                    for and, per platform, the CPython minors of its builds
+                    the newest conda-forge version and, per platform, the
+                    CPython minors of the newest of the three newest versions
+                    built there (a release uploads platform by platform, and
+                    pixi installs the previous one where it has not landed);
+                    such a build names its version
 
 LIBRARIES maps what a failed build names (a missing header, a `*-config`
 tool, a pkg-config module, a shared library) to the conda-forge package that
@@ -413,21 +416,68 @@ def gql_str(s: str) -> str:
     return json.dumps(s)
 
 
-def latest_many(names: List[str]) -> Dict[str, Optional[Dict]]:
-    """name -> {version, platforms} (None when conda-forge has no such package).
-    Batched with aliases, 20 names per request (larger batches have been seen
-    to under-report platforms)."""
-    out: Dict[str, Optional[Dict]] = {}
-    for i in range(0, len(names), 20):
-        chunk = names[i:i + 20]
+# A platform counts as built when one of the newest RECENT_VERSIONS versions
+# has a build for it, and pixi installs the newest of those there. conda-forge
+# uploads a release platform by platform, so the newest version alone misses
+# platforms whose build is still in flight (pixi then installs the previous
+# release on them).
+RECENT_VERSIONS = 3
+# Versions asked for per package; sorted locally, so the API's order does not
+# matter as long as the newest RECENT_VERSIONS are among them.
+VERSIONS_FETCHED = 10
+
+
+def _conda_vpart(part: str) -> Tuple[int, Any]:
+    if part.isdigit():
+        return (2, int(part))
+    if part == "post":
+        return (3, 0)
+    if part == "dev":
+        return (0, 0)
+    return (1, part)
+
+
+def conda_vkey(version: str) -> Tuple:
+    """Sort key for conda versions: numeric parts compare as numbers, letters
+    (alpha, rc, ...) sort before numbers, `dev` first and `post` last."""
+    parts = re.findall(r"\d+|[a-zA-Z]+", version.lower().split("+")[0])
+    return tuple(_conda_vpart(p) for p in parts) + ((2, -1),)
+
+
+def recent_versions(versions: List[Dict]) -> List[Dict]:
+    """The newest RECENT_VERSIONS of `[{version, platforms}]`, newest first."""
+    ordered = sorted(versions, key=lambda v: conda_vkey(v["version"]), reverse=True)
+    return ordered[:RECENT_VERSIONS]
+
+
+def platform_versions(versions: List[Dict]) -> Dict[str, str]:
+    """Tracked platform -> the newest recent version built for it."""
+    out: Dict[str, str] = {}
+    for v in recent_versions(versions):
+        for plat in v.get("platforms") or []:
+            if plat in PLATFORMS:
+                out.setdefault(plat, v["version"])
+    return out
+
+
+def versions_many(names: List[str]) -> Dict[str, Optional[List[Dict]]]:
+    """name -> its newest versions as [{version, platforms}], newest first
+    (None when conda-forge has no such package). Batched with aliases, 10
+    names per request (larger batches have been seen to under-report
+    platforms)."""
+    out: Dict[str, Optional[List[Dict]]] = {}
+    for i in range(0, len(names), 10):
+        chunk = names[i:i + 10]
         fields = " ".join(
             f'p{j}: package(channelName: "conda-forge", name: {gql_str(n)}) '
-            f"{{ name latestVersion {{ version platforms }} }}"
+            f"{{ name versions(limit: {VERSIONS_FETCHED}, page: 0) "
+            f"{{ page {{ version platforms }} }} }}"
             for j, n in enumerate(chunk))
         data = graphql("{ " + fields + " }")
         for j, n in enumerate(chunk):
             pkg = data.get(f"p{j}")
-            out[n] = pkg["latestVersion"] if pkg else None
+            page = (pkg or {}).get("versions", {}).get("page") or []
+            out[n] = recent_versions(page) if pkg and page else None
     return out
 
 
@@ -452,8 +502,9 @@ def python_minor(depends: List[str], build: str) -> Optional[int]:
     return None
 
 
-def builds_for(conda: str, version: str, platforms: List[str]) -> List[Dict]:
-    """Per tracked platform, the CPython minors conda-forge builds `version` for."""
+def variant_pythons(conda: str, version: str) -> Tuple[Dict[str, set], bool]:
+    """Per tracked platform, the CPython minors conda-forge builds `version`
+    for, and whether it has a noarch build."""
     per: Dict[str, set] = {}
     noarch = False
     page = 0
@@ -476,13 +527,48 @@ def builds_for(conda: str, version: str, platforms: List[str]) -> List[Dict]:
         page += 1
         if page >= res["pages"]:
             break
-    if noarch and not per:
+    return per, noarch
+
+
+def builds_for(conda: str, versions: List[Dict]) -> List[Dict]:
+    """Per tracked platform, the CPython minors of the newest recent version
+    built there. A build whose version is not the newest overall carries it
+    as `version`."""
+    newest = versions[0]["version"]
+    cache: Dict[str, Tuple[Dict[str, set], bool]] = {}
+
+    def pythons(version: str) -> Tuple[Dict[str, set], bool]:
+        if version not in cache:
+            cache[version] = variant_pythons(conda, version)
+        return cache[version]
+
+    per_newest, noarch = pythons(newest)
+    if noarch and not per_newest:
         return [{"platform": "noarch", "python": []}]
+    # The variants list is the authority: the per-version platform lists
+    # have been seen to collapse to a single platform. So a platform counts
+    # from the variants of the newest version built there; the listing only
+    # fills in what the variants of the recent versions do not show.
+    confirmed = {plat: newest for plat in per_newest}
+    for older in versions[1:]:
+        if all(plat in confirmed for plat in PLATFORMS):
+            break
+        per_older, _ = pythons(older["version"])
+        for plat in per_older:
+            confirmed.setdefault(plat, older["version"])
+    chosen = platform_versions(versions)
+    chosen.update(confirmed)
     rows = []
     for plat in PLATFORMS:
-        if plat in per or plat in platforms:
-            rows.append({"platform": plat,
-                         "python": [f"3.{m}" for m in sorted(per.get(plat, set()))]})
+        version = chosen.get(plat)
+        if version is None:
+            continue
+        per, _ = pythons(version)
+        row: Dict[str, Any] = {"platform": plat,
+                               "python": [f"3.{m}" for m in sorted(per.get(plat, set()))]}
+        if version != newest:
+            row["version"] = version
+        rows.append(row)
     return rows
 
 
@@ -504,10 +590,10 @@ def main() -> int:
     lib_names = sorted({c for _k, _n, c in LIBRARIES}
                        | {lib for _p, _o, libs, _w, _f in PACKAGES for lib in libs})
     all_names = sorted({n for ns in candidates.values() for n in ns} | set(lib_names))
-    latest = latest_many(all_names)
+    latest = versions_many(all_names)
 
     missing_libs = [n for n in lib_names if latest.get(n) is None]
-    resolved: List[Tuple[str, str, Dict, Tuple]] = []
+    resolved: List[Tuple[str, str, List[Dict], Tuple]] = []
     dropped = []
     for row in PACKAGES:
         conda = next((n for n in candidates[row[0]] if latest.get(n)), None)
@@ -517,16 +603,16 @@ def main() -> int:
             resolved.append((row[0], conda, latest[conda], row))
 
     def work(item):
-        pypi, conda, info, row = item
-        return pypi, conda, info, row, builds_for(conda, info["version"], info["platforms"])
+        pypi, conda, versions, row = item
+        return pypi, conda, versions, row, builds_for(conda, versions)
 
     rows = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        for pypi, conda, info, (_, _o, libs, why, flags), builds in pool.map(work, resolved):
+        for pypi, conda, versions, (_, _o, libs, why, flags), builds in pool.map(work, resolved):
             entry: Dict[str, Any] = {
                 "pypi": pypi,
                 "conda": conda,
-                "version": info["version"],
+                "version": versions[0]["version"],
                 "builds": builds,
                 "system_libs": [lib for lib in libs if latest.get(lib)],
                 "why": why,
@@ -543,8 +629,10 @@ def main() -> int:
         "_comment": (
             "PyPI packages whose source build needs system libraries (or nvcc) pip and uv "
             "cannot install, and the conda-forge package that ships them; backs the \"pixi can "
-            "help here\" advisory. `builds` lists, per conda platform, the CPython minors "
-            "conda-forge builds `version` for (`noarch` = any). `libraries` maps what a failed "
+            "help here\" advisory. `version` is the newest conda-forge version; `builds` lists, "
+            "per conda platform, the CPython minors of the newest of the three newest versions "
+            "built there (`noarch` = any), naming that version as the build's `version` when it "
+            "is not the newest (a release still uploading). `libraries` maps what a failed "
             "build names (kind: header, tool, pkg-config, library) to the conda-forge package "
             "providing it. Generated by scripts/gen_conda_forge.py from prefix.dev "
             "(https://prefix.dev/api/graphql) and parselmouth "
