@@ -20,19 +20,7 @@ all-features = false
 # does not affect PyPilot and when to revisit it.
 unmaintained = "all"
 yanked = "deny"
-ignore = [
-    # zip 2.x: all three are in `ZipArchive::extract()` / the stream
-    # extraction API (SUID/SGID bits kept, symlinks outside the target,
-    # permissions applied through symlinks). PyPilot never calls those:
-    # helper/src/core/uv.rs `extract_zip` walks entries itself, skips any
-    # without an `enclosed_name()`, writes plain files with File::create and
-    # applies no mode bits or symlinks from the archive. It only opens the
-    # uv release archives that are .zip (the Windows builds). Fixed in
-    # zip >= 9; drop these entries when helper/Cargo.toml moves off zip 2.
-    { id = "RUSTSEC-2026-0367", reason = "only ZipArchive::extract is affected; uv.rs extracts entries manually" },
-    { id = "RUSTSEC-2026-0368", reason = "only ZipArchive::extract is affected; uv.rs never creates symlinks" },
-    { id = "RUSTSEC-2026-0369", reason = "only ZipArchive::extract is affected; uv.rs applies no archive permissions" },
-]
+ignore = []
 
 [licenses]
 # Permissive licenses only for third-party code. Every helper dependency is
