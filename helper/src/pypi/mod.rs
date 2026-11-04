@@ -269,6 +269,40 @@ pub async fn fit_report_to_python<S: MetadataSource>(
     }
 }
 
+/// A release already installed in a venv on `python` evidently installs
+/// there, whatever its wheel tags say: MarkupSafe 2.0.1 has wheels up to
+/// cp310 only, but its sdist falls back to pure Python, so it installs and
+/// runs on 3.12 (E s05). Without this, a working venv was reported as "Python
+/// 3.12 is not supported" and rebuilt on 3.10. `installed` maps normalized
+/// names to versions; only a release whose `requires_python` admits
+/// `python` and whose version is the one analyzed counts.
+pub fn trust_installed(
+    report: &mut CompatReport,
+    installed: &std::collections::BTreeMap<String, String>,
+    python: PyVersion,
+) {
+    use crate::pypi::version::PackageVersion;
+    let mut changed = false;
+    for a in &mut report.per_package {
+        if a.supported.contains(python) || !a.declared().contains(python) {
+            continue;
+        }
+        let same = installed
+            .get(&crate::core::project::normalize_name(&a.name))
+            .and_then(|v| PackageVersion::parse(v))
+            .is_some_and(|v| PackageVersion::parse(&a.version) == Some(v));
+        if same {
+            a.supported.insert(python);
+            changed = true;
+        }
+    }
+    if changed {
+        let (intersection, conflicts) = summarize(&report.per_package);
+        report.intersection = intersection;
+        report.conflicts = conflicts;
+    }
+}
+
 /// Why `candidate` cannot join a project whose dependencies are `project`:
 /// the pair [`find_conflicts`] names once the candidate is added (the same
 /// sentence `doctor` and `setup` print for a conflicting project).
@@ -413,6 +447,47 @@ mod tests {
             urls: files,
             versions: vec!["1.0".into()],
         }
+    }
+
+    #[test]
+    fn an_installed_release_counts_as_supported_on_its_venv_python() {
+        // E s05: markupsafe 2.0.1 has wheels up to cp310 and an sdist; it
+        // is installed in a 3.12 venv.
+        let mut meta = pkg(
+            "MarkupSafe",
+            Some(">=3.6"),
+            vec![
+                wheel("MarkupSafe-1.0-cp310-cp310-manylinux_2_17_x86_64.whl"),
+                DistFile {
+                    filename: "MarkupSafe-1.0.tar.gz".into(),
+                    packagetype: "sdist".into(),
+                    requires_python: None,
+                    yanked: false,
+                },
+            ],
+        );
+        meta.info.version = "2.0.1".into();
+        let a = meta.analyze(&linux());
+        let py312 = PyVersion::py3(12);
+        assert!(a.lacks_wheel_for(py312));
+        let (intersection, conflicts) = summarize(std::slice::from_ref(&a));
+        let mut report = CompatReport {
+            platform: linux(),
+            per_package: vec![a],
+            unresolved: Vec::new(),
+            unreachable: Vec::new(),
+            intersection,
+            conflicts,
+            sdist_warnings: Vec::new(),
+        };
+        // Another version installed: no evidence.
+        let other = std::collections::BTreeMap::from([("markupsafe".into(), "2.1.5".into())]);
+        trust_installed(&mut report, &other, py312);
+        assert!(!report.intersection.contains(py312));
+        let same = std::collections::BTreeMap::from([("markupsafe".into(), "2.0.1".into())]);
+        trust_installed(&mut report, &same, py312);
+        assert!(report.intersection.contains(py312));
+        assert!(!report.per_package[0].lacks_wheel_for(py312));
     }
 
     #[tokio::test]
