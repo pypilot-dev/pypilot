@@ -324,6 +324,19 @@ mod tests {
                 r.dependency.is_some() && r.breaks_from.is_some() && r.constraint.is_some();
             assert!(by_dist != r.removed_in.is_some(), "{}", r.id);
         }
+        // Every call pattern parses here; a row's patterns are all or nothing.
+        let call_rows = t.symbol_removals.iter().filter(|r| !r.calls.is_empty());
+        for r in call_rows.clone() {
+            for c in &r.calls {
+                assert!(
+                    crate::core::imports::CallPattern::parse(c).is_some(),
+                    "{}: {c}",
+                    r.id
+                );
+            }
+            assert!(r.symbol.contains('.') && r.symptom.is_some(), "{}", r.id);
+        }
+        assert_eq!(t.call_targets().len(), call_rows.count());
         assert!(t.stdlib_removal("distutils").is_some());
         assert!(t.module_removal("pkg_resources").is_some());
     }

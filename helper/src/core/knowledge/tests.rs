@@ -1183,3 +1183,46 @@ fn a_python_break_from_one_release_line_spares_the_older_one() {
     ctx.installed = installed(&[("sqlalchemy", "2.0.30")]);
     assert!(evaluate(&method_table(), &ctx).is_empty());
 }
+
+#[test]
+fn the_bundled_rows_find_e_s07_and_dataframe_append() {
+    let dir = scratch("bundled-calls");
+    // E s07's app.py, as written.
+    std::fs::write(
+        dir.join("app.py"),
+        "from flask import Flask\nfrom flask_sqlalchemy import SQLAlchemy\napp=Flask(__name__)\ndb=SQLAlchemy(app)\nwith app.app_context():\n    print(db.engine.execute(\"select 1\").scalar())\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("frames.py"),
+        "import pandas as pd\nrows = []\nrows.append(1)\ndf = pd.DataFrame()\ndf = df.append({'a': 1}, ignore_index=True)\n",
+    )
+    .unwrap();
+    let t = bundled();
+    let scan = scan_source(&dir, &t.symbol_targets(), &t.call_targets());
+    let got: Vec<(&str, u32, &str)> = scan
+        .symbol_uses
+        .iter()
+        .map(|u| (u.file.as_str(), u.line, u.symbol.as_str()))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("app.py", 6, "Engine.execute"),
+            ("frames.py", 5, "DataFrame.append")
+        ]
+    );
+    let mut ctx = venv_ctx(12);
+    ctx.installed = installed(&[("sqlalchemy", "2.0.30"), ("pandas", "2.2.3")]);
+    ctx.declared = vec![req("sqlalchemy", "==2.0.30"), req("pandas", ">=2")];
+    ctx.symbol_uses = scan.symbol_uses;
+    let titles: Vec<String> = evaluate(&t, &ctx).into_iter().map(|f| f.title).collect();
+    assert_eq!(
+        titles,
+        [
+            "`df.append` fails: pandas 2 removed it",
+            "`db.engine.execute` fails: sqlalchemy 2 removed it"
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
