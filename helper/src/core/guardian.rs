@@ -198,7 +198,12 @@ pub async fn analyze_buffer_in<S: MetadataSource>(
             let renamed = matrix::is_mapped(&i.module);
             (i, package, renamed)
         })
-        .filter(|(_, package, _)| !installed.contains(package))
+        // An installed distribution that dropped the module (setuptools 82
+        // and `pkg_resources`) still leaves the import broken.
+        .filter(|(i, package, _)| {
+            !installed.contains(package)
+                || crate::core::knowledge::install_requirement_for(&i.module, installed).is_some()
+        })
         .collect();
 
     if candidates.is_empty() {
@@ -253,6 +258,10 @@ pub async fn analyze_buffer_in<S: MetadataSource>(
         .filter(|(_, package, _)| analyses.contains_key(package))
         .map(|(import, package, renamed)| {
             let analysis = analyses.get(&package).and_then(|a| a.as_ref());
+            // Offer the release that still ships the module, not the newest.
+            let package =
+                crate::core::knowledge::install_requirement_for(&import.module, installed)
+                    .unwrap_or(package);
             let finding = classify(import, package, renamed, analysis, &ctx);
             flag_cuda_extension(finding, extensions, platform, torch.as_deref())
         })

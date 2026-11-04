@@ -342,3 +342,66 @@ async fn doctor_files_an_unreachable_package_as_not_checked() {
     assert_eq!(report.unreachable.len(), 1);
     assert_eq!(report.unreachable[0].0, "requests");
 }
+
+/// `import pkg_resources` must offer a setuptools that still ships it: the
+/// newest one (82+) does not, so "Install setuptools" would leave the import
+/// broken (lab scenarios C s7a and s7b).
+#[tokio::test]
+async fn pkg_resources_offers_setuptools_below_81() {
+    let mut src = FixtureSource::new();
+    let meta = serde_json::from_str(
+        r#"{"info": {"name": "setuptools", "version": "84.2.1", "requires_python": ">=3.9"},
+            "urls": [{"filename": "setuptools-84.2.1-py3-none-any.whl", "packagetype": "bdist_wheel"}],
+            "releases": ["80.9.0", "84.2.1"]}"#,
+    )
+    .unwrap();
+    src.insert("setuptools", meta);
+    let buffer = "import pkg_resources\n";
+
+    // s7a: setuptools not installed.
+    let findings = analyze_buffer(
+        buffer,
+        &empty_workspace(),
+        linux(),
+        Some(PyVersion::py3(12)),
+        &Installed::default(),
+        &src,
+    )
+    .await;
+    assert_eq!(findings.len(), 1, "{findings:#?}");
+    assert_eq!(findings[0].package, "setuptools<81");
+    assert_eq!(findings[0].problem, Problem::NotInstalled);
+
+    // s7b: setuptools 84 installed, which dropped pkg_resources.
+    let mut installed = Installed::default();
+    installed.packages.insert("setuptools".into());
+    installed
+        .versions
+        .insert("setuptools".into(), "84.2.1".into());
+    let findings = analyze_buffer(
+        buffer,
+        &empty_workspace(),
+        linux(),
+        Some(PyVersion::py3(12)),
+        &installed,
+        &src,
+    )
+    .await;
+    assert_eq!(findings.len(), 1, "{findings:#?}");
+    assert_eq!(findings[0].package, "setuptools<81");
+
+    // setuptools 80 still ships it: silent.
+    installed
+        .versions
+        .insert("setuptools".into(), "80.9.0".into());
+    let findings = analyze_buffer(
+        buffer,
+        &empty_workspace(),
+        linux(),
+        Some(PyVersion::py3(12)),
+        &installed,
+        &src,
+    )
+    .await;
+    assert!(findings.is_empty(), "{findings:#?}");
+}
