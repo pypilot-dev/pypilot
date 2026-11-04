@@ -636,7 +636,8 @@ pub fn lock_finding(project: &PixiProject, status: &LockStatus) -> Option<Findin
                 detail: format!(
                     "{file} changed since pixi.lock was written, so the installed environments may not match it.{what} Run `pixi lock` to update the lock, or `pixi install` to update it and the environment."
                 ),
-                fix: FixKind::Manual,
+                // `doctor --fix` runs that `pixi install`.
+                fix: FixKind::SetupEnvironment,
             })
         }
         LockStatus::Unsolvable { reason } => Some(Finding {
@@ -1055,6 +1056,8 @@ dev = { features = ["lint"] }
         assert_eq!(lock_finding(&p, &LockStatus::Unknown), None);
         let stale = classify_lock_check(false, "", LOCK_STALE);
         let f = lock_finding(&p, &stale).unwrap();
+        // `doctor --fix` turns it into a `pixi install`.
+        assert_eq!(f.fix, FixKind::SetupEnvironment);
         assert_eq!(f.severity, Severity::Warning);
         assert_eq!(f.title, "pixi.lock is out of date with pixi.toml");
         assert!(f

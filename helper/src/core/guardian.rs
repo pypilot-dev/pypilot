@@ -351,7 +351,7 @@ pub fn check_attributes(source: &str, venv: &Path, installed: &Installed) -> Vec
 
 /// Module names that belong to this project, so `import utils` next to
 /// `utils.py` never gets reported as a missing PyPI package.
-fn local_modules(workspace: &Path, document_dir: Option<&Path>) -> HashSet<String> {
+pub(crate) fn local_modules(workspace: &Path, document_dir: Option<&Path>) -> HashSet<String> {
     let mut names = HashSet::new();
     let mut roots = vec![workspace.to_path_buf(), workspace.join("src")];
     if let Some(dir) = document_dir {

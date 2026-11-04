@@ -80,6 +80,14 @@ pub async fn run_with_mode<S: MetadataSource>(
     };
     let assessment = solver::assess(workspace, settings, source).await;
 
+    // An environment.yml or Poetry project, or a requirements.txt pip cannot
+    // read: a uv setup would install nothing or fail half-way.
+    if let Some(summary) =
+        crate::core::foreign_setup::run(workspace, settings, source, &assessment, mode).await?
+    {
+        return Ok(summary);
+    }
+
     if mode == ResolvedMode::Pixi {
         let mut summary = SetupSummary {
             package_manager: settings.package_manager,
@@ -106,7 +114,19 @@ pub async fn run_with_mode<S: MetadataSource>(
         {
             return Ok(summary);
         }
-        run_pixi(workspace, pixi_bin.as_deref(), &mut summary).await;
+        // A Python the dependencies rule out: `pixi install` alone fails (or
+        // keeps it), so apply the `pixi add python=X.Y` doctor recommends.
+        match pixi_manage::python_fix(&assessment.findings) {
+            Some((py, why)) => {
+                summary.why = format!(
+                    "pixi project: {why}, so it moves to Python {py}, as doctor recommends (`pixi add python={py}`)."
+                );
+                summary.python = Some(py);
+                pixi_manage::set_python(pixi_bin.as_deref(), workspace, py, &mut summary).await;
+                finish_pixi(workspace, pixi_bin.as_deref(), &mut summary).await;
+            }
+            None => run_pixi(workspace, pixi_bin.as_deref(), &mut summary).await,
+        }
         if assessment
             .project
             .packages
@@ -242,6 +262,12 @@ fn clear_damaged_venv(workspace: &Path, venv_path: &Path, summary: &mut SetupSum
 /// and nothing on disk changes.
 pub(crate) async fn run_pixi(workspace: &Path, pixi: Option<&Path>, summary: &mut SetupSummary) {
     pixi_manage::install(pixi, workspace, summary).await;
+    finish_pixi(workspace, pixi, summary).await;
+}
+
+/// What follows an install in a pixi project: report the environment, and
+/// add ipykernel when notebooks need it.
+async fn finish_pixi(workspace: &Path, pixi: Option<&Path>, summary: &mut SetupSummary) {
     if let Some(env) = env::project_env(workspace) {
         summary.python = env.python;
         summary.venv_path = env.path;
@@ -530,7 +556,11 @@ async fn install_deps_uv(
     let has_pyproject = exec::exists(&workspace.join("pyproject.toml"));
     let requirements = workspace.join("requirements.txt");
 
-    if has_pyproject && requirements.is_file() {
+    // `uv add -r` rewrites the pyproject.toml entry of every package it
+    // names, so requirements.txt lines for packages pyproject.toml already
+    // declares are left out rather than allowed to replace its pins.
+    let merge = crate::core::manifests::requirements_merge(workspace);
+    if has_pyproject && requirements.is_file() && !merge.overlaps {
         // If requirements.txt exists and pyproject.toml exists (whether newly created by
         // `uv init` or pre-existing), add and resolve dependencies using `uv add -r requirements.txt`.
         match uv::add_requirements(uv_info, &requirements, None, workspace).await {
@@ -542,7 +572,35 @@ async fn install_deps_uv(
             Ok(out) => fail(summary, "uv add -r requirements.txt", out.stderr.trim()),
             Err(e) => fail(summary, "uv add -r requirements.txt", &e.to_string()),
         }
+    } else if has_pyproject && requirements.is_file() && !merge.extra.is_empty() {
+        note_kept_pins(summary, &merge);
+        let step = format!("uv add {}", merge.extra.join(" "));
+        match uv::add(uv_info, &merge.extra, None, workspace).await {
+            Ok(out) if out.success() => step_ok(
+                summary,
+                &step,
+                "requirements.txt's other packages added to pyproject.toml and installed",
+            ),
+            Ok(out) => fail(summary, &step, out.stderr.trim()),
+            Err(e) => fail(summary, &step, &e.to_string()),
+        }
+    } else if has_pyproject && assessment.project.from_imports {
+        // No manifest declared anything: record what the code imports.
+        let names = assessment.project.names();
+        let step = format!("uv add {}", names.join(" "));
+        match uv::add(uv_info, &names, None, workspace).await {
+            Ok(out) if out.success() => step_ok(
+                summary,
+                &step,
+                "the packages the code imports, recorded in pyproject.toml and installed",
+            ),
+            Ok(out) => fail(summary, &step, out.stderr.trim()),
+            Err(e) => fail(summary, &step, &e.to_string()),
+        }
     } else if has_pyproject {
+        if requirements.is_file() {
+            note_kept_pins(summary, &merge);
+        }
         // Use `uv sync` which reads pyproject.toml / uv.lock and installs the
         // declared dependencies.
         // `--python` keeps the venv just built: without a pin, uv may
@@ -678,6 +736,32 @@ async fn run_uv_pip_compat(
             "no manifest to install from",
         );
     }
+}
+
+/// Say that requirements.txt was not copied over pyproject.toml's pins, and
+/// which ones disagree. Non-fatal: pyproject.toml's are installed.
+fn note_kept_pins(summary: &mut SetupSummary, merge: &crate::core::manifests::RequirementsMerge) {
+    let detail = if merge.conflicts.is_empty() {
+        "pyproject.toml already declares requirements.txt's packages, so its constraints are installed and requirements.txt does not replace them".to_string()
+    } else {
+        let each: Vec<String> = merge
+            .conflicts
+            .iter()
+            .map(|c| {
+                format!(
+                    "{}{} (pyproject.toml has {})",
+                    c.name, c.requirements, c.pyproject
+                )
+            })
+            .collect();
+        format!(
+            "requirements.txt pins {}; pyproject.toml's pins were kept and installed. Update requirements.txt (`uv export --format requirements-txt --no-hashes -o requirements.txt`) or pyproject.toml so they agree",
+            each.join(", ")
+        )
+    };
+    // An ok step: what was asked for (the project's declared pins) is
+    // installed, and doctor keeps reporting the disagreement.
+    step_ok(summary, "keep pyproject.toml pins", &detail);
 }
 
 /// Run `uv pip freeze > requirements.txt` and record the step.

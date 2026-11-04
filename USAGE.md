@@ -222,8 +222,8 @@ Shared shapes:
   `fix.kind` is one of `setup_environment`, `recreate_with_python` (with
   `python`), `migrate_conda`, `migrate_to_pixi`, `manual`, and since 1.4
   `sync_environment`, `relock`, `reinstall_packages` (with `packages`: a
-  list of names) and `repair_environment` (with `python`, `null` when
-  unknown). Treat a kind you do not know as "run `pypilot doctor --fix`".
+  list of names), `repair_environment` (with `python`, `null` when
+  unknown), `migrate_conda_to_pixi` and `poetry_install`. Treat a kind you do not know as "run `pypilot doctor --fix`".
 - **package analysis**: `{ "name", "version", "supported": [pythons], "has_platform_wheels", "sdist_only", "has_foreign_wheels", "no_files_for_platform", "wheel_platforms": [...], "requires_python" }`.
 - **conflict**: `{ "low": analysis, "high": analysis, "explanation" }`; `low`
   is the package with the lowest newest Python, `high` the one with the

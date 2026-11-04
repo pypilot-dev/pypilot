@@ -141,6 +141,36 @@ const PYTHON_CELL_MAGICS: &[&str] = &[
     "time", "timeit", "capture", "prun", "debug", "python", "python3",
 ];
 
+/// The Python code cells of an `.ipynb`, IPython syntax masked (see
+/// [`mask_ipython`]), one after another. `None` for what is not a notebook,
+/// or one whose kernel is not Python.
+pub fn notebook_code(json: &str) -> Option<String> {
+    let nb: serde_json::Value = serde_json::from_str(json).ok()?;
+    let language = nb
+        .pointer("/metadata/kernelspec/language")
+        .or_else(|| nb.pointer("/metadata/language_info/name"))
+        .and_then(|l| l.as_str());
+    if language.is_some_and(|l| !l.eq_ignore_ascii_case("python")) {
+        return None;
+    }
+    let mut text = String::new();
+    for cell in nb.get("cells")?.as_array()? {
+        if cell.get("cell_type").and_then(|t| t.as_str()) != Some("code") {
+            continue;
+        }
+        let source = match cell.get("source") {
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(serde_json::Value::Array(parts)) => {
+                parts.iter().filter_map(|p| p.as_str()).collect::<String>()
+            }
+            _ => continue,
+        };
+        text.push_str(&mask_ipython(&source));
+        text.push('\n');
+    }
+    Some(text)
+}
+
 /// Blank out IPython-only syntax in a notebook cell so the scanners see Python.
 ///
 /// Line magics (`%pip install x`), shell escapes (`!ls`, `files = !ls`) and help
@@ -442,6 +472,21 @@ mod tests {
 #[cfg(test)]
 mod notebook_tests {
     use super::*;
+
+    #[test]
+    fn notebook_code_cells_are_read_and_other_cells_skipped() {
+        let nb = r#"{"cells":[
+            {"cell_type":"markdown","source":["import not_code\n"]},
+            {"cell_type":"code","source":["%pip install requests\n","import requests\n","import yaml\n"]},
+            {"cell_type":"code","source":"import numpy as np"}
+        ],"metadata":{"kernelspec":{"name":"python3","language":"python"}}}"#;
+        let code = notebook_code(nb).unwrap();
+        let found: Vec<String> = extract(&code).into_iter().map(|i| i.module).collect();
+        assert_eq!(found, ["requests", "yaml", "numpy"]);
+        let r = r#"{"cells":[],"metadata":{"kernelspec":{"language":"R"}}}"#;
+        assert!(notebook_code(r).is_none());
+        assert!(notebook_code("not json").is_none());
+    }
 
     fn cell_modules(src: &str) -> Vec<(String, u32)> {
         extract(&mask_ipython(src))

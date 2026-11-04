@@ -90,6 +90,18 @@ pub fn details_markdown(a: &Assessment) -> String {
                 s.push_str("\n_Fix: run \"Fix environment\", or `pypilot setup`._\n");
             } else if f.fix == FixKind::MigrateConda {
                 s.push_str("\n_Fix: run `pypilot migrate-conda`._\n");
+            } else if f.fix == FixKind::MigrateCondaToPixi {
+                s.push_str(
+                    "
+_Fix: run `pypilot migrate-conda --to pixi --write --install`._
+",
+                );
+            } else if f.fix == FixKind::PoetryInstall {
+                s.push_str(
+                    "
+_Fix: run `poetry install`._
+",
+                );
             } else if f.fix == FixKind::MigrateToPixi {
                 s.push_str(
                     "\n_Fix: run \"Initialize pixi project\", or `pypilot migrate-to-pixi`._\n",

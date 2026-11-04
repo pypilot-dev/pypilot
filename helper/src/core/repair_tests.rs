@@ -34,6 +34,25 @@ fn info_findings_are_never_acted_on() {
 }
 
 #[test]
+fn conda_and_poetry_projects_go_to_their_own_tools() {
+    for fix in [
+        FixKind::MigrateCondaToPixi,
+        FixKind::MigrateConda,
+        FixKind::PoetryInstall,
+    ] {
+        let p = plan(&[finding(Severity::Warning, "project", fix.clone())]);
+        assert!(p.setup, "{fix:?}");
+        assert!(p.manual.is_empty());
+        assert_eq!(p.fixes, ["project"]);
+    }
+    // The optional migration offer stays a suggestion.
+    let p = plan(&[finding(Severity::Info, "conda", FixKind::MigrateConda)]);
+    assert!(p.is_empty());
+    let p = plan(&[finding(Severity::Warning, "pixi", FixKind::MigrateToPixi)]);
+    assert!(p.is_empty() && p.manual.len() == 1);
+}
+
+#[test]
 fn manual_errors_are_kept_for_the_report() {
     let p = plan(&[finding(Severity::Error, "conflict", FixKind::Manual)]);
     assert!(p.is_empty());
