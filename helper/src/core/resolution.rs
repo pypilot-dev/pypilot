@@ -629,7 +629,19 @@ async fn platform_findings<S: MetadataSource>(
         let Some(i) = reqs.iter().position(|r| r.name == name) else {
             continue;
         };
+        let prefix = format!("{} {} ", p.name, p.version);
+        let blocked = format!("{} {} cannot be installed on {here}", p.name, p.version);
+        let generic = |f: &Finding| {
+            (f.title == "Will compile from source" && f.detail.starts_with(&prefix))
+                || f.title == blocked
+        };
         let marker = reqs[i].marker();
+        // Already skipped here: nothing builds or installs, so nothing to say.
+        let skip = format!("sys_platform != '{}'", suggest::sys_platform(os));
+        if marker.replace('"', "'").contains(&skip) {
+            findings.retain(|f| !generic(f));
+            continue;
+        }
         if marker.contains("sys_platform") || marker.contains("platform_system") {
             continue;
         }
@@ -639,12 +651,7 @@ async fn platform_findings<S: MetadataSource>(
             continue;
         }
         let new = suggest::with_platform_marker(&reqs[i].raw, os);
-        let prefix = format!("{} {} ", p.name, p.version);
-        let blocked = format!("{} {} cannot be installed on {here}", p.name, p.version);
-        findings.retain(|f| {
-            !((f.title == "Will compile from source" && f.detail.starts_with(&prefix))
-                || f.title == blocked)
-        });
+        findings.retain(|f| !generic(f));
         findings.push(Finding {
             severity: Severity::Error,
             title: platform_title(&p.name, os),
@@ -1265,6 +1272,61 @@ mod tests {
             })
         );
         assert!(blocks_install(f));
+    }
+
+    #[tokio::test]
+    async fn a_requirement_marked_off_this_os_gets_no_build_warning() {
+        use crate::pypi::metadata::PackageAnalysis;
+        let declared = Declared {
+            reqs: reqs(
+                "pyproject.toml",
+                &["uvloop>=0.19; sys_platform != \"win32\""],
+            ),
+            ..Default::default()
+        };
+        let compat = crate::pypi::CompatReport {
+            platform: Platform {
+                os: Os::Windows,
+                ..Platform::current()
+            },
+            per_package: vec![PackageAnalysis {
+                name: "uvloop".into(),
+                version: "0.23.0".into(),
+                supported: crate::pypi::PyVersionSet::universe(),
+                has_platform_wheels: false,
+                sdist_only: true,
+                has_foreign_wheels: true,
+                no_files_for_platform: false,
+                wheel_platforms: Vec::new(),
+                requires_python: None,
+            }],
+            unresolved: vec![],
+            unreachable: vec![],
+            intersection: crate::pypi::PyVersionSet::universe(),
+            conflicts: vec![],
+            sdist_warnings: vec![],
+        };
+        let ctx = Context {
+            declared: &declared,
+            compat: Some(&compat),
+            project_name: None,
+            python: None,
+        };
+        let mut findings = vec![Finding {
+            severity: Severity::Info,
+            title: "Will compile from source".into(),
+            detail: "uvloop 0.23.0 ships prebuilt wheels for other platforms".into(),
+            fix: FixKind::Manual,
+        }];
+        let none: Option<&Table> = None;
+        diagnose(
+            &ctx,
+            &crate::pypi::FixtureSource::new(),
+            none,
+            &mut findings,
+        )
+        .await;
+        assert!(findings.is_empty(), "{findings:#?}");
     }
 
     #[tokio::test]
