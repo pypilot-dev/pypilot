@@ -202,19 +202,35 @@ pub fn context(
                 .collect()
         })
         .unwrap_or_default();
-    let (installed, site_modules, declared_conflicts) = match venv {
+    let (installed, site_modules, declared_conflicts, requirers) = match venv {
         Some((path, python)) => {
             let found = installed::scan(path);
-            let conflicts = crate::core::depcheck::conflicts(path, &found, python)
+            let requirers = crate::core::depcheck::requirements(path, python);
+            let conflicts = crate::core::depcheck::conflicts_in(&requirers, &found)
                 .into_iter()
                 .map(|c| (c.package, c.dependency))
                 .collect();
-            (Some(found.versions), site_modules(path), conflicts)
+            (
+                Some(found.versions),
+                site_modules(path),
+                conflicts,
+                requirers,
+            )
         }
-        None => (None, HashSet::new(), HashSet::new()),
+        None => (None, HashSet::new(), HashSet::new(), Vec::new()),
     };
     let venv_python = venv.and_then(|(_, p)| p);
-    let source = scan_source(workspace, &table::table().symbol_targets());
+    let t = table::table();
+    let source = scan_source(workspace, &t.symbol_targets(), &t.call_targets());
+    let locked = crate::core::health::read_lock(workspace)
+        .map(|l| {
+            l.versions
+                .into_iter()
+                .filter(|(_, v)| v.len() == 1)
+                .filter_map(|(n, v)| Some((n, v.into_iter().next()?)))
+                .collect()
+        })
+        .unwrap_or_default();
     rules::Context {
         declared_raw: crate::core::req_edit::declared(workspace).reqs,
         new_requirement_file: new_requirement_file(workspace),
@@ -230,6 +246,8 @@ pub fn context(
         symbol_uses: source.symbol_uses,
         requires_python: project.declared_requires_python.clone(),
         python_pin: crate::core::probe::read_python_pin(workspace),
+        locked,
+        requirers,
         declared_conflicts,
         pixi: project.is_pixi(),
     }
@@ -327,7 +345,7 @@ pub fn pyproject_dependencies(doc: &toml::Table) -> Vec<String> {
 /// each with the first file (relative, `/`-separated) that imports it. The
 /// project's own modules are left out.
 pub fn project_imports(workspace: &Path) -> BTreeMap<String, String> {
-    scan_source(workspace, &[]).imports
+    scan_source(workspace, &[], &[]).imports
 }
 
 /// What [`scan_source`] found in the project's source.
@@ -335,13 +353,20 @@ pub fn project_imports(workspace: &Path) -> BTreeMap<String, String> {
 pub struct SourceScan {
     /// See [`project_imports`].
     pub imports: BTreeMap<String, String>,
-    /// Uses of the `(module, symbol)` targets, in file order.
+    /// Uses of the `(module, symbol)` targets and of the call targets, in
+    /// file order.
     pub symbol_uses: Vec<rules::CodeUse>,
 }
 
 /// One walk over the project's `.py` files and notebooks: the modules they
-/// import, and where they use one of `targets` (`numpy.float`).
-pub fn scan_source(workspace: &Path, targets: &[(String, String)]) -> SourceScan {
+/// import, where they use one of `targets` (`numpy.float`), and where a file
+/// that imports a call target's module makes one of its calls
+/// (`db.engine.execute(`).
+pub fn scan_source(
+    workspace: &Path,
+    targets: &[(String, String)],
+    calls: &[table::CallTarget],
+) -> SourceScan {
     let mut files = Vec::new();
     let mut budget = MAX_SOURCE_ENTRIES;
     source_files(workspace, &mut files, &mut budget);
@@ -383,6 +408,28 @@ pub fn scan_source(workspace: &Path, targets: &[(String, String)]) -> SourceScan
                 written: u.written,
                 from_import: u.from_import,
             });
+        }
+        for c in calls.iter().filter(|c| {
+            c.gate
+                .iter()
+                .any(|g| !local.contains(g) && imports.iter().any(|i| &i.module == g))
+        }) {
+            let mut lines: Vec<u32> = Vec::new();
+            for u in crate::core::imports::call_uses(&source, &c.patterns) {
+                // One use per row per line, whichever pattern found it.
+                if lines.contains(&u.line) {
+                    continue;
+                }
+                lines.push(u.line);
+                uses.push(rules::CodeUse {
+                    module: c.module.clone(),
+                    symbol: c.symbol.clone(),
+                    file: rel.clone(),
+                    line: u.line,
+                    written: u.written,
+                    from_import: false,
+                });
+            }
         }
         for import in imports {
             if local.contains(&import.module) {

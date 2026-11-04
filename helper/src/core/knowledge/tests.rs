@@ -1013,7 +1013,7 @@ fn source_scan_finds_symbol_uses_with_file_and_line() {
     )
     .unwrap();
     std::fs::write(dir.join("other.py"), "np.float\n").unwrap();
-    let scan = scan_source(&dir, &bundled().symbol_targets());
+    let scan = scan_source(&dir, &bundled().symbol_targets(), &bundled().call_targets());
     assert_eq!(scan.symbol_uses.len(), 1, "{:?}", scan.symbol_uses);
     let u = &scan.symbol_uses[0];
     assert_eq!(
@@ -1021,4 +1021,165 @@ fn source_scan_finds_symbol_uses_with_file_and_line() {
         ("app.py", 2, "np.float")
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// --- removed methods (call patterns) ------------------------------------------
+
+/// A table with one method row and one Python row, as the data writes them.
+fn method_table() -> Table {
+    Table::load(
+        r#"{
+        "symbol_removals": [{
+            "id": "sqlalchemy-2-engine-execute", "module": "sqlalchemy",
+            "symbol": "Engine.execute", "dependency": "sqlalchemy", "breaks_from": "2",
+            "constraint": "sqlalchemy<2",
+            "calls": ["engine.execute("], "calls_in": ["sqlalchemy", "flask_sqlalchemy"],
+            "symptom": "AttributeError: 'Engine' object has no attribute 'execute'",
+            "replacement": "`with engine.connect() as conn: conn.execute(text(...))`",
+            "source": "u"
+        }],
+        "python_removals": [{
+            "id": "sqlalchemy-2.0-py313", "package": "sqlalchemy", "breaks_from": "2.0.0",
+            "fixed_in": "2.0.31", "python_min": "3.13", "symptom": "TypeError", "source": "u"
+        }]
+    }"#,
+    )
+    .unwrap()
+}
+
+fn engine_use() -> rules::CodeUse {
+    code_use("sqlalchemy", "Engine.execute", "db.engine.execute", 6)
+}
+
+#[test]
+fn a_removed_method_is_reported_with_its_line_and_replacement() {
+    // E s07 after the flask-sqlalchemy fix: sqlalchemy==2.0.30 is pinned.
+    let mut ctx = venv_ctx(12);
+    ctx.installed = installed(&[("sqlalchemy", "2.0.30")]);
+    ctx.declared = vec![req("sqlalchemy", "==2.0.30")];
+    ctx.symbol_uses = vec![engine_use()];
+    let found = evaluate(&method_table(), &ctx);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    let f = &found[0];
+    assert_eq!(
+        f.title,
+        "`db.engine.execute` fails: sqlalchemy 2 removed it"
+    );
+    assert!(f.detail.contains("app.py:6 uses `db.engine.execute`: write `with engine.connect() as conn: conn.execute(text(...))` instead."), "{}", f.detail);
+    assert!(f
+        .detail
+        .contains("'Engine' object has no attribute 'execute'"));
+    assert!(
+        f.detail.contains("rules out `sqlalchemy<2`"),
+        "{}",
+        f.detail
+    );
+    assert_eq!(f.fix, FixKind::Manual);
+    assert_eq!(
+        rules::code_changes(&method_table(), &ctx),
+        vec!["`db.engine.execute` fails: sqlalchemy 2 removed it: change app.py:6 to `with engine.connect() as conn: conn.execute(text(...))`".to_string()]
+    );
+
+    // SQLAlchemy 1.4 still has it.
+    ctx.installed = installed(&[("sqlalchemy", "1.4.54")]);
+    ctx.declared = vec![req("sqlalchemy", "==1.4.54")];
+    assert!(evaluate(&method_table(), &ctx).is_empty());
+}
+
+#[test]
+fn a_cap_is_offered_only_when_nothing_installed_needs_the_new_release() {
+    // sqlalchemy comes in through flask-sqlalchemy; nothing pins it.
+    let mut ctx = venv_ctx(12);
+    ctx.installed = installed(&[("sqlalchemy", "2.0.30"), ("flask-sqlalchemy", "3.0.5")]);
+    ctx.declared = vec![req("flask-sqlalchemy", ">=3.0.2")];
+    ctx.symbol_uses = vec![engine_use()];
+    ctx.requirers = vec![crate::core::depcheck::Requires {
+        package: "flask-sqlalchemy".into(),
+        package_version: Some("3.0.5".into()),
+        dependency: "sqlalchemy".into(),
+        spec: ">=1.4.18".into(),
+    }];
+    let found = evaluate(&method_table(), &ctx);
+    assert_eq!(found[0].fix, constraint("sqlalchemy<2"), "{found:#?}");
+
+    // flask-sqlalchemy 3.1 needs sqlalchemy 2: no cap, and the detail says why.
+    ctx.requirers[0].package_version = Some("3.1.1".into());
+    ctx.requirers[0].spec = ">=2.0.16".into();
+    let found = evaluate(&method_table(), &ctx);
+    assert_eq!(found[0].fix, FixKind::Manual);
+    assert!(
+        found[0].detail.contains("The installed flask-sqlalchemy 3.1.1 requires sqlalchemy>=2.0.16, so `sqlalchemy<2` would not install next to it"),
+        "{}",
+        found[0].detail
+    );
+    assert!(found[0].detail.contains("change app.py:6 to"));
+}
+
+#[test]
+fn with_no_venv_the_locked_release_decides() {
+    let mut ctx = Context {
+        python: Some(PyVersion::py3(12)),
+        symbol_uses: vec![engine_use()],
+        ..Context::default()
+    };
+    ctx.locked = [("sqlalchemy".to_string(), "2.0.30".to_string())].into();
+    assert_eq!(evaluate(&method_table(), &ctx).len(), 1);
+    ctx.locked = [("sqlalchemy".to_string(), "1.4.54".to_string())].into();
+    assert!(evaluate(&method_table(), &ctx).is_empty());
+    // Neither installed, locked nor declared: not in play.
+    ctx.locked.clear();
+    assert!(evaluate(&method_table(), &ctx).is_empty());
+}
+
+#[test]
+fn source_scan_runs_call_patterns_only_where_the_module_is_imported() {
+    let dir = scratch("calls");
+    std::fs::write(
+        dir.join("app.py"),
+        "from flask_sqlalchemy import SQLAlchemy\ndb = SQLAlchemy()\n# db.engine.execute(old)\nprint(db.engine.execute(\"select 1\").scalar())\n",
+    )
+    .unwrap();
+    // Same call, no SQLAlchemy import: somebody else's `engine`.
+    std::fs::write(dir.join("other.py"), "engine.execute(q)\n").unwrap();
+    let t = method_table();
+    let scan = scan_source(&dir, &t.symbol_targets(), &t.call_targets());
+    let got: Vec<(&str, u32, &str, &str)> = scan
+        .symbol_uses
+        .iter()
+        .map(|u| {
+            (
+                u.file.as_str(),
+                u.line,
+                u.symbol.as_str(),
+                u.written.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(got, [("app.py", 4, "Engine.execute", "db.engine.execute")]);
+    // A call row is not a module attribute.
+    assert!(t.symbol_targets().is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_python_break_from_one_release_line_spares_the_older_one() {
+    // SQLAlchemy 2.0.0 to 2.0.30 fail on Python 3.13+; 1.4 runs there.
+    let mut ctx = venv_ctx(15);
+    ctx.installed = installed(&[("sqlalchemy", "1.4.54")]);
+    ctx.declared = vec![req("sqlalchemy", "")];
+    assert!(evaluate(&method_table(), &ctx).is_empty());
+    ctx.installed = installed(&[("sqlalchemy", "2.0.30")]);
+    let found = evaluate(&method_table(), &ctx);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert_eq!(
+        found[0].title,
+        "sqlalchemy 2.0.30 does not work on Python 3.15"
+    );
+    assert_eq!(found[0].fix, constraint("sqlalchemy>=2.0.31,<3"));
+    ctx.installed = installed(&[("sqlalchemy", "2.0.31")]);
+    assert!(evaluate(&method_table(), &ctx).is_empty());
+    // Python 3.12 is fine.
+    let mut ctx = venv_ctx(12);
+    ctx.installed = installed(&[("sqlalchemy", "2.0.30")]);
+    assert!(evaluate(&method_table(), &ctx).is_empty());
 }

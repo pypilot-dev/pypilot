@@ -56,6 +56,12 @@ pub struct Context {
     pub requires_python: Option<String>,
     /// The Python `.python-version` pins, when it names one.
     pub python_pin: Option<PyVersion>,
+    /// What `uv.lock` pins, for each package it locks at one version
+    /// (normalized name to version), whether or not the lock is current.
+    pub locked: BTreeMap<String, String>,
+    /// The installed distributions' own requirements, markers judged on the
+    /// venv's Python: who else needs a release a cap would rule out.
+    pub requirers: Vec<crate::core::depcheck::Requires>,
 }
 
 /// One use of a removed symbol in the project's source.
@@ -114,6 +120,21 @@ impl Context {
 
     fn resolved_version(&self, name: &str) -> Option<&str> {
         self.resolved.get(&normalize_name(name)).map(String::as_str)
+    }
+
+    fn locked_version(&self, name: &str) -> Option<&str> {
+        self.locked.get(&normalize_name(name)).map(String::as_str)
+    }
+
+    /// An installed distribution other than `dep` whose requirement on `dep`
+    /// rules out everything below `from` (flask-sqlalchemy 3.1.1 requires
+    /// `sqlalchemy>=2.0.16`), so capping `dep` below `from` would not
+    /// install as it stands.
+    fn needs_from(&self, dep: &str, from: &str) -> Option<&crate::core::depcheck::Requires> {
+        let dep = normalize_name(dep);
+        self.requirers
+            .iter()
+            .find(|r| r.dependency == dep && forces_from(&r.spec, from))
     }
 
     fn fix(&self, fix: FixKind) -> FixKind {
@@ -648,6 +669,13 @@ fn python_finding(rule: &PythonRemoval, ctx: &Context) -> Option<Finding> {
             return None;
         }
     }
+    // Only the releases from `breaks_from` on (SQLAlchemy 2.0.0 to 2.0.30;
+    // 1.4 runs there).
+    if let Some(from) = &rule.breaks_from {
+        if version.is_empty() || below(&version, from) {
+            return None;
+        }
+    }
     let label = if version.is_empty() {
         rule.package.clone()
     } else {
@@ -1155,7 +1183,9 @@ fn dist_symbol_finding(hits: &[(&SymbolRemoval, &CodeUse)], ctx: &Context) -> Op
             if ctx.is_installed(dep) {
                 return None;
             }
-            ctx.resolved_version(dep).map(str::to_string)
+            ctx.resolved_version(dep)
+                .or_else(|| ctx.locked_version(dep))
+                .map(str::to_string)
         })
         .or_else(|| {
             decl.and_then(|d| d.spec.strip_prefix("=="))
@@ -1194,6 +1224,13 @@ fn dist_symbol_finding(hits: &[(&SymbolRemoval, &CodeUse)], ctx: &Context) -> Op
         )),
     }
     let forced = decl.is_some_and(|d| forces_from(&d.spec, from));
+    // Something installed needs the new API's release line, so a cap would
+    // not install as it stands (flask-sqlalchemy 3.1 needs sqlalchemy 2).
+    let needed = if forced {
+        None
+    } else {
+        ctx.needs_from(dep, from)
+    };
     let add = hits
         .iter()
         .find_map(|(r, _)| r.add.clone())
@@ -1216,6 +1253,17 @@ fn dist_symbol_finding(hits: &[(&SymbolRemoval, &CodeUse)], ctx: &Context) -> Op
                 FixKind::Manual
             }
         }
+    } else if let Some(r) = needed {
+        let who = match &r.package_version {
+            Some(v) => format!("{} {v}", r.package),
+            None => r.package.clone(),
+        };
+        detail.push_str(&format!(
+            "The installed {who} requires {dep}{}, so `{constraint}` would not install next to it; the code has to change. Fix: {}. PyPilot does not edit source, so this stays reported until the code changes.",
+            r.spec,
+            code_fix(hits)
+        ));
+        FixKind::Manual
     } else {
         let and_add = add
             .as_ref()

@@ -52,6 +52,11 @@ pub struct PythonRemoval {
     pub fixed_in: Option<String>,
     /// The first Python it breaks on.
     pub python_min: String,
+    /// The first release that breaks there; older releases work (SQLAlchemy
+    /// 1.4 runs on Python 3.13, 2.0.0 to 2.0.30 do not). Absent: every
+    /// release below `fixed_in`.
+    #[serde(default)]
+    pub breaks_from: Option<String>,
     /// What to use instead when no release is fixed.
     #[serde(default)]
     pub replacement: Option<String>,
@@ -121,6 +126,13 @@ pub struct StdlibRemoval {
 ///
 /// A distribution row has `dependency`, `breaks_from` and `constraint`; a
 /// standard library row has `removed_in`.
+///
+/// A row with `calls` is about a method on an object the code builds
+/// (`db.engine.execute(...)`, SQLAlchemy 2), not a module attribute: its
+/// `symbol` only names it (`Engine.execute`) and the uses are found by the
+/// call patterns ([`crate::core::imports::CallPattern`]), in files that
+/// import one of `calls_in` (default: `module`). A `symbol` with a dot never
+/// matches a module attribute, so an engine without `calls` finds nothing.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct SymbolRemoval {
     pub id: String,
@@ -148,6 +160,40 @@ pub struct SymbolRemoval {
     /// What to write instead.
     pub replacement: String,
     pub source: String,
+    /// Call patterns that use the removed method: `engine.execute(`,
+    /// `conn.execute("`, `*.append(ignore_index=`.
+    #[serde(default)]
+    pub calls: Vec<String>,
+    /// Top-level modules a file must import for `calls` to be looked for
+    /// in it; `module`'s top-level name when empty.
+    #[serde(default)]
+    pub calls_in: Vec<String>,
+}
+
+impl SymbolRemoval {
+    /// The modules a file must import for this row's calls to count.
+    pub fn call_gate(&self) -> Vec<String> {
+        if self.calls_in.is_empty() {
+            vec![self
+                .module
+                .split('.')
+                .next()
+                .unwrap_or(&self.module)
+                .to_string()]
+        } else {
+            self.calls_in.clone()
+        }
+    }
+}
+
+/// A row's call patterns, parsed, for the source scan.
+#[derive(Debug, Clone)]
+pub struct CallTarget {
+    pub module: String,
+    pub symbol: String,
+    pub patterns: Vec<crate::core::imports::CallPattern>,
+    /// See [`SymbolRemoval::call_gate`].
+    pub gate: Vec<String>,
 }
 
 /// The whole table.
@@ -186,11 +232,33 @@ impl Table {
             && self.symbol_removals.is_empty()
     }
 
-    /// Every `(module, symbol)` pair `symbol_removals` names, for the scan.
+    /// Every `(module, symbol)` pair `symbol_removals` names as a module
+    /// attribute, for the scan.
     pub fn symbol_targets(&self) -> Vec<(String, String)> {
         self.symbol_removals
             .iter()
+            .filter(|r| r.calls.is_empty())
             .map(|r| (r.module.clone(), r.symbol.clone()))
+            .collect()
+    }
+
+    /// The method-call rows, with the patterns this engine can parse.
+    pub fn call_targets(&self) -> Vec<CallTarget> {
+        self.symbol_removals
+            .iter()
+            .filter_map(|r| {
+                let patterns: Vec<_> = r
+                    .calls
+                    .iter()
+                    .filter_map(|c| crate::core::imports::CallPattern::parse(c))
+                    .collect();
+                (!patterns.is_empty()).then(|| CallTarget {
+                    module: r.module.clone(),
+                    symbol: r.symbol.clone(),
+                    patterns,
+                    gate: r.call_gate(),
+                })
+            })
             .collect()
     }
 
