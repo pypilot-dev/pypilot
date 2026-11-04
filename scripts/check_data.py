@@ -637,11 +637,15 @@ BREAKAGE_SCHEMA: Dict[str, Dict[str, str]] = {
                         "breaks_from": "string", "constraint": "string",
                         "symptom": "string", "source": "string"},
     "stdlib_removals": {"module": "string", "removed_in": "string", "source": "string"},
+    "symbol_removals": {"id": "string", "module": "string", "symbol": "string",
+                        "replacement": "string", "source": "string"},
 }
 BREAKAGE_OPTIONAL: Dict[str, str] = {
     "fixed_in": "string", "python_min": "string", "python_below": "string",
     "prefer": "string", "replacement": "string", "drop_in": "bool", "other": "string",
     "keep": "string", "stdlib_since": "string", "severity": "string", "migrate": "string",
+    "removed_in": "string", "dependency": "string", "breaks_from": "string",
+    "constraint": "string", "add": "string", "symptom": "string",
 }
 BREAKAGE_KINDS = {"api_removals": {"abi", "api"},
                   "shadowing": {"clash", "backport", "deprecated"}}
@@ -682,6 +686,11 @@ def breakage_problems(table: Dict) -> List[str]:
                     problems.append(f"{where}.stdlib_since: a backport names its Python")
                 if row.get("kind") == "deprecated" and "keep" not in row:
                     problems.append(f"{where}.keep: a deprecated dist names its replacement")
+            if section == "symbol_removals":
+                by_dist = all(k in row for k in ("dependency", "breaks_from", "constraint"))
+                if by_dist == ("removed_in" in row):
+                    problems.append(f"{where}: needs either removed_in (a Python) or "
+                                    "dependency, breaks_from and constraint (a distribution)")
             for key in _VERSION_FIELDS:
                 value = row.get(key)
                 if isinstance(value, str) and not _VERSION_RE.match(value):
@@ -715,6 +724,11 @@ def breakage_names(table: Dict) -> Dict[str, set]:
                 wanted.setdefault(row[key], set())
     for row in table.get("module_removals", []) + table.get("stdlib_removals", []):
         for key in ("dependency", "replacement"):
+            if key in row:
+                wanted.setdefault(row[key], set())
+    # A symbol row's replacement is code, not a distribution.
+    for row in table.get("symbol_removals", []):
+        for key in ("dependency", "add"):
             if key in row:
                 wanted.setdefault(row[key], set())
     return wanted
@@ -881,10 +895,15 @@ def self_test() -> int:
                                "symptom": "s", "source": "u", "python_min": "3"}]
     broken["stdlib_removals"] = [{"module": "imp", "removed_in": "3.12", "source": "u"},
                                  {"module": "imp", "removed_in": "3.12", "source": "u"}]
+    broken["symbol_removals"] = [{"id": "s", "module": "m", "symbol": "x", "replacement": "y",
+                                  "source": "u", "removed_in": "3.10", "dependency": "d",
+                                  "breaks_from": "2", "constraint": "d<2"}]
     got = breakage_problems(broken)
-    # kind, fixed_in format, breaks_from type, python_min format, duplicate.
-    assert len(got) == 5, got
+    # kind, fixed_in format, breaks_from type, python_min format, duplicate,
+    # a symbol row that is both a Python and a distribution removal.
+    assert len(got) == 6, got
     assert "numpy" in breakage_names(bundled) and "2.2.2" in breakage_names(bundled)["pandas"]
+    assert "pydantic-settings" in breakage_names(bundled)
     print("self-test passed")
     return 0
 
