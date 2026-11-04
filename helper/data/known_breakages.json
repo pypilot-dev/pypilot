@@ -217,6 +217,14 @@
   ],
   "python_removals": [
     {
+      "id": "flask-py314-pkgutil-get-loader",
+      "package": "flask",
+      "fixed_in": "2.3.3",
+      "python_min": "3.14",
+      "symptom": "AttributeError: module 'pkgutil' has no attribute 'get_loader'",
+      "source": "https://flask.palletsprojects.com/en/stable/changes/#version-2-3-3"
+    },
+    {
       "id": "sqlalchemy-2.0-py313-typing",
       "package": "sqlalchemy",
       "breaks_from": "2.0.0",
