@@ -224,8 +224,13 @@ Shared shapes:
   `sync_environment`, `relock`, `reinstall_packages` (with `packages`: a
   list of names), `repair_environment` (with `python`, `null` when
   unknown), `migrate_conda_to_pixi`, `poetry_install`, `edit_requirement`
-  (with `edit`: `{ "file", "old", "new" }`) and `add_requirements` (with
-  `packages`). Treat a kind you do not know as "run `pypilot doctor --fix`".
+  (with `edit`: `{ "file", "old", "new" }`; an empty `old` adds `new`, an
+  empty `new` removes the line), `add_requirements` (with `packages`),
+  `replace_dist` (with `uninstall`, `install` and `drop`: distributions to
+  uninstall, to install afterwards, and to remove from the manifest) and
+  `raise_requires_python` (with `python`: the new lower bound of
+  pyproject.toml's `requires-python`). Treat a kind you do not know as
+  "run `pypilot doctor --fix`".
 - **package analysis**: `{ "name", "version", "supported": [pythons], "has_platform_wheels", "sdist_only", "has_foreign_wheels", "no_files_for_platform", "wheel_platforms": [...], "requires_python" }`.
 - **conflict**: `{ "low": analysis, "high": analysis, "explanation" }`; `low`
   is the package with the lowest newest Python, `high` the one with the
