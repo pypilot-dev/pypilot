@@ -150,6 +150,18 @@ pub async fn run<S: MetadataSource>(
     if summary.ok && summary.steps.is_empty() {
         println!("  {} Nothing was changed.", "✓".green().bold());
         Ok(())
+    } else if summary.ok && summary.steps.iter().any(|s| !s.ok) {
+        // Only code changes are left (`repair::CODE_CHANGE_STEP`).
+        println!(
+            "  {} Environment at {} ({}), but the code still needs the change(s) marked above; PyPilot does not edit source.",
+            "! Fixed what PyPilot can.".yellow().bold(),
+            summary.venv_path.display(),
+            summary
+                .python
+                .map(|p| format!("Python {p}").cyan().bold().to_string())
+                .unwrap_or_else(|| "system interpreter".to_string())
+        );
+        Ok(())
     } else if summary.ok {
         println!(
             "  {} Environment at {} ({}).",

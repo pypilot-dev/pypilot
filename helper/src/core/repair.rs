@@ -189,7 +189,31 @@ pub async fn run_with_mode<S: MetadataSource>(
 ) -> crate::Result<SetupSummary> {
     let mut summary = run_fixes(workspace, settings, source, mode).await?;
     own_up_to_edits(&mut summary.steps);
+    if summary.ok && !summary.steps.is_empty() && !exec::is_dry_run() {
+        code_changes_left(workspace, &mut summary);
+    }
     Ok(summary)
+}
+
+/// Name of the step for a code change the fix leaves to the user.
+pub const CODE_CHANGE_STEP: &str = "change the code";
+
+/// After a successful fix: the code changes still needed (E s09: the fix
+/// added `pydantic-settings`, but app.py still imports `BaseSettings` from
+/// pydantic), each as a failed step, so the run does not read as a clean
+/// bill of health. They do not fail the run: the environment is right, and
+/// PyPilot does not edit source.
+fn code_changes_left(workspace: &Path, summary: &mut SetupSummary) {
+    let Some(env) = crate::core::env::project_env(workspace) else {
+        return;
+    };
+    for change in knowledge::code_changes(workspace, (&env.path, env.python)) {
+        summary.steps.push(Step {
+            name: CODE_CHANGE_STEP.into(),
+            ok: false,
+            detail: change,
+        });
+    }
 }
 
 /// A later step that stopped the run may say "nothing was changed" (a

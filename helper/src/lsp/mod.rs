@@ -965,11 +965,26 @@ async fn run_fix(client: &Client, source: &PyPiClient, root: &Path) -> bool {
                 .python
                 .map(|p| format!("Python {p}"))
                 .unwrap_or_else(|| "system interpreter".into());
+            // Code changes the fix cannot make (`repair::CODE_CHANGE_STEP`).
+            let code: Vec<&str> = summary
+                .steps
+                .iter()
+                .filter(|s| !s.ok)
+                .map(|s| s.detail.as_str())
+                .collect();
+            let (kind, tail) = if code.is_empty() {
+                (MessageType::INFO, String::new())
+            } else {
+                (
+                    MessageType::WARNING,
+                    format!(" The code still needs changing: {}", code.join(" | ")),
+                )
+            };
             client
                 .show_message(
-                    MessageType::INFO,
+                    kind,
                     format!(
-                        "PyPilot: done. {} at {}. {}",
+                        "PyPilot: done. {} at {}. {}{tail}",
                         py,
                         summary.venv_path.display(),
                         summary.why
