@@ -515,11 +515,10 @@ async fn rebuild_env(
             {
                 let name = format!("uv python pin {py}");
                 let why = format!(
-                    ".python-version pinned {} ; changed because: {}",
+                    ".python-version: {} -> {py}, because: {}",
                     pin.map(|p| p.to_string()).unwrap_or_default(),
                     rebuild.reason
-                )
-                .replace(" ;", ";");
+                );
                 match uv::pin(uv_info, py, workspace).await {
                     Ok(out) if out.success() => step(summary, &name, true, &why),
                     Ok(out) => step(summary, &name, false, out.stderr.trim()),
