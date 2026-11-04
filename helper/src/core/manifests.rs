@@ -47,9 +47,8 @@ pub async fn apply<S: MetadataSource>(
         }
     }
     if let (Some(py), Some(req)) = (&pyproject, &requirements) {
-        if let Some(f) = pin_conflict_finding(&pin_conflicts(py, req)) {
-            findings.push(f);
-        }
+        let file = workspace.join("requirements.txt");
+        findings.extend(pin_conflict_findings(&pin_conflicts(py, req), req, &file));
     }
     let poetry = pyproject.as_deref().is_some_and(is_poetry_only);
     if let Some(f) = lockfile_finding(&lockfiles(workspace), poetry, settings) {
@@ -259,32 +258,73 @@ fn disagree(a: &str, b: &str) -> bool {
     rules_out(a, b) || rules_out(b, a)
 }
 
-fn pin_conflict_finding(conflicts: &[PinConflict]) -> Option<Finding> {
-    if conflicts.is_empty() {
-        return None;
-    }
-    let names: Vec<&str> = conflicts.iter().map(|c| c.name.as_str()).collect();
-    let each: Vec<String> = conflicts
+/// One finding per package the two files pin differently. pyproject.toml is
+/// what uv installs, so the fix brings requirements.txt in line with it: the
+/// line is rewritten to pyproject.toml's specifier, its extras and marker
+/// kept. When the line cannot be found as written, the finding stays manual.
+fn pin_conflict_findings(
+    conflicts: &[PinConflict],
+    requirements: &str,
+    file: &Path,
+) -> Vec<Finding> {
+    conflicts
         .iter()
         .map(|c| {
-            format!(
-                "{} is `{}` in pyproject.toml but `{}` in requirements.txt",
-                c.name, c.pyproject, c.requirements
-            )
+            let line = requirement_line(requirements, &c.name);
+            let fix = match &line {
+                Some(raw) => FixKind::EditRequirement(crate::core::RequirementEdit {
+                    file: file.to_path_buf(),
+                    old: raw.clone(),
+                    new: crate::core::req_edit::DeclaredReq {
+                        file: file.to_path_buf(),
+                        raw: raw.clone(),
+                        name: c.name.clone(),
+                    }
+                    .with_spec(&c.pyproject),
+                }),
+                None => FixKind::Manual,
+            };
+            let action = match &fix {
+                FixKind::EditRequirement(e) => format!(
+                    "Fix: change requirements.txt's `{}` to `{}` so both files say the same.",
+                    e.old, e.new
+                ),
+                _ => format!(
+                    "Fix: change requirements.txt's {} pin to `{}{}` so both files say the same.",
+                    c.name, c.name, c.pyproject
+                ),
+            };
+            Finding {
+                severity: Severity::Warning,
+                title: format!(
+                    "pyproject.toml and requirements.txt disagree on {}",
+                    c.name
+                ),
+                detail: format!(
+                    "{} is `{}` in pyproject.toml but `{}` in requirements.txt. pyproject.toml is the project's declaration: PyPilot installs its pin and never copies requirements.txt's over it, so requirements.txt is the stale one. {action} If requirements.txt's pin is the one you want, change pyproject.toml instead.",
+                    c.name, c.pyproject, c.requirements
+                ),
+                fix,
+            }
         })
+        .collect()
+}
+
+/// The requirement on `name` (normalized) as requirements.txt writes it,
+/// without a comment, when exactly one line declares it.
+fn requirement_line(text: &str, name: &str) -> Option<String> {
+    let hits: Vec<String> = text
+        .lines()
+        .map(|l| crate::core::req_edit::strip_comment(l).trim())
+        .filter(|body| {
+            project::requirement_name(body).is_some_and(|n| project::normalize_name(&n) == name)
+        })
+        .map(str::to_string)
         .collect();
-    Some(Finding {
-        severity: Severity::Warning,
-        title: format!(
-            "pyproject.toml and requirements.txt disagree on {}",
-            names.join(", ")
-        ),
-        detail: format!(
-            "{}. PyPilot follows pyproject.toml, the project's declaration, and setup will not copy requirements.txt's pins over it. If requirements.txt is the one that is right, change pyproject.toml; otherwise regenerate it with `uv export --format requirements-txt --no-hashes -o requirements.txt`.",
-            each.join("; ")
-        ),
-        fix: FixKind::Manual,
-    })
+    match hits.as_slice() {
+        [one] => Some(one.clone()),
+        _ => None,
+    }
 }
 
 /// How requirements.txt relates to pyproject.toml when setup installs both.
@@ -862,16 +902,65 @@ mod tests {
         assert_eq!(conflicts[0].pyproject, "==2.31.0");
         assert_eq!(conflicts[0].requirements, "==2.25.0");
 
-        let f = pin_conflict_finding(&conflicts).unwrap();
+        let file = Path::new("requirements.txt");
+        let found = pin_conflict_findings(&conflicts, requirements, file);
+        assert_eq!(found.len(), 3);
+        let f = &found[1];
         assert_eq!(f.severity, Severity::Warning);
         assert_eq!(
             f.title,
-            "pyproject.toml and requirements.txt disagree on requests, pyyaml, six"
+            "pyproject.toml and requirements.txt disagree on pyyaml"
         );
-        assert!(f.detail.contains(
-            "requests is `==2.31.0` in pyproject.toml but `==2.25.0` in requirements.txt"
-        ));
-        assert!(pin_conflict_finding(&pin_conflicts(pyproject, "requests>=2\n")).is_none());
+        assert!(f
+            .detail
+            .contains("pyyaml is `==6.0.1` in pyproject.toml but `==5.4.1` in requirements.txt"));
+        // pyproject.toml is followed, and the fix says so: no contradiction.
+        assert!(f.detail.contains("requirements.txt is the stale one"));
+        assert_eq!(
+            f.fix,
+            FixKind::EditRequirement(crate::core::RequirementEdit {
+                file: file.to_path_buf(),
+                old: "pyyaml==5.4.1".into(),
+                new: "pyyaml==6.0.1".into(),
+            })
+        );
+        assert!(pin_conflict_findings(
+            &pin_conflicts(
+                pyproject,
+                "requests>=2
+"
+            ),
+            "",
+            file
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn pin_fix_keeps_extras_and_markers_and_needs_one_line() {
+        let pyproject = "[project]
+name = \"x\"
+dependencies = [\"requests==2.31.0\"]
+";
+        let requirements = "Requests[socks]==2.25.0 ; python_version >= '3.8'  # pinned
+";
+        let file = Path::new("requirements.txt");
+        let found =
+            pin_conflict_findings(&pin_conflicts(pyproject, requirements), requirements, file);
+        let FixKind::EditRequirement(edit) = &found[0].fix else {
+            panic!("{:?}", found[0].fix);
+        };
+        assert_eq!(
+            edit.old,
+            "Requests[socks]==2.25.0 ; python_version >= '3.8'"
+        );
+        assert_eq!(edit.new, "Requests[socks]==2.31.0; python_version >= '3.8'");
+        // Listed twice: which one to change is not obvious.
+        let twice = "requests==2.25.0
+requests==2.20.0
+";
+        let found = pin_conflict_findings(&pin_conflicts(pyproject, twice), twice, file);
+        assert_eq!(found[0].fix, FixKind::Manual);
     }
 
     #[test]

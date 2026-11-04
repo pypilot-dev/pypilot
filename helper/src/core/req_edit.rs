@@ -90,7 +90,14 @@ pub fn declared(workspace: &Path) -> Declared {
     }
     let requirements = workspace.join("requirements.txt");
     if let Some(text) = read_manifest(&requirements) {
+        let from_pyproject: Vec<String> = out.reqs.iter().map(|r| r.name.clone()).collect();
         read_requirements(&text, &requirements, workspace, &mut out);
+        // pyproject.toml's requirement is the one installed: setup never
+        // copies requirements.txt's pin over it. Resolving both would report
+        // a clash that no install ever meets (the pin disagreement has its
+        // own finding).
+        out.reqs
+            .retain(|r| r.file != requirements || !from_pyproject.contains(&r.name));
     }
     out
 }
@@ -176,7 +183,7 @@ fn push_requirement(raw: &str, path: &Path, out: &mut Declared) {
 }
 
 /// `line` without a `#` comment (one at the start, or after whitespace).
-fn strip_comment(line: &str) -> &str {
+pub fn strip_comment(line: &str) -> &str {
     if line.trim_start().starts_with('#') {
         return "";
     }
@@ -437,6 +444,26 @@ mod tests {
         assert_eq!(flask.spec(), ">=3");
         assert_eq!(flask.marker(), "; python_version >= '3.9'");
         assert_eq!(flask.with_spec(""), "flask[async]; python_version >= '3.9'");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn pyproject_pins_win_over_requirements_lines() {
+        // D 5a: requirements.txt pins requests and pyyaml differently.
+        // pyproject.toml's are the ones installed, so only they resolve.
+        let dir = tempdir();
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"demo\"\ndependencies = [\"requests==2.31.0\", \"pyyaml==6.0.1\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("requirements.txt"),
+            "requests==2.25.0\nPyYAML==5.4.1\nattrs>=23\n",
+        )
+        .unwrap();
+        let raws: Vec<String> = declared(&dir).reqs.into_iter().map(|r| r.raw).collect();
+        assert_eq!(raws, ["requests==2.31.0", "pyyaml==6.0.1", "attrs>=23"]);
         std::fs::remove_dir_all(&dir).ok();
     }
 
