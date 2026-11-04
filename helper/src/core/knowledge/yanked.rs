@@ -18,7 +18,7 @@ use crate::core::{Finding, FixKind, Severity};
 use crate::pypi::version::PackageVersion;
 use crate::pypi::MetadataSource;
 
-use super::Constraint;
+use super::rules::Context;
 
 /// Candidate releases tried when looking for one that is not yanked.
 const MAX_TRIES: usize = 6;
@@ -95,7 +95,7 @@ pub async fn check<S: MetadataSource>(
     workspace: &Path,
     project: &ProjectDeps,
     source: &S,
-    pixi: bool,
+    ctx: &Context,
 ) -> Vec<Finding> {
     let locked = locked_versions(workspace);
     let mut targets: Vec<(String, String, Origin)> = Vec::new();
@@ -123,7 +123,7 @@ pub async fn check<S: MetadataSource>(
                         }
                     }
                 }
-                Some(finding(&name, &version, origin, reason, nearest, pixi))
+                Some(finding(&name, &version, origin, reason, nearest, ctx))
             }),
     )
     .await;
@@ -136,7 +136,7 @@ fn finding(
     origin: Origin,
     reason: Option<String>,
     nearest: Option<String>,
-    pixi: bool,
+    ctx: &Context,
 ) -> Finding {
     let reason = reason
         .map(|r| r.trim().to_string())
@@ -152,13 +152,7 @@ fn finding(
     let (advice, fix) = match (&nearest, origin) {
         (Some(n), Origin::Pin) => (
             format!(" The nearest release that is not yanked is {n}. Fix: pin `{name}=={n}`."),
-            if pixi {
-                FixKind::Manual
-            } else {
-                FixKind::AddConstraint(Constraint {
-                    requirement: format!("{name}=={n}"),
-                })
-            },
+            ctx.constraint_fix(&format!("{name}=={n}")),
         ),
         (Some(n), Origin::Lock) => (
             format!(
@@ -245,25 +239,38 @@ mod tests {
         assert_eq!(exact(">=2"), None);
     }
 
+    fn ctx() -> Context {
+        Context {
+            declared_raw: vec![crate::core::req_edit::DeclaredReq {
+                file: "pyproject.toml".into(),
+                raw: "requests==2.32.0".into(),
+                name: "requests".into(),
+            }],
+            ..Context::default()
+        }
+    }
+
     #[tokio::test]
     async fn a_yanked_pin_names_the_reason_and_the_nearest_release() {
         let dir = std::env::temp_dir();
-        let found = check(&dir, &project("==2.32.0"), &source(), false).await;
+        let found = check(&dir, &project("==2.32.0"), &source(), &ctx()).await;
         assert_eq!(found.len(), 1, "{found:#?}");
         let f = &found[0];
         assert_eq!(f.title, "requests 2.32.0 is yanked on PyPI");
         assert!(f.detail.contains("2.32.2"), "{}", f.detail);
         assert_eq!(
             f.fix,
-            FixKind::AddConstraint(Constraint {
-                requirement: "requests==2.32.2".into()
+            FixKind::EditRequirement(crate::core::RequirementEdit {
+                file: "pyproject.toml".into(),
+                old: "requests==2.32.0".into(),
+                new: "requests==2.32.2".into(),
             })
         );
         // Fine pins and ranges say nothing.
-        assert!(check(&dir, &project("==2.32.2"), &source(), false)
+        assert!(check(&dir, &project("==2.32.2"), &source(), &ctx())
             .await
             .is_empty());
-        assert!(check(&dir, &project(">=2.31"), &source(), false)
+        assert!(check(&dir, &project(">=2.31"), &source(), &ctx())
             .await
             .is_empty());
     }
@@ -281,7 +288,7 @@ mod tests {
             locked_versions(&dir),
             [("requests".to_string(), "2.32.0".to_string())]
         );
-        let found = check(&dir, &project(">=2.31"), &source(), false).await;
+        let found = check(&dir, &project(">=2.31"), &source(), &ctx()).await;
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].fix, FixKind::Manual);
         assert!(found[0]
@@ -298,7 +305,7 @@ mod tests {
             Origin::Pin,
             Some("Yanked due to conflicts with CVE-2024-35195 mitigation ".into()),
             Some("2.32.2".into()),
-            false,
+            &ctx(),
         );
         assert!(f.detail.starts_with(
             "PyPI's reason: \"Yanked due to conflicts with CVE-2024-35195 mitigation\"."
@@ -309,7 +316,10 @@ mod tests {
             Origin::Pin,
             None,
             Some("2.32.2".into()),
-            true,
+            &Context {
+                pixi: true,
+                ..ctx()
+            },
         );
         assert_eq!(pixi.fix, FixKind::Manual);
         assert!(pixi.detail.starts_with("PyPI gives no reason."));

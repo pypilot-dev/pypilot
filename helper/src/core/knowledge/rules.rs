@@ -9,7 +9,9 @@ use crate::pypi::pyversion::PyVersion;
 use crate::pypi::version::{PackageVersion, VersionSpec};
 
 use super::table::{ApiRemoval, ModuleRemoval, PythonRemoval, Shadowing, StdlibRemoval, Table};
-use super::{Constraint, Replacement};
+use super::Replacement;
+use crate::core::req_edit::DeclaredReq;
+use crate::core::RequirementEdit;
 
 /// What the rules look at, gathered by [`super::assess`].
 #[derive(Debug, Clone, Default)]
@@ -39,6 +41,13 @@ pub struct Context {
     pub declared_conflicts: HashSet<(String, String)>,
     /// A pixi project: findings stay, fixes are manual (pixi owns it).
     pub pixi: bool,
+    /// The requirements exactly as the manifests write them, for edits.
+    pub declared_raw: Vec<DeclaredReq>,
+    /// Where an undeclared requirement is added (see
+    /// [`super::new_requirement_file`]); `None` with no manifest.
+    pub new_requirement_file: Option<std::path::PathBuf>,
+    /// The project has a `uv.lock`, whose drift the health check reports.
+    pub has_lock: bool,
 }
 
 impl Context {
@@ -79,6 +88,46 @@ impl Context {
             fix
         }
     }
+
+    /// The fix that makes the project require `requirement` (`numpy<2`):
+    /// rewrite the declared requirement on that name, add it when there is
+    /// none, or just sync when the manifest already says exactly that.
+    pub fn constraint_fix(&self, requirement: &str) -> FixKind {
+        let requirement = requirement.trim();
+        let (name, spec) = split_requirement(requirement);
+        if self.pixi || name.is_empty() {
+            return FixKind::Manual;
+        }
+        let key = normalize_name(name);
+        if let Some(d) = self.declared_raw.iter().find(|d| d.name == key) {
+            if d.spec() == spec {
+                return FixKind::SyncEnvironment;
+            }
+            return FixKind::EditRequirement(RequirementEdit {
+                file: d.file.clone(),
+                old: d.raw.clone(),
+                new: d.with_spec(&spec),
+            });
+        }
+        match &self.new_requirement_file {
+            Some(file) => FixKind::EditRequirement(RequirementEdit {
+                file: file.clone(),
+                old: String::new(),
+                new: requirement.to_string(),
+            }),
+            None => FixKind::AddRequirements(vec![requirement.to_string()]),
+        }
+    }
+}
+
+/// `("numpy", "<2")` for `numpy<2`, whitespace dropped from the spec.
+fn split_requirement(requirement: &str) -> (&str, String) {
+    let req = requirement.split(';').next().unwrap_or(requirement).trim();
+    let end = req
+        .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')))
+        .unwrap_or(req.len());
+    let spec = req[end..].chars().filter(|c| !c.is_whitespace()).collect();
+    (&req[..end], spec)
 }
 
 fn ver(s: &str) -> Option<PackageVersion> {
@@ -166,6 +215,48 @@ pub fn evaluate(table: &Table, ctx: &Context) -> Vec<Finding> {
     }
     for rule in &table.stdlib_removals {
         out.extend(stdlib_finding(rule, ctx));
+    }
+    out.extend(drift_findings(ctx));
+    out
+}
+
+/// Installed versions the manifest rules out, in a project with no
+/// `uv.lock` (with one, the health check reports drift from the lock). This
+/// is what is left after a constraint edit (`requests==2.32.2` while
+/// 2.32.0 is installed): the sync that installs the new requirement.
+fn drift_findings(ctx: &Context) -> Vec<Finding> {
+    if ctx.has_lock || !ctx.python_is_venv {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for d in &ctx.declared_raw {
+        let spec = d.spec();
+        if spec.is_empty() || !d.marker().is_empty() {
+            continue;
+        }
+        let Some(have) = ctx.installed_version(&d.name) else {
+            continue;
+        };
+        let Some(v) = ver(have) else {
+            continue;
+        };
+        if VersionSpec::parse(&spec).admits(&v) {
+            continue;
+        }
+        let file = d
+            .file
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        out.push(Finding {
+            severity: Severity::Warning,
+            title: format!("{} {have} is installed, but {file} requires {}", d.name, d.raw),
+            detail: format!(
+                "The environment has {} {have}, which `{}` rules out. Fix: install the declared dependencies into the existing environment.",
+                d.name, d.raw
+            ),
+            fix: ctx.fix(FixKind::SyncEnvironment),
+        });
     }
     out
 }
@@ -349,9 +440,7 @@ fn api_finding(group: &[&ApiHit], ctx: &Context) -> Finding {
     let fix = if first.upgrade && group.len() > 1 {
         FixKind::Manual
     } else {
-        ctx.fix(FixKind::AddConstraint(Constraint {
-            requirement: first.requirement.clone(),
-        }))
+        ctx.constraint_fix(&first.requirement)
     };
     Finding {
         severity: Severity::Warning,
@@ -421,9 +510,7 @@ fn python_finding(rule: &PythonRemoval, ctx: &Context) -> Option<Finding> {
             " {} {fixed} is the first release that works there. Fix: upgrade to `{}>={fixed}`.",
             rule.package, rule.package
         ));
-        ctx.fix(FixKind::AddConstraint(Constraint {
-            requirement: format!("{}>={fixed}", rule.package),
-        }))
+        ctx.constraint_fix(&format!("{}>={fixed}", rule.package))
     } else if let (Some(repl), true) = (&rule.replacement, rule.drop_in) {
         detail.push_str(&format!(
             " No release fixes it. `{repl}` is a drop-in replacement with the same import. Fix: replace {} with {repl}.",
@@ -620,9 +707,7 @@ fn module_finding(rule: &ModuleRemoval, ctx: &Context) -> Option<Finding> {
         severity: Severity::Warning,
         title,
         detail,
-        fix: ctx.fix(FixKind::AddConstraint(Constraint {
-            requirement: rule.constraint.clone(),
-        })),
+        fix: ctx.constraint_fix(&rule.constraint),
     })
 }
 
@@ -657,9 +742,7 @@ fn stdlib_finding(rule: &StdlibRemoval, ctx: &Context) -> Option<Finding> {
             if let Some(m) = &rule.migrate {
                 detail.push_str(&format!(", or move the code to {m}"));
             }
-            ctx.fix(FixKind::AddConstraint(Constraint {
-                requirement: repl.clone(),
-            }))
+            ctx.constraint_fix(repl)
         }
         None => {
             match &rule.migrate {

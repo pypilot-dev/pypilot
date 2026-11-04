@@ -134,12 +134,9 @@ pub enum FixKind {
     AddRequirements(Vec<String>),
 
     // ---- Known breakages ([`knowledge`]), run by [`knowledge::apply::apply`].
-    // Kept together so they merge as one block.
-    /// Put a requirement in the manifest and the environment, replacing one
-    /// on the same name: `numpy<2` for an old pandas, `setuptools<81` for
-    /// `import pkg_resources`, `standard-imghdr` on Python 3.13,
-    /// `requests==2.32.2` for a yanked pin. Serialized with `requirement`.
-    AddConstraint(knowledge::Constraint),
+    // Their constraint fixes (`numpy<2`, `setuptools<81`, ...) are
+    // `EditRequirement` / `AddRequirements` above; only this has no
+    // equivalent there.
     /// Remove stray distributions from the manifest and the environment and
     /// (re)install the right one: jwt next to PyJWT, enum34, sklearn.
     /// Serialized with `uninstall`, `install` and `drop` lists.
@@ -157,7 +154,6 @@ impl serde::Serialize for FixKind {
             FixKind::RepairEnvironment { python } => map.serialize_entry("python", python)?,
             FixKind::EditRequirement(edit) => map.serialize_entry("edit", edit)?,
             FixKind::AddRequirements(packages) => map.serialize_entry("packages", packages)?,
-            FixKind::AddConstraint(c) => map.serialize_entry("requirement", &c.requirement)?,
             FixKind::ReplaceDist(r) => {
                 map.serialize_entry("uninstall", &r.uninstall)?;
                 map.serialize_entry("install", &r.install)?;
@@ -186,7 +182,6 @@ impl FixKind {
             FixKind::PoetryInstall => "poetry_install",
             FixKind::EditRequirement(_) => "edit_requirement",
             FixKind::AddRequirements(_) => "add_requirements",
-            FixKind::AddConstraint(_) => "add_constraint",
             FixKind::ReplaceDist(_) => "replace_dist",
         }
     }
@@ -312,27 +307,19 @@ mod tests {
                 serde_json::json!({"kind": "repair_environment", "python": null}),
             ),
         ];
-        let known = [
-            (
-                FixKind::AddConstraint(knowledge::Constraint {
-                    requirement: "numpy<2".into(),
-                }),
-                serde_json::json!({"kind": "add_constraint", "requirement": "numpy<2"}),
-            ),
-            (
-                FixKind::ReplaceDist(knowledge::Replacement {
-                    uninstall: vec!["jwt".into(), "pyjwt".into()],
-                    install: vec!["PyJWT".into()],
-                    drop: vec!["jwt".into()],
-                }),
-                serde_json::json!({
-                    "kind": "replace_dist",
-                    "uninstall": ["jwt", "pyjwt"],
-                    "install": ["PyJWT"],
-                    "drop": ["jwt"],
-                }),
-            ),
-        ];
+        let known = [(
+            FixKind::ReplaceDist(knowledge::Replacement {
+                uninstall: vec!["jwt".into(), "pyjwt".into()],
+                install: vec!["PyJWT".into()],
+                drop: vec!["jwt".into()],
+            }),
+            serde_json::json!({
+                "kind": "replace_dist",
+                "uninstall": ["jwt", "pyjwt"],
+                "install": ["PyJWT"],
+                "drop": ["jwt"],
+            }),
+        )];
         for (kind, json) in new.into_iter().chain(known) {
             assert_eq!(serde_json::to_value(&kind).unwrap(), json);
         }

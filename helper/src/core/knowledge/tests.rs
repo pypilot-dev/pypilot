@@ -41,10 +41,89 @@ fn titles(ctx: &Context) -> Vec<String> {
         .collect()
 }
 
+/// The fix for a constraint in a context with no manifest to edit (the
+/// hand-built contexts below): install it. [`constraint_fixes_edit_the_manifest`]
+/// covers the edits.
 fn constraint(r: &str) -> FixKind {
-    FixKind::AddConstraint(Constraint {
-        requirement: r.into(),
-    })
+    FixKind::AddRequirements(vec![r.into()])
+}
+
+fn pyproject_req(raw: &str) -> crate::core::req_edit::DeclaredReq {
+    crate::core::req_edit::DeclaredReq {
+        file: "pyproject.toml".into(),
+        raw: raw.into(),
+        name: crate::core::project::normalize_name(
+            crate::core::project::requirement_name(raw)
+                .unwrap()
+                .as_str(),
+        ),
+    }
+}
+
+#[test]
+fn constraint_fixes_edit_the_manifest() {
+    use crate::core::RequirementEdit;
+    let mut ctx = venv_ctx(12);
+    ctx.declared_raw = vec![
+        pyproject_req("pandas==2.0.3"),
+        pyproject_req("setuptools>=81; python_version >= '3.9'"),
+        pyproject_req("numpy<2"),
+    ];
+    ctx.new_requirement_file = Some("pyproject.toml".into());
+    let edit = |old: &str, new: &str| {
+        FixKind::EditRequirement(RequirementEdit {
+            file: "pyproject.toml".into(),
+            old: old.into(),
+            new: new.into(),
+        })
+    };
+    // Declared: rewritten in place, marker kept.
+    assert_eq!(
+        ctx.constraint_fix("pandas>=2.2.2"),
+        edit("pandas==2.0.3", "pandas>=2.2.2")
+    );
+    assert_eq!(
+        ctx.constraint_fix("setuptools<81"),
+        edit(
+            "setuptools>=81; python_version >= '3.9'",
+            "setuptools<81; python_version >= '3.9'"
+        )
+    );
+    // Not declared: added.
+    assert_eq!(
+        ctx.constraint_fix("standard-imghdr"),
+        edit("", "standard-imghdr")
+    );
+    // Already declared as asked: only the venv lags.
+    assert_eq!(ctx.constraint_fix("numpy < 2"), FixKind::SyncEnvironment);
+    // No manifest: install it.
+    ctx.new_requirement_file = None;
+    assert_eq!(
+        ctx.constraint_fix("standard-imghdr"),
+        FixKind::AddRequirements(vec!["standard-imghdr".into()])
+    );
+    ctx.pixi = true;
+    assert_eq!(ctx.constraint_fix("numpy<2"), FixKind::Manual);
+}
+
+#[test]
+fn an_installed_version_the_manifest_rules_out_asks_for_a_sync() {
+    let mut ctx = venv_ctx(12);
+    ctx.declared_raw = vec![pyproject_req("requests==2.32.2")];
+    ctx.installed = installed(&[("requests", "2.32.0")]);
+    let found = evaluate(&Table::default(), &ctx);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert_eq!(
+        found[0].title,
+        "requests 2.32.0 is installed, but pyproject.toml requires requests==2.32.2"
+    );
+    assert_eq!(found[0].fix, FixKind::SyncEnvironment);
+    // With a uv.lock the health check owns drift; satisfied pins are silent.
+    ctx.has_lock = true;
+    assert!(evaluate(&Table::default(), &ctx).is_empty());
+    ctx.has_lock = false;
+    ctx.installed = installed(&[("requests", "2.32.2")]);
+    assert!(evaluate(&Table::default(), &ctx).is_empty());
 }
 
 #[test]
@@ -572,7 +651,11 @@ fn the_planner_runs_known_fixes_once_and_nothing_else() {
         detail: String::new(),
         fix,
     };
-    let numpy = constraint("numpy<2");
+    let numpy = FixKind::EditRequirement(crate::core::RequirementEdit {
+        file: "pyproject.toml".into(),
+        old: String::new(),
+        new: "numpy<2".into(),
+    });
     let jwt = FixKind::ReplaceDist(Replacement {
         uninstall: vec!["jwt".into()],
         install: vec!["PyJWT".into()],
@@ -583,7 +666,9 @@ fn the_planner_runs_known_fixes_once_and_nothing_else() {
         f("matplotlib", numpy.clone()),
         f("jwt", jwt.clone()),
     ]);
-    assert_eq!(plan.known, vec![numpy, jwt]);
+    // The constraint is a requirement edit (run first); ReplaceDist is ours.
+    assert_eq!(plan.requirements, vec![numpy]);
+    assert_eq!(plan.known, vec![jwt]);
     assert!(!plan.is_empty());
     assert!(plan.rebuild.is_none() && !plan.setup && !plan.sync);
     assert_eq!(plan.fixes.len(), 3);
@@ -597,7 +682,6 @@ fn the_planner_runs_known_fixes_once_and_nothing_else() {
 
 #[test]
 fn fixes_describe_what_they_change() {
-    assert_eq!(apply::describe(&constraint("numpy<2")), "require `numpy<2`");
     let jwt = FixKind::ReplaceDist(Replacement {
         uninstall: vec!["jwt".into(), "pyjwt".into()],
         install: vec!["PyJWT".into()],
@@ -610,46 +694,39 @@ fn fixes_describe_what_they_change() {
 }
 
 #[tokio::test]
-async fn a_dry_run_plans_uv_add_for_a_pyproject_project() {
-    let dir = scratch("dry-add");
+async fn a_dry_run_plans_the_replacement_without_touching_anything() {
+    let dir = scratch("dry-replace");
     std::fs::write(
         dir.join("pyproject.toml"),
-        "[project]\nname = \"x\"\nversion = \"0\"\ndependencies = [\"pandas==2.0.3\"]\n",
+        "[project]
+name = \"x\"
+version = \"0\"
+dependencies = [\"jwt\", \"pyjwt\"]
+",
     )
     .unwrap();
+    let before = std::fs::read_to_string(dir.join("pyproject.toml")).unwrap();
+    let fix = FixKind::ReplaceDist(Replacement {
+        uninstall: vec!["jwt".into(), "pyjwt".into()],
+        install: vec!["PyJWT".into()],
+        drop: vec!["jwt".into()],
+    });
     let settings = crate::settings::Settings::default();
-    let (result, planned) =
-        crate::core::exec::dry_run(apply::apply(&dir, &settings, &constraint("numpy<2"))).await;
-    // No uv on the machine is an error; otherwise exactly one `uv add`.
-    if let Ok(steps) = result {
-        assert_eq!(steps.len(), 1, "{steps:?}");
-        let cmds: Vec<String> = planned.iter().map(|p| p.command_line()).collect();
-        assert!(
-            cmds.iter().any(|c| c.ends_with("add \"numpy<2\"")),
-            "{cmds:?}"
-        );
-    }
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[tokio::test]
-async fn a_dry_run_edits_requirements_txt_and_installs() {
-    let dir = scratch("dry-req");
-    std::fs::write(dir.join("requirements.txt"), "pandas==1.5.3\n").unwrap();
-    let settings = crate::settings::Settings::default();
-    let (result, planned) =
-        crate::core::exec::dry_run(apply::apply(&dir, &settings, &constraint("numpy<2"))).await;
+    let (result, planned) = crate::core::exec::dry_run(apply::apply(&dir, &settings, &fix)).await;
+    // No uv on the machine is an error; otherwise remove, uninstall, reinstall.
     if result.is_ok() {
         let names: Vec<&str> = planned.iter().map(|p| p.name.as_str()).collect();
-        assert!(
-            names.contains(&"write numpy<2 to requirements.txt"),
-            "{names:?}"
-        );
-        assert!(names.contains(&"uv pip install numpy<2"), "{names:?}");
-        // A dry run writes nothing.
         assert_eq!(
-            std::fs::read_to_string(dir.join("requirements.txt")).unwrap(),
-            "pandas==1.5.3\n"
+            names,
+            [
+                "uv remove jwt",
+                "uv pip uninstall jwt pyjwt",
+                "uv pip install --reinstall PyJWT"
+            ]
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("pyproject.toml")).unwrap(),
+            before
         );
     }
     let _ = std::fs::remove_dir_all(&dir);

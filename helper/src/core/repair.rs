@@ -18,10 +18,10 @@
 //! 3. `uv lock` ([`FixKind::Relock`]);
 //! 4. one sync into the existing environment ([`FixKind::SyncEnvironment`],
 //!    with `--reinstall-package` for [`FixKind::ReinstallPackages`]);
-//! 5. known-breakage fixes ([`FixKind::AddConstraint`],
-//!    [`FixKind::ReplaceDist`]), through [`knowledge::apply::apply_all`]:
-//!    a constraint such as `numpy<2`, or a stray dist removed and the right
-//!    one reinstalled;
+//! 5. known-breakage fixes ([`FixKind::ReplaceDist`], through
+//!    [`knowledge::apply::apply_all`]): a stray dist removed and the right
+//!    one reinstalled (their constraints, `numpy<2` and the like, are
+//!    requirement edits and run in step 0);
 //! 6. the notebook kernel, then a check that the result is healthy: the
 //!    package checks again, and an import of every declared package.
 //!
@@ -143,7 +143,7 @@ pub fn plan(findings: &[Finding]) -> RepairPlan {
                 }
             }
             // Known breakages: run after the rebuild and the sync.
-            FixKind::AddConstraint(_) | FixKind::ReplaceDist(_) => {
+            FixKind::ReplaceDist(_) => {
                 if !p.known.contains(&f.fix) {
                     p.known.push(f.fix.clone());
                 }

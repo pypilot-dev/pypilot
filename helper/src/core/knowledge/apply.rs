@@ -1,4 +1,5 @@
-//! Carry out [`FixKind::AddConstraint`] and [`FixKind::ReplaceDist`].
+//! Carry out [`FixKind::ReplaceDist`]. (Constraints are requirement edits,
+//! run by [`crate::core::req_edit::apply`].)
 //!
 //! The manifest is edited the way the project already manages it:
 //!
@@ -21,7 +22,7 @@ use crate::core::setup::Step;
 use crate::core::{installed, uv, FixKind};
 use crate::settings::Settings;
 
-use super::{Constraint, Replacement};
+use super::Replacement;
 
 /// Where the project declares its dependencies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,7 +69,7 @@ impl Manifests {
 /// Run one known-breakage fix in `workspace` and return its steps.
 ///
 /// This is the function the `doctor --fix` planner calls for
-/// [`FixKind::AddConstraint`] and [`FixKind::ReplaceDist`]; any other kind is
+/// [`FixKind::ReplaceDist`]; any other kind is
 /// an error. Steps that fail are returned with `ok: false` rather than as an
 /// `Err`, so the caller can report them next to its own; `Err` means nothing
 /// could run (no uv, a pixi project).
@@ -94,9 +95,6 @@ pub async fn apply(
     let manifests = Manifests::of(workspace);
     let mut steps = Vec::new();
     match fix {
-        FixKind::AddConstraint(c) => {
-            add_constraint(workspace, &uv_info, manifests, c, &mut steps).await
-        }
         FixKind::ReplaceDist(r) => {
             replace_dist(workspace, &uv_info, manifests, r, &mut steps).await
         }
@@ -108,7 +106,6 @@ pub async fn apply(
 /// One line saying what `fix` changes, for messages.
 pub fn describe(fix: &FixKind) -> String {
     match fix {
-        FixKind::AddConstraint(c) => format!("require `{}`", c.requirement),
         FixKind::ReplaceDist(r) => {
             let mut parts = Vec::new();
             if !r.drop.is_empty() {
@@ -208,81 +205,6 @@ fn manifest_writes(effect: Effect, workspace: &Path) -> Effect {
         .writes(workspace.join("pyproject.toml"))
         .writes(workspace.join("uv.lock"))
         .writes(workspace.join(".venv"))
-}
-
-async fn add_constraint(
-    workspace: &Path,
-    uv_info: &uv::UvInfo,
-    manifests: Manifests,
-    c: &Constraint,
-    steps: &mut Vec<Step>,
-) {
-    let req = c.requirement.trim();
-    if manifests.pyproject {
-        let name = format!("uv add {req}");
-        let effect = manifest_writes(
-            Effect::new(
-                &name,
-                "record the requirement in pyproject.toml and install it",
-            ),
-            workspace,
-        );
-        let args = manifests.project_args("add", [req]);
-        let out = exec::run(&uv_info.path, &args, Some(workspace), effect).await;
-        if !record(
-            steps,
-            &name,
-            out,
-            "recorded in pyproject.toml and installed",
-        ) {
-            return;
-        }
-        if !manifests.requirements {
-            return;
-        }
-    }
-    if manifests.requirements {
-        let path = workspace.join("requirements.txt");
-        let text = std::fs::read_to_string(&path).unwrap_or_default();
-        let edited = set_requirement(&text, req);
-        if edited != text {
-            let effect = Effect::new(
-                format!("write {req} to requirements.txt"),
-                "record the requirement where the project declares its dependencies",
-            );
-            match exec::write(&path, edited, effect) {
-                Ok(()) => steps.push(Step {
-                    name: "edit requirements.txt".into(),
-                    ok: true,
-                    detail: format!("now requires {req}"),
-                }),
-                Err(e) => {
-                    steps.push(Step {
-                        name: "edit requirements.txt".into(),
-                        ok: false,
-                        detail: e.to_string(),
-                    });
-                    return;
-                }
-            }
-        }
-        if manifests.pyproject {
-            return; // `uv add` already installed it.
-        }
-    }
-    let name = format!("uv pip install {req}");
-    let effect = venv_writes(
-        Effect::new(&name, "install the requirement into the venv"),
-        workspace,
-    );
-    let out = exec::run(
-        &uv_info.path,
-        &["pip", "install", req],
-        Some(workspace),
-        effect,
-    )
-    .await;
-    record(steps, &name, out, "installed");
 }
 
 async fn replace_dist(

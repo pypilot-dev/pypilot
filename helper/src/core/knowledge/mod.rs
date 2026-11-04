@@ -16,22 +16,26 @@
 //!
 //! # Fixes, for the `doctor --fix` planner
 //!
-//! Findings from here carry one of two fix kinds, grouped apart in
-//! [`FixKind`]:
+//! A constraint (`numpy<2`, `setuptools<81`, `standard-imghdr`,
+//! `pandas>=2.2.2`, `requests==2.32.2`) is a requirement edit, built by
+//! [`rules::Context::constraint_fix`]:
 //!
-//! - [`FixKind::AddConstraint`]: put a requirement in the manifest and the
-//!   venv (`numpy<2`, `setuptools<81`, `standard-imghdr`, `pandas>=2.2.2`,
-//!   `requests==2.32.2`). An existing requirement on the same name is
-//!   replaced.
-//! - [`FixKind::ReplaceDist`]: drop strays from the manifest, uninstall them,
-//!   and (re)install the right distribution (jwt next to PyJWT, enum34,
-//!   sklearn).
+//! - the project declares that name: [`FixKind::EditRequirement`] rewrites
+//!   that one requirement where it is written (marker and extras kept);
+//! - it does not: an `EditRequirement` with an empty `old` adds it to
+//!   pyproject.toml's `[project] dependencies` or requirements.txt;
+//! - no manifest at all: [`FixKind::AddRequirements`] installs it;
+//! - the manifest already says it and only the venv lags:
+//!   [`FixKind::SyncEnvironment`].
 //!
-//! Both run through [`apply::apply`]: `apply(workspace, settings, &fix)`
-//! returns the steps it ran, every mutation goes through
-//! [`crate::core::exec`] so it plans correctly under
-//! [`crate::core::exec::dry_run`], and it never changes the venv's Python.
-//! Other fix kinds return an error. [`crate::core::repair::plan`] collects
+//! The planner applies edits first, assesses again and syncs, so the venv
+//! keeps its Python. The one fix of our own is [`FixKind::ReplaceDist`]:
+//! drop strays from the manifest, uninstall them, and (re)install the right
+//! distribution (jwt next to PyJWT, enum34, sklearn). It runs through
+//! [`apply::apply`]: `apply(workspace, settings, &fix)` returns the steps
+//! it ran, every mutation goes through [`crate::core::exec`] so it plans
+//! correctly under [`crate::core::exec::dry_run`], and it never changes the
+//! venv's Python. Other fix kinds return an error. [`crate::core::repair::plan`] collects
 //! them, so `pypilot doctor --fix` runs them after its rebuild or sync.
 
 pub mod apply;
@@ -52,13 +56,6 @@ use crate::pypi::{CompatReport, MetadataSource};
 
 #[allow(unused_imports)] // Named in the docs above.
 use crate::core::FixKind;
-
-/// [`FixKind::AddConstraint`]'s payload.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Constraint {
-    /// A PEP 508 requirement, `numpy<2`.
-    pub requirement: String,
-}
 
 /// [`FixKind::ReplaceDist`]'s payload.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -95,7 +92,7 @@ pub async fn assess<S: MetadataSource>(
     }
     let ctx = context(workspace, project, compat, venv, target);
     let mut findings = rules::evaluate(table::table(), &ctx);
-    findings.extend(yanked::check(workspace, project, source, ctx.pixi).await);
+    findings.extend(yanked::check(workspace, project, source, &ctx).await);
     findings
 }
 
@@ -128,6 +125,9 @@ pub fn context(
     };
     let venv_python = venv.and_then(|(_, p)| p);
     rules::Context {
+        declared_raw: crate::core::req_edit::declared(workspace).reqs,
+        new_requirement_file: new_requirement_file(workspace),
+        has_lock: workspace.join("uv.lock").is_file(),
         declared: project.packages.clone(),
         with_marker: declared_with_marker(workspace),
         resolved,
@@ -139,6 +139,21 @@ pub fn context(
         declared_conflicts,
         pixi: project.is_pixi(),
     }
+}
+
+/// Where a requirement the project does not declare yet goes: pyproject.toml
+/// when it has a `[project]` table, else requirements.txt when there is one.
+pub fn new_requirement_file(workspace: &Path) -> Option<std::path::PathBuf> {
+    let pyproject = workspace.join("pyproject.toml");
+    let has_project = std::fs::read_to_string(&pyproject)
+        .ok()
+        .and_then(|t| t.parse::<toml::Table>().ok())
+        .is_some_and(|d| d.get("project").is_some_and(|p| p.is_table()));
+    if has_project {
+        return Some(pyproject);
+    }
+    let requirements = workspace.join("requirements.txt");
+    requirements.is_file().then_some(requirements)
 }
 
 /// Top-level importable names in a venv's site-packages: package
