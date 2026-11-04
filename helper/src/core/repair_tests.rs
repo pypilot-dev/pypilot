@@ -141,12 +141,19 @@ fn a_forced_python_is_pinned_unless_uv_would_pick_it_anyway() {
         required: true,
         reason: "Python 3.15 is not supported by this project".into(),
     };
+    let global = |m| uv::UvDefault {
+        python: py(m),
+        source: uv::DefaultSource::GlobalPin,
+    };
     // A s4: no pin, uv's default is 3.15, the dependencies need 3.12: pin.
-    let why = pin_change(None, py(12), &forced, Some(py(15))).unwrap();
+    let why = pin_change(None, py(12), &forced, Some(global(15))).unwrap();
     assert!(why.contains("wrote .python-version (3.12)"), "{why}");
-    assert!(why.contains("Python 3.15"), "{why}");
+    assert!(
+        why.contains("Python 3.15 (the global `uv python pin`)"),
+        "{why}"
+    );
     // uv picks 3.12 by itself: nothing to write.
-    assert_eq!(pin_change(None, py(12), &forced, Some(py(12))), None);
+    assert_eq!(pin_change(None, py(12), &forced, Some(global(12))), None);
     // uv finds no default: pin, to be sure.
     assert!(pin_change(None, py(12), &forced, None).is_some());
     // A pin moves only when a finding requires the new Python, and says so.
@@ -158,6 +165,71 @@ fn a_forced_python_is_pinned_unless_uv_would_pick_it_anyway() {
     };
     assert_eq!(pin_change(Some(py(11)), py(12), &repair, None), None);
     assert_eq!(pin_change(Some(py(12)), py(12), &forced, None), None);
+}
+
+#[test]
+fn a_fix_that_keeps_the_venv_pins_it_when_uv_would_move_it() {
+    let py = |m| PyVersion::py3(m);
+    let d = |m, source| uv::UvDefault {
+        python: py(m),
+        source,
+    };
+    // E s07 / s09: the sync kept 3.12, a global pin says 3.15: pin 3.12.
+    let why = sync_pin(
+        None,
+        Some(py(12)),
+        Some(d(15, uv::DefaultSource::GlobalPin)),
+    )
+    .unwrap();
+    assert_eq!(
+        why,
+        "wrote .python-version (3.12): the fix kept the environment on Python 3.12, and without the pin a plain `uv sync` would move it to uv's default here, Python 3.15 (the global `uv python pin`)"
+    );
+    // uv would choose 3.12 anyway: no file.
+    assert_eq!(
+        sync_pin(None, Some(py(12)), Some(d(12, uv::DefaultSource::Found))),
+        None
+    );
+    // The project pins already; or nothing is known.
+    assert_eq!(
+        sync_pin(
+            Some(py(12)),
+            Some(py(12)),
+            Some(d(15, uv::DefaultSource::GlobalPin))
+        ),
+        None
+    );
+    assert_eq!(
+        sync_pin(None, None, Some(d(15, uv::DefaultSource::Found))),
+        None
+    );
+    assert_eq!(sync_pin(None, Some(py(12)), None), None);
+}
+
+#[test]
+fn uv_default_follows_pins_then_requires_python() {
+    use uv::{default_from_pins, newest_allowed, DefaultSource};
+    let py = |m| PyVersion::py3(m);
+    // The project pin wins over everything.
+    let got = default_from_pins(Some(py(11)), Some(py(15)), Some(">=3.9"), true).unwrap();
+    assert_eq!(
+        (got.python, got.source),
+        (py(11), DefaultSource::ProjectPin)
+    );
+    // The global pin, when requires-python allows it.
+    let got = default_from_pins(None, Some(py(15)), Some(">=3.9"), false).unwrap();
+    assert_eq!((got.python, got.source), (py(15), DefaultSource::GlobalPin));
+    // uv skips a global pin requires-python rules out, and UV_PYTHON
+    // overrides it: ask uv then.
+    assert_eq!(
+        default_from_pins(None, Some(py(15)), Some(">=3.9,<3.13"), false),
+        None
+    );
+    assert_eq!(default_from_pins(None, Some(py(15)), None, true), None);
+    // Last resort: the newest known interpreter requires-python allows.
+    let got = newest_allowed(&[py(15), py(12), py(11)], Some(">=3.9,<3.13")).unwrap();
+    assert_eq!((got.python, got.source), (py(12), DefaultSource::Newest));
+    assert_eq!(newest_allowed(&[py(8)], Some(">=3.9")), None);
 }
 
 #[test]

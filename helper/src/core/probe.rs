@@ -78,7 +78,7 @@ pub fn read_python_pin(workspace: &Path) -> Option<PyVersion> {
     parse_python_pin(&text)
 }
 
-fn parse_python_pin(text: &str) -> Option<PyVersion> {
+pub fn parse_python_pin(text: &str) -> Option<PyVersion> {
     text.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))

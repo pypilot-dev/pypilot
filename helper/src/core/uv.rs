@@ -509,6 +509,131 @@ pub async fn pin(uv: &UvInfo, version: PyVersion, cwd: &Path) -> crate::Result<O
     .await
 }
 
+/// The Python uv picks for a project on its own, and why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UvDefault {
+    pub python: PyVersion,
+    pub source: DefaultSource,
+}
+
+/// Where [`UvDefault`] comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefaultSource {
+    /// The project's own `.python-version`.
+    ProjectPin,
+    /// A global `uv python pin` (`.python-version` in uv's config dir).
+    GlobalPin,
+    /// `uv python find`: the newest Python uv has that requires-python allows.
+    Found,
+    /// No uv answer: the newest known interpreter requires-python allows.
+    Newest,
+}
+
+impl UvDefault {
+    /// "uv's default here, Python 3.15 (the global `uv python pin`)".
+    pub fn describe(&self) -> String {
+        let why = match self.source {
+            DefaultSource::ProjectPin => "the project's .python-version",
+            DefaultSource::GlobalPin => "the global `uv python pin`",
+            DefaultSource::Found | DefaultSource::Newest => {
+                "the newest Python uv finds that requires-python allows"
+            }
+        };
+        format!("uv's default here, Python {} ({why})", self.python)
+    }
+}
+
+/// uv's global `.python-version` (`uv python pin --global`): in
+/// `%APPDATA%\uv` on Windows, `$XDG_CONFIG_HOME/uv` or `~/.config/uv`
+/// elsewhere.
+pub fn global_pin_file() -> Option<PathBuf> {
+    let dir = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+    }?;
+    Some(dir.join("uv").join(".python-version"))
+}
+
+/// The cheap steps of [`uv_default`], without running uv: the project pin,
+/// then the global pin when requires-python allows it (uv skips one it
+/// does not). `UV_PYTHON` overrides both in uv, so with it set this says
+/// nothing and uv is asked.
+pub fn default_from_pins(
+    project_pin: Option<PyVersion>,
+    global_pin: Option<PyVersion>,
+    requires_python: Option<&str>,
+    uv_python_env: bool,
+) -> Option<UvDefault> {
+    if let Some(p) = project_pin {
+        return Some(UvDefault {
+            python: p,
+            source: DefaultSource::ProjectPin,
+        });
+    }
+    if uv_python_env {
+        return None;
+    }
+    let allowed = |py: PyVersion| {
+        requires_python.map_or(true, |rp| {
+            crate::pypi::pyversion::parse_requires_python(rp).contains(py)
+        })
+    };
+    global_pin.filter(|p| allowed(*p)).map(|p| UvDefault {
+        python: p,
+        source: DefaultSource::GlobalPin,
+    })
+}
+
+/// The last resort of [`uv_default`]: the newest of `known` that
+/// requires-python allows.
+pub fn newest_allowed(known: &[PyVersion], requires_python: Option<&str>) -> Option<UvDefault> {
+    let set = requires_python.map(crate::pypi::pyversion::parse_requires_python);
+    known
+        .iter()
+        .copied()
+        .filter(|py| set.as_ref().map_or(true, |s| s.contains(*py)))
+        .max()
+        .map(|python| UvDefault {
+            python,
+            source: DefaultSource::Newest,
+        })
+}
+
+/// The Python a plain `uv sync` would build `.venv` on, cheapest first:
+/// the project's `.python-version`, a global `uv python pin` that
+/// requires-python allows, `uv python find --system` from the project dir,
+/// then the newest of `known` that requires-python allows. Read-only.
+pub async fn uv_default(
+    uv: &UvInfo,
+    workspace: &Path,
+    requires_python: Option<&str>,
+    known: &[PyVersion],
+) -> Option<UvDefault> {
+    let global = global_pin_file()
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .and_then(|t| crate::core::probe::parse_python_pin(&t));
+    let uv_python_env = std::env::var_os("UV_PYTHON").is_some_and(|v| !v.is_empty());
+    if let Some(d) = default_from_pins(
+        crate::core::probe::read_python_pin(workspace),
+        global,
+        requires_python,
+        uv_python_env,
+    ) {
+        return Some(d);
+    }
+    if let Some(python) = default_python(uv, workspace).await {
+        return Some(UvDefault {
+            python,
+            source: DefaultSource::Found,
+        });
+    }
+    newest_allowed(known, requires_python)
+}
+
 /// The Python uv uses for this project when nothing pins one locally:
 /// `uv python find --system --show-version`, which follows a global
 /// `uv python pin` and the project's requires-python but not its `.venv`.

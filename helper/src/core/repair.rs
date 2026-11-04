@@ -521,6 +521,23 @@ async fn run_fixes<S: MetadataSource>(
         knowledge::apply::apply_all(workspace, settings, &plan.known, &mut summary.steps).await;
     }
 
+    // A rebuild pins its own Python (`pin_change`); a fix that kept the venv
+    // pins it too when uv would move it on the next plain sync.
+    if summary.steps.iter().all(|s| s.ok)
+        && plan.rebuild.is_none()
+        && (plan.sync || !plan.known.is_empty())
+    {
+        keep_python(
+            workspace,
+            &env,
+            uv_info.as_ref(),
+            mode,
+            &assessment,
+            &mut summary,
+        )
+        .await;
+    }
+
     if summary.steps.iter().all(|s| s.ok) {
         if env.dir == workspace.join(".venv") {
             setup::ensure_ipykernel(workspace, settings, mode, &mut summary).await;
@@ -752,7 +769,7 @@ async fn rebuild_env(
             let pin = assessment.probes.python_pin;
             if mode == ResolvedMode::UvFull && exec::exists(&workspace.join("pyproject.toml")) {
                 let uv_default = match pin {
-                    None => uv::default_python(uv_info, workspace).await,
+                    None => uv_default_for(uv_info, workspace, assessment).await,
                     Some(_) => None,
                 };
                 if let Some(why) = pin_change(pin, py, rebuild, uv_default) {
@@ -805,7 +822,7 @@ fn pin_change(
     pin: Option<PyVersion>,
     py: PyVersion,
     rebuild: &Rebuild,
-    uv_default: Option<PyVersion>,
+    uv_default: Option<uv::UvDefault>,
 ) -> Option<String> {
     match pin {
         Some(p) if p == py => None,
@@ -814,10 +831,10 @@ fn pin_change(
             rebuild.reason
         )),
         Some(_) => None,
-        None if uv_default == Some(py) => None,
+        None if uv_default.is_some_and(|d| d.python == py) => None,
         None => {
             let otherwise = match uv_default {
-                Some(d) => format!("uv's default here, Python {d}"),
+                Some(d) => d.describe(),
                 None => "another Python".to_string(),
             };
             Some(format!(
@@ -825,6 +842,88 @@ fn pin_change(
                 rebuild.reason
             ))
         }
+    }
+}
+
+/// [`uv::uv_default`] for the project: its requires-python, and the
+/// interpreters the probe found as the last resort.
+async fn uv_default_for(
+    uv_info: &uv::UvInfo,
+    workspace: &Path,
+    assessment: &Assessment,
+) -> Option<uv::UvDefault> {
+    let known: Vec<PyVersion> = assessment
+        .probes
+        .interpreters
+        .iter()
+        .map(|i| i.version)
+        .collect();
+    let rp = assessment.project.declared_requires_python.as_deref();
+    uv::uv_default(uv_info, workspace, rp, &known).await
+}
+
+/// Whether a fix that kept the venv where it was (a sync, a known-breakage
+/// fix) writes `.python-version`, and the step's detail when it does. With
+/// no pin, a plain `uv sync` rebuilds `.venv` on uv's own default, so a
+/// venv on any other Python lasts only until then (E s07: 3.12 kept by the
+/// fix, moved to 3.15 by the global pin, where SQLAlchemy 2.0.30 does not
+/// import). An existing pin is uv's choice already; the findings report a
+/// venv that does not match it.
+fn sync_pin(
+    pin: Option<PyVersion>,
+    venv: Option<PyVersion>,
+    uv_default: Option<uv::UvDefault>,
+) -> Option<String> {
+    if pin.is_some() {
+        return None;
+    }
+    let py = venv?;
+    let d = uv_default?;
+    (d.python != py).then(|| {
+        format!(
+            "wrote .python-version ({py}): the fix kept the environment on Python {py}, and without the pin a plain `uv sync` would move it to {}",
+            d.describe()
+        )
+    })
+}
+
+/// After a fix that kept the venv in place: pin its Python when uv would
+/// otherwise move it ([`sync_pin`]). Only for a uv project's own `.venv`,
+/// which is what a plain `uv sync` rebuilds.
+async fn keep_python(
+    workspace: &Path,
+    env: &Target,
+    uv_info: Option<&uv::UvInfo>,
+    mode: ResolvedMode,
+    assessment: &Assessment,
+    summary: &mut SetupSummary,
+) {
+    let Some(uv_info) = uv_info else {
+        return;
+    };
+    if mode != ResolvedMode::UvFull
+        || !exec::exists(&workspace.join("pyproject.toml"))
+        || env.custom_dir(workspace).is_some()
+        || env.damaged
+    {
+        return;
+    }
+    let pin = crate::core::probe::read_python_pin(workspace);
+    if pin.is_some() {
+        return;
+    }
+    let default = uv_default_for(uv_info, workspace, assessment).await;
+    let Some(why) = sync_pin(pin, env.python, default) else {
+        return;
+    };
+    let Some(py) = env.python else {
+        return;
+    };
+    let name = format!("uv python pin {py}");
+    match uv::pin(uv_info, py, workspace).await {
+        Ok(out) if out.success() => step(summary, &name, true, &why),
+        Ok(out) => step(summary, &name, false, out.stderr.trim()),
+        Err(e) => step(summary, &name, false, &e.to_string()),
     }
 }
 
