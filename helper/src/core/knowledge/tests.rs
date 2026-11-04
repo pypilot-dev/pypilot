@@ -299,11 +299,29 @@ fn packages_dead_on_new_python_get_upgrade_or_replacement() {
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].fix, constraint("kafka-python>=2.0.3,<3"));
 
+    // E s04: no release of nose works on 3.12. Nothing pins the Python, so
+    // the fix is a rebuild on 3.11, which keeps `import nose` working.
     ctx.installed = installed(&[("nose", "1.3.7")]);
+    ctx.requires_python = Some(">=3.9".into());
     let found = evaluate(&bundled(), &ctx);
     assert_eq!(found[0].title, "nose 1.3.7 does not work on Python 3.12");
-    assert_eq!(found[0].fix, FixKind::Manual);
+    assert_eq!(
+        found[0].fix,
+        FixKind::RecreateWithPython(PyVersion::py3(11))
+    );
     assert!(found[0].detail.contains("pytest") && found[0].detail.contains("3.11"));
+
+    // .python-version pins 3.12, or requires-python excludes 3.11: advice only.
+    ctx.python_pin = Some(PyVersion::py3(12));
+    let found = evaluate(&bundled(), &ctx);
+    assert_eq!(found[0].fix, FixKind::Manual);
+    assert!(found[0].detail.contains(".python-version pins Python 3.12"));
+    ctx.python_pin = None;
+    ctx.requires_python = Some(">=3.12".into());
+    let found = evaluate(&bundled(), &ctx);
+    assert_eq!(found[0].fix, FixKind::Manual);
+    assert!(found[0].detail.contains("does not allow it"));
+    ctx.requires_python = None;
 
     // attrdict3 is a drop-in, so the swap is automatic.
     ctx.installed = installed(&[("attrdict", "2.0.1")]);
@@ -738,5 +756,169 @@ dependencies = [\"jwt\", \"pyjwt\"]
             before
         );
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// --- removed symbols ----------------------------------------------------------
+
+fn code_use(module: &str, symbol: &str, written: &str, line: u32) -> rules::CodeUse {
+    rules::CodeUse {
+        module: module.into(),
+        symbol: symbol.into(),
+        file: "app.py".into(),
+        line,
+        written: written.into(),
+        from_import: written.starts_with("from "),
+    }
+}
+
+#[test]
+fn np_float_with_numpy_1_24_points_at_the_code_and_caps_numpy() {
+    // E s08: numpy 1.26 installed, app.py uses np.float.
+    let mut ctx = venv_ctx(12);
+    ctx.installed = installed(&[("numpy", "1.26.4")]);
+    ctx.symbol_uses = vec![code_use("numpy", "float", "np.float", 2)];
+    ctx.declared = vec![req("numpy", "")];
+    let found = evaluate(&bundled(), &ctx);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    let f = &found[0];
+    assert_eq!(f.title, "`np.float` fails: numpy 1.24 removed it");
+    assert!(
+        f.detail.contains("app.py:2 uses `np.float`"),
+        "{}",
+        f.detail
+    );
+    assert!(f.detail.contains("module 'numpy' has no attribute 'float'"));
+    assert_eq!(f.fix, constraint("numpy<1.24"));
+
+    // The project asks for numpy>=1.24 itself: the cap is ruled out, the
+    // code has to change.
+    ctx.declared = vec![req("numpy", ">=1.24")];
+    let found = evaluate(&bundled(), &ctx);
+    assert_eq!(found[0].fix, FixKind::Manual);
+    assert!(found[0].detail.contains("rules out `numpy<1.24`"));
+
+    // numpy 1.23 still has it: silent.
+    ctx.installed = installed(&[("numpy", "1.23.5")]);
+    assert!(evaluate(&bundled(), &ctx).is_empty());
+}
+
+#[test]
+fn a_cap_keeps_the_users_floor() {
+    let mut ctx = venv_ctx(12);
+    ctx.declared_raw = vec![pyproject_req("numpy>=1.20")];
+    ctx.new_requirement_file = Some("pyproject.toml".into());
+    assert_eq!(
+        ctx.constraint_fix("numpy<1.24"),
+        FixKind::EditRequirement(crate::core::RequirementEdit {
+            file: "pyproject.toml".into(),
+            old: "numpy>=1.20".into(),
+            new: "numpy>=1.20,<1.24".into(),
+        })
+    );
+    // A floor at or above the cap cannot stay.
+    ctx.declared_raw = vec![pyproject_req("numpy>=1.25")];
+    let FixKind::EditRequirement(e) = ctx.constraint_fix("numpy<1.24") else {
+        panic!()
+    };
+    assert_eq!(e.new, "numpy<1.24");
+}
+
+#[test]
+fn pydantic_2_base_settings_adds_pydantic_settings() {
+    // E s09: pydantic>=2 declared, `from pydantic import BaseSettings`.
+    let mut ctx = venv_ctx(12);
+    ctx.installed = installed(&[("pydantic", "2.8.0")]);
+    ctx.declared = vec![req("pydantic", ">=2")];
+    ctx.symbol_uses = vec![code_use(
+        "pydantic",
+        "BaseSettings",
+        "from pydantic import BaseSettings",
+        1,
+    )];
+    let found = evaluate(&bundled(), &ctx);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    let f = &found[0];
+    assert!(f.detail.contains("pydantic_settings"), "{}", f.detail);
+    assert!(f.detail.contains("PydanticImportError"));
+    assert_eq!(f.fix, constraint("pydantic-settings"));
+    // Once pydantic-settings is there, only the code change is left.
+    ctx.declared.push(req("pydantic-settings", ""));
+    assert_eq!(evaluate(&bundled(), &ctx)[0].fix, FixKind::Manual);
+}
+
+#[test]
+fn stdlib_symbols_name_the_last_python_and_the_code_change() {
+    // E s10: collections.Mapping on 3.10.
+    let mut ctx = venv_ctx(10);
+    ctx.symbol_uses = vec![code_use("collections", "Mapping", "collections.Mapping", 3)];
+    let found = evaluate(&bundled(), &ctx);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    let f = &found[0];
+    assert_eq!(f.severity, Severity::Warning);
+    assert_eq!(f.title, "`collections.Mapping` was removed in Python 3.10");
+    assert!(f.detail.contains("Python 3.9 is the last"), "{}", f.detail);
+    assert!(f
+        .detail
+        .contains("app.py:3 uses `collections.Mapping`: write `collections.abc.Mapping`"));
+    assert_eq!(f.fix, FixKind::Manual);
+
+    // E s11: asyncio.coroutine on 3.11.
+    let mut ctx = venv_ctx(11);
+    ctx.symbol_uses = vec![code_use("asyncio", "coroutine", "asyncio.coroutine", 2)];
+    let found = evaluate(&bundled(), &ctx);
+    assert_eq!(
+        found[0].title,
+        "`asyncio.coroutine` was removed in Python 3.11"
+    );
+    assert!(found[0].detail.contains("async def"));
+
+    // On 3.9 it still works; requires-python allowing 3.10 makes it a note.
+    let mut ctx = venv_ctx(9);
+    ctx.symbol_uses = vec![code_use("collections", "Mapping", "collections.Mapping", 3)];
+    assert!(evaluate(&bundled(), &ctx).is_empty());
+    ctx.requires_python = Some(">=3.9".into());
+    let found = evaluate(&bundled(), &ctx);
+    assert_eq!(found[0].severity, Severity::Info);
+    ctx.requires_python = Some(">=3.9,<3.10".into());
+    assert!(evaluate(&bundled(), &ctx).is_empty());
+}
+
+#[test]
+fn distutils_on_3_11_warns_when_requires_python_allows_3_12() {
+    // E c12c: the venv runs 3.11, where distutils exists, but `>=3.9`
+    // lets the project move to 3.12.
+    let mut ctx = venv_ctx(11);
+    ctx.imports = importing("distutils");
+    assert!(evaluate(&bundled(), &ctx).is_empty());
+    ctx.requires_python = Some(">=3.9".into());
+    let found = evaluate(&bundled(), &ctx);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert_eq!(
+        found[0].title,
+        "`distutils` fails on Python 3.12 and newer, which the project allows"
+    );
+    assert_eq!(found[0].fix, constraint("setuptools"));
+    // Capped below 3.12: nothing to say.
+    ctx.requires_python = Some(">=3.9,<3.12".into());
+    assert!(evaluate(&bundled(), &ctx).is_empty());
+}
+
+#[test]
+fn source_scan_finds_symbol_uses_with_file_and_line() {
+    let dir = scratch("symbols");
+    std::fs::write(
+        dir.join("app.py"),
+        "import numpy as np\nx = np.zeros(3, dtype=np.float)\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("other.py"), "np.float\n").unwrap();
+    let scan = scan_source(&dir, &bundled().symbol_targets());
+    assert_eq!(scan.symbol_uses.len(), 1, "{:?}", scan.symbol_uses);
+    let u = &scan.symbol_uses[0];
+    assert_eq!(
+        (u.file.as_str(), u.line, u.written.as_str()),
+        ("app.py", 2, "np.float")
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

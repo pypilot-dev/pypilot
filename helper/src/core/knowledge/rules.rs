@@ -8,7 +8,9 @@ use crate::core::{Finding, FixKind, Severity};
 use crate::pypi::pyversion::PyVersion;
 use crate::pypi::version::{PackageVersion, VersionSpec};
 
-use super::table::{ApiRemoval, ModuleRemoval, PythonRemoval, Shadowing, StdlibRemoval, Table};
+use super::table::{
+    ApiRemoval, ModuleRemoval, PythonRemoval, Shadowing, StdlibRemoval, SymbolRemoval, Table,
+};
 use super::Replacement;
 use crate::core::req_edit::DeclaredReq;
 use crate::core::RequirementEdit;
@@ -48,6 +50,26 @@ pub struct Context {
     pub new_requirement_file: Option<std::path::PathBuf>,
     /// The project has a `uv.lock`, whose drift the health check reports.
     pub has_lock: bool,
+    /// Where the source uses a symbol `symbol_removals` names.
+    pub symbol_uses: Vec<CodeUse>,
+    /// `requires-python` as declared, when it is.
+    pub requires_python: Option<String>,
+    /// The Python `.python-version` pins, when it names one.
+    pub python_pin: Option<PyVersion>,
+}
+
+/// One use of a removed symbol in the project's source.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CodeUse {
+    pub module: String,
+    pub symbol: String,
+    /// Relative, `/`-separated.
+    pub file: String,
+    /// One-based.
+    pub line: u32,
+    /// The code as written: `np.float`.
+    pub written: String,
+    pub from_import: bool,
 }
 
 impl Context {
@@ -161,6 +183,25 @@ pub fn upgrade_requirement(package: &str, fixed_in: &str) -> String {
     }
 }
 
+/// Does the project's `requires-python` allow `py` or anything newer? False
+/// when it declares none: there is no promise to judge.
+fn allows_from(ctx: &Context, py: PyVersion) -> bool {
+    ctx.requires_python
+        .as_deref()
+        .map(crate::pypi::pyversion::parse_requires_python)
+        .and_then(|set| set.max())
+        .is_some_and(|max| max >= py)
+}
+
+/// Does the project let the environment run on `py`: `requires-python`
+/// admits it and `.python-version` does not pin another Python?
+fn may_run_on(ctx: &Context, py: PyVersion) -> bool {
+    let rp_ok = ctx.requires_python.as_deref().map_or(true, |rp| {
+        crate::pypi::pyversion::parse_requires_python(rp).contains(py)
+    });
+    rp_ok && ctx.python_pin.map_or(true, |p| p == py)
+}
+
 /// `("numpy", "<2")` for `numpy<2`, whitespace dropped from the spec.
 fn split_requirement(requirement: &str) -> (&str, String) {
     let req = requirement.split(';').next().unwrap_or(requirement).trim();
@@ -257,6 +298,7 @@ pub fn evaluate(table: &Table, ctx: &Context) -> Vec<Finding> {
     for rule in &table.stdlib_removals {
         out.extend(stdlib_finding(rule, ctx));
     }
+    out.extend(symbol_findings(&table.symbol_removals, ctx));
     out.extend(drift_findings(ctx));
     out
 }
@@ -574,14 +616,45 @@ fn python_finding(rule: &PythonRemoval, ctx: &Context) -> Option<Finding> {
             install: vec![repl.clone()],
             drop: declared_only(ctx, &[&rule.package]),
         }))
+    } else if ctx.python_is_venv && may_run_on(ctx, last) {
+        // Moving to another package means changing every `import` of this
+        // one; Python {last} keeps the code as it is.
+        let other = rule
+            .replacement
+            .as_ref()
+            .map(|r| {
+                format!(
+                    " Moving to `{r}` instead would mean changing the code that imports {}.",
+                    rule.package
+                )
+            })
+            .unwrap_or_default();
+        detail.push_str(&format!(
+            " No release of {} fixes it. Fix: rebuild the environment on Python {last}, the last it works on, which the project's requires-python and .python-version allow; this is the smaller change, since the code stays as it is.{other}",
+            rule.package
+        ));
+        ctx.fix(FixKind::RecreateWithPython(last))
     } else {
         let instead = rule
             .replacement
             .as_ref()
             .map(|r| format!(" Move the code to `{r}`, or"))
             .unwrap_or_else(|| " Either change the code, or".to_string());
+        let blocked = if ctx.python_pin.is_some_and(|p| p != last) {
+            format!(
+                " (.python-version pins Python {}, so PyPilot does not move it on its own)",
+                ctx.python_pin.map(|p| p.to_string()).unwrap_or_default()
+            )
+        } else if ctx.requires_python.is_some() && !may_run_on(ctx, last) {
+            format!(
+                " (requires-python `{}` does not allow it, so PyPilot does not move it on its own)",
+                ctx.requires_python.as_deref().unwrap_or_default()
+            )
+        } else {
+            String::new()
+        };
         detail.push_str(&format!(
-            " No release of {} fixes it.{instead} keep the project on Python {last} (PyPilot does not change the Python for this on its own).",
+            " No release of {} fixes it.{instead} keep the project on Python {last}{blocked}.",
             rule.package
         ));
         FixKind::Manual
@@ -770,7 +843,14 @@ fn stdlib_finding(rule: &StdlibRemoval, ctx: &Context) -> Option<Finding> {
     let file = ctx.imports.get(&rule.module)?;
     let current = ctx.python?;
     let removed = py(&rule.removed_in)?;
-    if current < removed || ctx.site_modules.contains(&rule.module) {
+    if ctx.site_modules.contains(&rule.module) {
+        return None;
+    }
+    // Works on this Python, but requires-python lets the project move to
+    // one without it (c12c: distutils on 3.11 with `>=3.9`). Only worth a
+    // warning when there is a distribution that brings the module back.
+    let ahead = current < removed;
+    if ahead && !(allows_from(ctx, removed) && rule.replacement.is_some()) {
         return None;
     }
     if let Some(repl) = &rule.replacement {
@@ -785,9 +865,24 @@ fn stdlib_finding(rule: &StdlibRemoval, ctx: &Context) -> Option<Finding> {
     } else {
         "The environment would run"
     };
-    let title = format!("`{module}` was removed in Python {removed}");
+    let (title, now) = if ahead {
+        (
+            format!("`{module}` fails on Python {removed} and newer, which the project allows"),
+            format!(
+                "{whose} Python {current}, where it still works, but requires-python `{}` allows Python {removed} and newer, where the import fails with \"ModuleNotFoundError: No module named '{module}'\".",
+                ctx.requires_python.as_deref().unwrap_or_default()
+            ),
+        )
+    } else {
+        (
+            format!("`{module}` was removed in Python {removed}"),
+            format!(
+                "{whose} Python {current}, so the import fails with \"ModuleNotFoundError: No module named '{module}'\"."
+            ),
+        )
+    };
     let mut detail = format!(
-        "{file} imports `{module}`, which Python {removed} removed from the standard library; Python {last} is the last that has it. {whose} Python {current}, so the import fails with \"ModuleNotFoundError: No module named '{module}'\". Fix: "
+        "{file} imports `{module}`, which Python {removed} removed from the standard library; Python {last} is the last that has it. {now} Fix: "
     );
     let fix = match &rule.replacement {
         Some(repl) => {
@@ -830,4 +925,232 @@ pub fn install_requirement_for(
         Some(v) if !at_least(v, &rule.breaks_from) => None,
         _ => Some(rule.constraint.clone()),
     }
+}
+
+// --- module symbols a dependency or Python removed ----------------------------
+
+/// How many uses a finding lists before "and N more".
+const MAX_LISTED_USES: usize = 5;
+
+/// Findings for removed symbols the source uses: one per distribution
+/// release that removed some (`numpy 1.24`), one per Python release.
+fn symbol_findings(rows: &[SymbolRemoval], ctx: &Context) -> Vec<Finding> {
+    let mut by_dist: BTreeMap<(String, String), Vec<(&SymbolRemoval, &CodeUse)>> = BTreeMap::new();
+    let mut by_python: BTreeMap<String, Vec<(&SymbolRemoval, &CodeUse)>> = BTreeMap::new();
+    for u in &ctx.symbol_uses {
+        let Some(row) = rows
+            .iter()
+            .find(|r| r.module == u.module && r.symbol == u.symbol)
+        else {
+            continue;
+        };
+        match (&row.dependency, &row.breaks_from, &row.removed_in) {
+            (Some(dep), Some(from), _) => by_dist
+                .entry((normalize_name(dep), from.clone()))
+                .or_default()
+                .push((row, u)),
+            (_, _, Some(py)) => by_python.entry(py.clone()).or_default().push((row, u)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for hits in by_dist.values() {
+        out.extend(dist_symbol_finding(hits, ctx));
+    }
+    for hits in by_python.values() {
+        out.extend(python_symbol_finding(hits, ctx));
+    }
+    out
+}
+
+/// The error a use fails with.
+fn symbol_symptom(row: &SymbolRemoval, u: &CodeUse) -> String {
+    if let Some(s) = &row.symptom {
+        return s.clone();
+    }
+    if u.from_import {
+        format!(
+            "ImportError: cannot import name '{}' from '{}'",
+            row.symbol, row.module
+        )
+    } else {
+        format!(
+            "AttributeError: module '{}' has no attribute '{}'",
+            row.module, row.symbol
+        )
+    }
+}
+
+/// "`np.float`" or "`np.float` and 2 more", for a title.
+fn uses_label(hits: &[(&SymbolRemoval, &CodeUse)]) -> String {
+    let mut written: Vec<&str> = Vec::new();
+    for (_, u) in hits {
+        if !written.contains(&u.written.as_str()) {
+            written.push(&u.written);
+        }
+    }
+    match written.len() {
+        1 => format!("`{}`", written[0]),
+        n => format!("`{}` and {} more", written[0], n - 1),
+    }
+}
+
+/// "app.py:2 uses `np.float`: write `float` instead." per use, capped.
+fn uses_detail(hits: &[(&SymbolRemoval, &CodeUse)]) -> String {
+    let mut parts: Vec<String> = hits
+        .iter()
+        .take(MAX_LISTED_USES)
+        .map(|(r, u)| {
+            format!(
+                "{}:{} uses `{}`: write {} instead.",
+                u.file, u.line, u.written, r.replacement
+            )
+        })
+        .collect();
+    if hits.len() > MAX_LISTED_USES {
+        parts.push(format!(
+            "{} more use(s) like these.",
+            hits.len() - MAX_LISTED_USES
+        ));
+    }
+    parts.join(" ")
+}
+
+fn dist_symbol_finding(hits: &[(&SymbolRemoval, &CodeUse)], ctx: &Context) -> Option<Finding> {
+    let row = hits[0].0;
+    let dep = row.dependency.as_deref()?;
+    let from = row.breaks_from.as_deref()?;
+    let constraint = row.constraint.as_deref()?;
+    let decl = ctx.declared_plain(dep);
+    let have = ctx
+        .installed_version(dep)
+        .map(str::to_string)
+        .or_else(|| {
+            if ctx.is_installed(dep) {
+                return None;
+            }
+            ctx.resolved_version(dep).map(str::to_string)
+        })
+        .or_else(|| {
+            decl.and_then(|d| d.spec.strip_prefix("=="))
+                .filter(|v| !v.contains('*'))
+                .map(str::to_string)
+        });
+    let now = match &have {
+        Some(v) if below(v, from) => return None,
+        Some(_) => true,
+        None => {
+            let d = decl?;
+            if !admits_from(&d.spec, from) {
+                return None;
+            }
+            false
+        }
+    };
+    let label = uses_label(hits);
+    let title = if now {
+        format!("{label} fails: {dep} {from} removed it")
+    } else {
+        format!("{label} will fail: {dep} {from} removed it")
+    };
+    let mut detail = format!(
+        "{dep} {from} removed APIs the code uses. {} ",
+        uses_detail(hits)
+    );
+    match &have {
+        Some(v) if ctx.installed_version(dep).is_some() => detail.push_str(&format!(
+            "{dep} {v} is installed, so the code fails with \"{}\". ",
+            symbol_symptom(row, hits[0].1)
+        )),
+        _ => detail.push_str(&format!(
+            "Nothing in the project keeps {dep} below {from}, so the code fails with \"{}\". ",
+            symbol_symptom(row, hits[0].1)
+        )),
+    }
+    let forced = decl.is_some_and(|d| forces_from(&d.spec, from));
+    let add = hits
+        .iter()
+        .find_map(|(r, _)| r.add.clone())
+        .filter(|a| ctx.declared(a).is_none() && !ctx.is_installed(a));
+    let fix = if forced {
+        let spec = decl.map(|d| d.spec.as_str()).unwrap_or("");
+        match &add {
+            Some(a) => {
+                detail.push_str(&format!(
+                    "The project requires {dep}{spec}, which rules out `{constraint}`. Fix: change the code as above; PyPilot adds `{a}`, which the new code needs."
+                ));
+                ctx.constraint_fix(a)
+            }
+            None => {
+                detail.push_str(&format!(
+                    "The project requires {dep}{spec}, which rules out `{constraint}`, so the code has to change as above (PyPilot does not edit source)."
+                ));
+                FixKind::Manual
+            }
+        }
+    } else {
+        let and_add = add
+            .as_ref()
+            .map(|a| format!(" and add `{a}`"))
+            .unwrap_or_default();
+        detail.push_str(&format!(
+            "Fix: add `{constraint}` to keep the old API until the code is changed, or change the code as above{and_add}."
+        ));
+        ctx.constraint_fix(constraint)
+    };
+    detail.push_str(&source_line(&row.source));
+    Some(Finding {
+        severity: Severity::Warning,
+        title,
+        detail,
+        fix,
+    })
+}
+
+fn python_symbol_finding(hits: &[(&SymbolRemoval, &CodeUse)], ctx: &Context) -> Option<Finding> {
+    let row = hits[0].0;
+    let removed = py(row.removed_in.as_deref()?)?;
+    let current = ctx.python?;
+    let ahead = current < removed;
+    if ahead && !allows_from(ctx, removed) {
+        return None;
+    }
+    let last = PyVersion::new(removed.major, removed.minor.saturating_sub(1));
+    let label = uses_label(hits);
+    let whose = if ctx.python_is_venv {
+        "The venv runs"
+    } else {
+        "The environment would run"
+    };
+    let (severity, title, now) = if ahead {
+        (
+            Severity::Info,
+            format!("{label} fails on Python {removed} and newer, which the project allows"),
+            format!(
+                "{whose} Python {current}, where it still works, but requires-python `{}` allows Python {removed} and newer, where it fails with \"{}\".",
+                ctx.requires_python.as_deref().unwrap_or_default(),
+                symbol_symptom(row, hits[0].1)
+            ),
+        )
+    } else {
+        (
+            Severity::Warning,
+            format!("{label} was removed in Python {removed}"),
+            format!(
+                "{whose} Python {current}, so it fails with \"{}\".",
+                symbol_symptom(row, hits[0].1)
+            ),
+        )
+    };
+    let detail = format!(
+        "Python {removed} removed these from the standard library; Python {last} is the last that has them. {now} {} Fix: change the code as above. PyPilot does not move the project to an older Python for this.{}",
+        uses_detail(hits),
+        source_line(&row.source)
+    );
+    Some(Finding {
+        severity,
+        title,
+        detail,
+        fix: FixKind::Manual,
+    })
 }

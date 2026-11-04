@@ -124,6 +124,7 @@ pub fn context(
         None => (None, HashSet::new(), HashSet::new()),
     };
     let venv_python = venv.and_then(|(_, p)| p);
+    let source = scan_source(workspace, &table::table().symbol_targets());
     rules::Context {
         declared_raw: crate::core::req_edit::declared(workspace).reqs,
         new_requirement_file: new_requirement_file(workspace),
@@ -135,7 +136,10 @@ pub fn context(
         site_modules,
         python: venv_python.or(target),
         python_is_venv: venv_python.is_some(),
-        imports: project_imports(workspace),
+        imports: source.imports,
+        symbol_uses: source.symbol_uses,
+        requires_python: project.declared_requires_python.clone(),
+        python_pin: crate::core::probe::read_python_pin(workspace),
         declared_conflicts,
         pixi: project.is_pixi(),
     }
@@ -234,11 +238,27 @@ pub fn pyproject_dependencies(doc: &toml::Table) -> Vec<String> {
 /// each with the first file (relative, `/`-separated) that imports it. The
 /// project's own modules are left out.
 pub fn project_imports(workspace: &Path) -> BTreeMap<String, String> {
+    scan_source(workspace, &[]).imports
+}
+
+/// What [`scan_source`] found in the project's source.
+#[derive(Debug, Default)]
+pub struct SourceScan {
+    /// See [`project_imports`].
+    pub imports: BTreeMap<String, String>,
+    /// Uses of the `(module, symbol)` targets, in file order.
+    pub symbol_uses: Vec<rules::CodeUse>,
+}
+
+/// One walk over the project's `.py` files and notebooks: the modules they
+/// import, and where they use one of `targets` (`numpy.float`).
+pub fn scan_source(workspace: &Path, targets: &[(String, String)]) -> SourceScan {
     let mut files = Vec::new();
     let mut budget = MAX_SOURCE_ENTRIES;
     source_files(workspace, &mut files, &mut budget);
     let local = local_modules(workspace);
     let mut out = BTreeMap::new();
+    let mut uses = Vec::new();
     for file in files {
         let Ok(text) = std::fs::read_to_string(&file) else {
             continue;
@@ -256,14 +276,36 @@ pub fn project_imports(workspace: &Path) -> BTreeMap<String, String> {
             .unwrap_or(&file)
             .to_string_lossy()
             .replace('\\', "/");
-        for import in crate::core::imports::extract(&source) {
+        let imports = crate::core::imports::extract(&source);
+        let wanted: Vec<(String, String)> = targets
+            .iter()
+            .filter(|(m, _)| {
+                let top = m.split('.').next().unwrap_or(m);
+                !local.contains(top) && imports.iter().any(|i| i.module == top)
+            })
+            .cloned()
+            .collect();
+        for u in crate::core::imports::symbol_uses(&source, &wanted) {
+            uses.push(rules::CodeUse {
+                module: u.module,
+                symbol: u.symbol,
+                file: rel.clone(),
+                line: u.line,
+                written: u.written,
+                from_import: u.from_import,
+            });
+        }
+        for import in imports {
             if local.contains(&import.module) {
                 continue;
             }
             out.entry(import.module).or_insert_with(|| rel.clone());
         }
     }
-    out
+    SourceScan {
+        imports: out,
+        symbol_uses: uses,
+    }
 }
 
 /// Directories never searched for project source.

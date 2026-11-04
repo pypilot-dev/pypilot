@@ -115,6 +115,41 @@ pub struct StdlibRemoval {
     pub source: String,
 }
 
+/// A module attribute a distribution release or a Python removed, which
+/// source still uses (`np.float`, `from pydantic import BaseSettings`,
+/// `collections.Mapping`).
+///
+/// A distribution row has `dependency`, `breaks_from` and `constraint`; a
+/// standard library row has `removed_in`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct SymbolRemoval {
+    pub id: String,
+    /// The module the symbol was looked up in, dotted.
+    pub module: String,
+    pub symbol: String,
+    /// The first Python without it (standard library rows).
+    #[serde(default)]
+    pub removed_in: Option<String>,
+    /// The distribution that removed it (distribution rows).
+    #[serde(default)]
+    pub dependency: Option<String>,
+    /// First release of `dependency` without it.
+    #[serde(default)]
+    pub breaks_from: Option<String>,
+    /// The requirement that keeps the old API: `numpy<1.24`.
+    #[serde(default)]
+    pub constraint: Option<String>,
+    /// A distribution the replacement code needs: `pydantic-settings`.
+    #[serde(default)]
+    pub add: Option<String>,
+    /// The error, when it is not the plain AttributeError or ImportError.
+    #[serde(default)]
+    pub symptom: Option<String>,
+    /// What to write instead.
+    pub replacement: String,
+    pub source: String,
+}
+
 /// The whole table.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Table {
@@ -123,6 +158,7 @@ pub struct Table {
     pub shadowing: Vec<Shadowing>,
     pub module_removals: Vec<ModuleRemoval>,
     pub stdlib_removals: Vec<StdlibRemoval>,
+    pub symbol_removals: Vec<SymbolRemoval>,
 }
 
 impl Table {
@@ -137,6 +173,7 @@ impl Table {
             shadowing: rows(&value, "shadowing"),
             module_removals: rows(&value, "module_removals"),
             stdlib_removals: rows(&value, "stdlib_removals"),
+            symbol_removals: rows(&value, "symbol_removals"),
         })
     }
 
@@ -146,6 +183,15 @@ impl Table {
             && self.shadowing.is_empty()
             && self.module_removals.is_empty()
             && self.stdlib_removals.is_empty()
+            && self.symbol_removals.is_empty()
+    }
+
+    /// Every `(module, symbol)` pair `symbol_removals` names, for the scan.
+    pub fn symbol_targets(&self) -> Vec<(String, String)> {
+        self.symbol_removals
+            .iter()
+            .map(|r| (r.module.clone(), r.symbol.clone()))
+            .collect()
     }
 
     /// The `stdlib_removals` row for `module`, if Python removed it.
@@ -203,6 +249,13 @@ mod tests {
         assert_eq!(t.shadowing.len(), count("shadowing"));
         assert_eq!(t.module_removals.len(), count("module_removals"));
         assert_eq!(t.stdlib_removals.len(), count("stdlib_removals"));
+        assert_eq!(t.symbol_removals.len(), count("symbol_removals"));
+        // Each row is a Python removal or a distribution removal.
+        for r in &t.symbol_removals {
+            let by_dist =
+                r.dependency.is_some() && r.breaks_from.is_some() && r.constraint.is_some();
+            assert!(by_dist != r.removed_in.is_some(), "{}", r.id);
+        }
         assert!(t.stdlib_removal("distutils").is_some());
         assert!(t.module_removal("pkg_resources").is_some());
     }
