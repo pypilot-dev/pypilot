@@ -103,6 +103,18 @@ pub async fn assess<S: MetadataSource, R: Resolver>(
     findings
 }
 
+/// The code changes the project still needs in the environment at `venv`
+/// ([`rules::code_changes`]): uses of symbols its dependencies or Python
+/// removed that no requirement edit can fix. File reads only.
+pub fn code_changes(workspace: &Path, venv: (&Path, Option<PyVersion>)) -> Vec<String> {
+    let project = project::scan(workspace);
+    if !project.is_python_project() {
+        return Vec::new();
+    }
+    let ctx = context(workspace, &project, None, Some(venv), None);
+    rules::code_changes(table::table(), &ctx)
+}
+
 /// A finding's requirement edit must leave the project resolvable: an
 /// upgrade of a pinned package next to other pins often does not (flask
 /// 1.1.2 to 2.x with jinja2==2.11.3 pinned). When uv finds no solution

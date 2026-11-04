@@ -1008,8 +1008,21 @@ const MAX_LISTED_USES: usize = 5;
 /// Findings for removed symbols the source uses: one per distribution
 /// release that removed some (`numpy 1.24`), one per Python release.
 fn symbol_findings(rows: &[SymbolRemoval], ctx: &Context) -> Vec<Finding> {
-    let mut by_dist: BTreeMap<(String, String), Vec<(&SymbolRemoval, &CodeUse)>> = BTreeMap::new();
-    let mut by_python: BTreeMap<String, Vec<(&SymbolRemoval, &CodeUse)>> = BTreeMap::new();
+    symbol_groups(rows, ctx)
+        .into_iter()
+        .filter_map(|(f, _)| f)
+        .collect()
+}
+
+/// Each finding [`symbol_findings`] makes, next to the uses it is about.
+type Hits<'a> = Vec<(&'a SymbolRemoval, &'a CodeUse)>;
+
+fn symbol_groups<'a>(
+    rows: &'a [SymbolRemoval],
+    ctx: &'a Context,
+) -> Vec<(Option<Finding>, Hits<'a>)> {
+    let mut by_dist: BTreeMap<(String, String), Hits<'a>> = BTreeMap::new();
+    let mut by_python: BTreeMap<String, Hits<'a>> = BTreeMap::new();
     for u in &ctx.symbol_uses {
         let Some(row) = rows
             .iter()
@@ -1027,11 +1040,11 @@ fn symbol_findings(rows: &[SymbolRemoval], ctx: &Context) -> Vec<Finding> {
         }
     }
     let mut out = Vec::new();
-    for hits in by_dist.values() {
-        out.extend(dist_symbol_finding(hits, ctx));
+    for hits in by_dist.into_values() {
+        out.push((dist_symbol_finding(&hits, ctx), hits));
     }
-    for hits in by_python.values() {
-        out.extend(python_symbol_finding(hits, ctx));
+    for hits in by_python.into_values() {
+        out.push((python_symbol_finding(&hits, ctx), hits));
     }
     out
 }
@@ -1087,6 +1100,46 @@ fn uses_detail(hits: &[(&SymbolRemoval, &CodeUse)]) -> String {
         ));
     }
     parts.join(" ")
+}
+
+/// The fix sentence for code that uses removed symbols: "change app.py:1
+/// to `from pydantic_settings import BaseSettings` (...)" for one use,
+/// "change the code as above (app.py:2, app.py:5)" for several.
+fn code_fix(hits: &[(&SymbolRemoval, &CodeUse)]) -> String {
+    match hits {
+        [(row, u)] => format!("change {}:{} to {}", u.file, u.line, row.replacement),
+        _ => {
+            let mut at: Vec<String> = Vec::new();
+            for (_, u) in hits.iter().take(MAX_LISTED_USES) {
+                let loc = format!("{}:{}", u.file, u.line);
+                if !at.contains(&loc) {
+                    at.push(loc);
+                }
+            }
+            let more = if hits.len() > MAX_LISTED_USES {
+                ", ..."
+            } else {
+                ""
+            };
+            format!("change the code as above ({}{more})", at.join(", "))
+        }
+    }
+}
+
+/// The code changes still needed: for each removed-symbol finding PyPilot
+/// cannot fix itself (the project's pins rule out the old API, or Python
+/// removed it), its title and where the code has to change. The planner
+/// lists these after a fix (E s09), since the environment can be healthy
+/// while the code still fails.
+pub fn code_changes(table: &Table, ctx: &Context) -> Vec<String> {
+    symbol_groups(&table.symbol_removals, ctx)
+        .into_iter()
+        .filter_map(|(f, hits)| {
+            let f = f?;
+            (f.severity != Severity::Info && f.fix == FixKind::Manual)
+                .then(|| format!("{}: {}", f.title, code_fix(&hits)))
+        })
+        .collect()
 }
 
 fn dist_symbol_finding(hits: &[(&SymbolRemoval, &CodeUse)], ctx: &Context) -> Option<Finding> {
@@ -1150,13 +1203,15 @@ fn dist_symbol_finding(hits: &[(&SymbolRemoval, &CodeUse)], ctx: &Context) -> Op
         match &add {
             Some(a) => {
                 detail.push_str(&format!(
-                    "The project requires {dep}{spec}, which rules out `{constraint}`. Fix: change the code as above; PyPilot adds `{a}`, which the new code needs."
+                    "The project requires {dep}{spec}, which rules out `{constraint}`. Fix: {}; PyPilot adds `{a}`, which the new code needs, but does not edit source, so this stays reported until the code changes.",
+                    code_fix(hits)
                 ));
                 ctx.constraint_fix(a)
             }
             None => {
                 detail.push_str(&format!(
-                    "The project requires {dep}{spec}, which rules out `{constraint}`, so the code has to change as above (PyPilot does not edit source)."
+                    "The project requires {dep}{spec}, which rules out `{constraint}`, so the code has to change. Fix: {} (PyPilot does not edit source).",
+                    code_fix(hits)
                 ));
                 FixKind::Manual
             }
@@ -1216,8 +1271,9 @@ fn python_symbol_finding(hits: &[(&SymbolRemoval, &CodeUse)], ctx: &Context) -> 
         )
     };
     let detail = format!(
-        "Python {removed} removed these from the standard library; Python {last} is the last that has them. {now} {} Fix: change the code as above. PyPilot does not move the project to an older Python for this.{}",
+        "Python {removed} removed these from the standard library; Python {last} is the last that has them. {now} {} Fix: {}. PyPilot does not move the project to an older Python for this.{}",
         uses_detail(hits),
+        code_fix(hits),
         source_line(&row.source)
     );
     Some(Finding {

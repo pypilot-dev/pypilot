@@ -848,9 +848,32 @@ fn pydantic_2_base_settings_adds_pydantic_settings() {
     assert!(f.detail.contains("pydantic_settings"), "{}", f.detail);
     assert!(f.detail.contains("PydanticImportError"));
     assert_eq!(f.fix, constraint("pydantic-settings"));
-    // Once pydantic-settings is there, only the code change is left.
+    // The fix names the line and the import to write, and says the finding
+    // stays until the code changes.
+    assert!(
+        f.detail
+            .contains("Fix: change app.py:1 to `from pydantic_settings import BaseSettings`"),
+        "{}",
+        f.detail
+    );
+    assert!(f.detail.contains("stays reported until the code changes"));
+    // Nothing is left to the user while PyPilot still has the addition to make.
+    assert!(rules::code_changes(&bundled(), &ctx).is_empty());
+    // Once pydantic-settings is there, only the code change is left, and
+    // the planner lists it after the fix.
     ctx.declared.push(req("pydantic-settings", ""));
-    assert_eq!(evaluate(&bundled(), &ctx)[0].fix, FixKind::Manual);
+    let after = evaluate(&bundled(), &ctx);
+    assert_eq!(after[0].fix, FixKind::Manual);
+    assert!(after[0]
+        .detail
+        .contains("Fix: change app.py:1 to `from pydantic_settings import BaseSettings`"));
+    assert_eq!(
+        rules::code_changes(&bundled(), &ctx),
+        vec!["`from pydantic import BaseSettings` fails: pydantic 2 removed it: change app.py:1 to `from pydantic_settings import BaseSettings` (from the pydantic-settings package)".to_string()]
+    );
+    // Code that no longer uses it: nothing left.
+    ctx.symbol_uses.clear();
+    assert!(rules::code_changes(&bundled(), &ctx).is_empty());
 }
 
 #[test]
