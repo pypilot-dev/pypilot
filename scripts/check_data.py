@@ -646,12 +646,49 @@ BREAKAGE_OPTIONAL: Dict[str, str] = {
     "keep": "string", "stdlib_since": "string", "severity": "string", "migrate": "string",
     "removed_in": "string", "dependency": "string", "breaks_from": "string",
     "constraint": "string", "add": "string", "symptom": "string",
+    "calls": "array", "calls_in": "array",
 }
 BREAKAGE_KINDS = {"api_removals": {"abi", "api"},
                   "shadowing": {"clash", "backport", "deprecated"}}
 _PYTHON_RE = re.compile(r"^3\.\d+$")
 _VERSION_FIELDS = ("fixed_in", "breaks_from")
 _PYTHON_FIELDS = ("python_min", "python_below", "stdlib_since", "removed_in")
+# A `calls` pattern, as helper/src/core/imports.rs (CallPattern::parse) reads
+# it: `engine.execute(`, `.engine.execute(`, `*.append(`, `conn.execute("`,
+# `*.append(ignore_index=`. A bare `name(` would match every function call.
+_IDENT = r"[A-Za-z_][A-Za-z0-9_]*"
+_CALL_RE = re.compile(
+    rf"^(?:\.|\*\.|\.\*\.)?{_IDENT}(?:\.{_IDENT})*\((?:|\"|'|{_IDENT}=)$")
+_MODULE_RE = re.compile(rf"^{_IDENT}$")
+
+
+def call_problems(where: str, row: Dict) -> List[str]:
+    """Problems with a symbol_removals row's `calls` and `calls_in`."""
+    out: List[str] = []
+    calls = row.get("calls")
+    if calls is None:
+        if "calls_in" in row:
+            out.append(f"{where}.calls_in: only means something next to calls")
+        return out
+    if not calls:
+        out.append(f"{where}.calls: empty")
+    for c in calls if isinstance(calls, list) else []:
+        bare = isinstance(c, str) and not c.startswith((".", "*")) and "." not in c.split("(")[0]
+        if not isinstance(c, str) or not _CALL_RE.match(c) or bare:
+            out.append(f"{where}.calls: {c!r} is not a call pattern")
+    for m in row.get("calls_in", []) if isinstance(row.get("calls_in"), list) else []:
+        if not isinstance(m, str) or not _MODULE_RE.match(m):
+            out.append(f"{where}.calls_in: {m!r} is not a top-level module name")
+    # The default symptom is a module AttributeError, wrong for a method.
+    if "symptom" not in row:
+        out.append(f"{where}.symptom: a calls row says how the call fails")
+    # Engines without `calls` look the symbol up as a module attribute; a
+    # dotted symbol never matches one, so they stay silent.
+    if "." not in str(row.get("symbol", "")):
+        out.append(f"{where}.symbol: a calls row names `Class.method`, with a dot")
+    if "dependency" not in row:
+        out.append(f"{where}: a calls row is a distribution removal")
+    return out
 
 
 def breakage_problems(table: Dict) -> List[str]:
@@ -686,7 +723,13 @@ def breakage_problems(table: Dict) -> List[str]:
                     problems.append(f"{where}.stdlib_since: a backport names its Python")
                 if row.get("kind") == "deprecated" and "keep" not in row:
                     problems.append(f"{where}.keep: a deprecated dist names its replacement")
+            if section == "python_removals" and "breaks_from" in row:
+                if "fixed_in" not in row:
+                    problems.append(f"{where}.breaks_from: needs fixed_in, the end of the range")
+                elif vkey(row["breaks_from"]) >= vkey(row["fixed_in"]):
+                    problems.append(f"{where}.breaks_from: not below fixed_in")
             if section == "symbol_removals":
+                problems.extend(call_problems(where, row))
                 by_dist = all(k in row for k in ("dependency", "breaks_from", "constraint"))
                 if by_dist == ("removed_in" in row):
                     problems.append(f"{where}: needs either removed_in (a Python) or "
@@ -715,6 +758,8 @@ def breakage_names(table: Dict) -> Dict[str, set]:
         wanted.setdefault(row["package"], set())
         if "fixed_in" in row:
             wanted[row["package"]].add(row["fixed_in"])
+        if "breaks_from" in row and row in table.get("python_removals", []):
+            wanted[row["package"]].add(row["breaks_from"])
         for key in ("dependency", "replacement"):
             if key in row:
                 wanted.setdefault(row[key], set())
@@ -902,6 +947,26 @@ def self_test() -> int:
     # kind, fixed_in format, breaks_from type, python_min format, duplicate,
     # a symbol row that is both a Python and a distribution removal.
     assert len(got) == 6, got
+    # Method rows: a good one passes; a bare call, a bad keyword, a missing
+    # symptom and an undotted symbol do not.
+    good = {"id": "m", "module": "sqlalchemy", "symbol": "Engine.execute",
+            "dependency": "sqlalchemy", "breaks_from": "2", "constraint": "sqlalchemy<2",
+            "symptom": "s", "replacement": "r", "source": "u",
+            "calls": ["engine.execute(", ".engine.execute(", "conn.execute(\"",
+                      "*.append(ignore_index="], "calls_in": ["flask_sqlalchemy"]}
+    assert call_problems("r", good) == [], call_problems("r", good)
+    bad = dict(good, calls=["execute(", "engine.execute(x"], symbol="execute", calls_in=["a.b"])
+    del bad["symptom"]
+    assert len(call_problems("r", bad)) == 5, call_problems("r", bad)
+    ranged = {k: [] for k in BREAKAGE_SCHEMA}
+    ranged["python_removals"] = [
+        {"id": "a", "package": "p", "python_min": "3.13", "symptom": "s", "source": "u",
+         "breaks_from": "2.0.0", "fixed_in": "2.0.31"},
+        {"id": "b", "package": "p", "python_min": "3.13", "symptom": "s", "source": "u",
+         "breaks_from": "2.0.31", "fixed_in": "2.0.31"},
+        {"id": "c", "package": "p", "python_min": "3.13", "symptom": "s", "source": "u",
+         "breaks_from": "2.0.0"}]
+    assert len(breakage_problems(ranged)) == 2, breakage_problems(ranged)
     assert "numpy" in breakage_names(bundled) and "2.2.2" in breakage_names(bundled)["pandas"]
     assert "pydantic-settings" in breakage_names(bundled)
     print("self-test passed")
