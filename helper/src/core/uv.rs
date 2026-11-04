@@ -765,6 +765,38 @@ mod tests {
         );
     }
 
+    /// The Windows uv archive is a zip. Its entries are written one by one,
+    /// and a path that would land outside the target is skipped rather than
+    /// followed.
+    #[test]
+    fn extract_zip_writes_entries_and_skips_escaping_paths() {
+        use std::io::Write;
+        let mut bytes = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(Cursor::new(&mut bytes));
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            zip.start_file("uv-x86_64-pc-windows-msvc/uv.exe", opts)
+                .unwrap();
+            zip.write_all(b"uv binary").unwrap();
+            zip.start_file("../escaped.txt", opts).unwrap();
+            zip.write_all(b"must not be written").unwrap();
+            zip.finish().unwrap();
+        }
+        let root = std::env::temp_dir().join(format!("pypilot-uv-zip-{}", std::process::id()));
+        let dest = root.join("out");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&dest).unwrap();
+
+        extract_zip(&bytes, &dest).unwrap();
+
+        let uv = dest.join("uv-x86_64-pc-windows-msvc").join("uv.exe");
+        assert_eq!(std::fs::read(&uv).unwrap(), b"uv binary");
+        assert!(!root.join("escaped.txt").exists());
+        assert_eq!(locate_binary(&dest).as_deref(), Some(uv.as_path()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn init_is_bare_and_pins_the_chosen_python() {
         assert_eq!(
