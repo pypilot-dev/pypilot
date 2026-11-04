@@ -93,6 +93,15 @@ pub async fn find<S: MetadataSource>(
             if !missing || declared.contains(&dist) {
                 continue;
             }
+            // A module its distribution dropped (`pkg_resources` from
+            // setuptools 82) is the known-breakage finding's, which asks for
+            // the release that still ships it; the newest would not do.
+            if crate::core::knowledge::table::table()
+                .module_removal(&f.import.module)
+                .is_some()
+            {
+                continue;
+            }
             out.entry(dist).or_insert(Undeclared {
                 import: f.import.module.clone(),
                 dist: f.package.clone(),
@@ -215,7 +224,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("pkg")).unwrap();
         std::fs::write(
             dir.join("app.py"),
-            "import os\nimport yaml\nimport requests\nimport helpers\nfrom PIL import Image\n",
+            "import os\nimport yaml\nimport requests\nimport helpers\nfrom PIL import Image\nimport pkg_resources\n",
         )
         .unwrap();
         std::fs::write(dir.join("helpers.py"), "").unwrap();
@@ -228,7 +237,15 @@ mod tests {
         std::fs::write(dir.join("pkg").join("sibling.py"), "").unwrap();
 
         let mut source = crate::pypi::FixtureSource::new();
-        for name in ["PyYAML", "requests", "pillow", "beautifulsoup4"] {
+        // setuptools is on PyPI, but `pkg_resources` is the known-breakage
+        // finding's (setuptools<81, C s7a), so it is not listed here.
+        for name in [
+            "PyYAML",
+            "requests",
+            "pillow",
+            "beautifulsoup4",
+            "setuptools",
+        ] {
             source.insert(name, meta(name));
         }
         let project = ProjectDeps {
