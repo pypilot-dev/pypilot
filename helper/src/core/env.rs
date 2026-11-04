@@ -75,7 +75,7 @@ pub fn no_env_sentence(pixi: bool) -> &'static str {
 }
 
 /// The venv directory names looked for, in order.
-const VENV_DIRS: [&str; 3] = [".venv", "venv", "env"];
+pub(crate) const VENV_DIRS: [&str; 3] = [".venv", "venv", "env"];
 
 /// The environment of the project at `workspace`, read off disk only.
 ///

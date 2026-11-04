@@ -252,6 +252,20 @@ pub fn resolve_package(import_name: &str) -> String {
         .unwrap_or_else(|| import_name.to_string())
 }
 
+/// The import names the table ties to the PyPI `package` (`attrs` ->
+/// `attr`), compared by normalized name, sorted. Empty when the package is
+/// imported under its own name.
+pub fn import_names_for(package: &str) -> Vec<String> {
+    let want = crate::core::project::normalize_name(package);
+    let mut names: Vec<String> = import_map()
+        .iter()
+        .filter(|(_, pkg)| crate::core::project::normalize_name(pkg) == want)
+        .map(|(import, _)| import.clone())
+        .collect();
+    names.sort();
+    names
+}
+
 /// True when the name came from the bundled table rather than falling through.
 pub fn is_mapped(import_name: &str) -> bool {
     import_map().contains_key(import_name)

@@ -11,6 +11,7 @@ pub mod env;
 pub mod exec;
 pub mod gpu;
 pub mod guardian;
+pub mod health;
 pub mod imports;
 pub mod install;
 pub mod installed;
