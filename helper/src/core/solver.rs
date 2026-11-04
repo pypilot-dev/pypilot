@@ -296,6 +296,16 @@ pub async fn assess<S: MetadataSource>(
     )
     .await;
 
+    // The Python a rebuild names must be the one `doctor --fix` uses, and
+    // the fix makes the requirement edits first (E c12b).
+    let mut target_python = target_python;
+    if !project.is_pixi() {
+        if let Some(t) = rebuild_after_edits(source, &project, env.python_pin, &findings).await {
+            retarget_rebuild(&mut findings, t);
+            target_python = Some(t);
+        }
+    }
+
     Assessment {
         probes,
         project,
@@ -303,6 +313,122 @@ pub async fn assess<S: MetadataSource>(
         target_python,
         findings,
     }
+}
+
+/// The requirements as they read once every requirement edit the findings
+/// propose is made: a rewritten requirement replaces the old one, an added
+/// one joins the rest, a removed one is dropped. Packages to install
+/// (undeclared imports) join too, but do not count as an edit on their own.
+/// `None` when no finding proposes an edit.
+fn requirements_after_edits(
+    packages: &[crate::core::project::Requirement],
+    findings: &[Finding],
+) -> Option<Vec<crate::core::project::Requirement>> {
+    use crate::core::project::{normalize_name, parse_requirement, requirement_name};
+    let mut out = packages.to_vec();
+    let mut edited = false;
+    for f in findings.iter().filter(|f| f.severity != Severity::Info) {
+        let edit = match &f.fix {
+            FixKind::EditRequirement(edit) => edit,
+            FixKind::AddRequirements(names) => {
+                for n in names {
+                    if let Some(new) = parse_requirement(n) {
+                        let key = normalize_name(&new.name);
+                        if !out.iter().any(|r| normalize_name(&r.name) == key) {
+                            out.push(new);
+                        }
+                    }
+                }
+                continue;
+            }
+            _ => continue,
+        };
+        if let Some(old) = requirement_name(&edit.old) {
+            let key = normalize_name(&old);
+            out.retain(|r| normalize_name(&r.name) != key);
+        }
+        if let Some(new) = parse_requirement(&edit.new) {
+            let key = normalize_name(&new.name);
+            out.retain(|r| normalize_name(&r.name) != key);
+            out.push(new);
+        }
+        edited = true;
+    }
+    edited.then_some(out)
+}
+
+/// The Python [`synthesize`]'s rebuild finding should name when the
+/// findings also propose requirement edits: `doctor --fix` makes those
+/// first and then rebuilds on what the edited requirements support, so the
+/// finding has to be judged on them too. E c12b: `pyyaml==99.0` is left out
+/// of the range (no such release), so Python 3.15 looks fine, but its fix,
+/// `pyyaml==6.0.3`, has no 3.15 wheel and the rebuild lands on 3.14.
+/// `None` when there is no such finding or the Python stays the same.
+async fn rebuild_after_edits<S: MetadataSource>(
+    source: &S,
+    project: &ProjectDeps,
+    pin: Option<PyVersion>,
+    findings: &[Finding],
+) -> Option<PyVersion> {
+    let current = findings.iter().find_map(|f| match f.fix {
+        FixKind::RecreateWithPython(t) if is_unsupported_python_title(&f.title) => Some(t),
+        _ => None,
+    })?;
+    let packages = requirements_after_edits(&project.packages, findings)?;
+    let report = pypi::analyze(source, Platform::current(), &packages).await;
+    if report.intersection.is_empty() || !report.unresolved.is_empty() {
+        return None;
+    }
+    let rp_set = project
+        .declared_requires_python
+        .as_deref()
+        .map(crate::pypi::pyversion::parse_requires_python)
+        .unwrap_or_else(PyVersionSet::universe);
+    // An edit may raise requires-python's floor, never its ceiling: the
+    // newest Python stays what the ceiling and the dependencies allow.
+    let allowed = report.intersection.intersect(&rp_set);
+    let t = choose(&allowed, &[pin]).or_else(|| report.intersection.max())?;
+    (t != current).then_some(t)
+}
+
+/// Point the unsupported-Python finding at `t` (see [`rebuild_after_edits`]).
+fn retarget_rebuild(findings: &mut [Finding], t: PyVersion) {
+    for f in findings.iter_mut() {
+        let FixKind::RecreateWithPython(old) = f.fix else {
+            continue;
+        };
+        if !is_unsupported_python_title(&f.title) {
+            continue;
+        }
+        let said = format!("Recreate the environment with Python {old}");
+        let now = format!(
+            "Recreate the environment with Python {t}, the newest the dependencies support once the requirement fixes here are made"
+        );
+        f.detail = match f.detail.find(&said) {
+            // Replace through the end of that sentence.
+            Some(i) => {
+                let end = f.detail[i..]
+                    .find(". ")
+                    .map(|e| i + e)
+                    .unwrap_or_else(|| f.detail.trim_end_matches('.').len());
+                format!("{}{now}{}", &f.detail[..i], &f.detail[end..])
+            }
+            None => format!("{} {now}.", f.detail),
+        };
+        f.detail = f.detail.replace(
+            &format!("Python {old} has wheels"),
+            &format!("Python {t} has wheels"),
+        );
+        f.fix = FixKind::RecreateWithPython(t);
+    }
+}
+
+/// The findings [`synthesize`] asks a rebuild with: the venv's Python
+/// excluded by the dependencies, or by requires-python.
+fn is_unsupported_python_title(title: &str) -> bool {
+    title.starts_with("Python ")
+        && (title.ends_with(UNSUPPORTED_SUFFIX)
+            || title.contains(" is outside the project's requires-python "))
 }
 
 /// Title of the finding for dependencies with no common Python.
@@ -1202,6 +1328,113 @@ mod tests {
             ..Default::default()
         }
     }
+
+    fn edit(old: &str, new: &str) -> Finding {
+        Finding {
+            severity: Severity::Error,
+            title: format!("No release matches `{old}`"),
+            detail: String::new(),
+            fix: FixKind::EditRequirement(crate::core::RequirementEdit {
+                file: "pyproject.toml".into(),
+                old: old.into(),
+                new: new.into(),
+            }),
+        }
+    }
+
+    #[test]
+    fn requirements_after_edits_replace_add_and_drop() {
+        let packages = vec![
+            crate::core::project::parse_requirement("pyyaml==99.0").unwrap(),
+            crate::core::project::parse_requirement("reqests").unwrap(),
+            crate::core::project::parse_requirement("numpy>=2.1").unwrap(),
+        ];
+        // Nothing to edit: nothing to judge again.
+        assert_eq!(requirements_after_edits(&packages, &[]), None);
+        let findings = vec![
+            edit("pyyaml==99.0", "pyyaml==6.0.3"),
+            edit("reqests", "requests"),
+            edit("", "setuptools<81"),
+            Finding {
+                severity: Severity::Warning,
+                title: "undeclared".into(),
+                detail: String::new(),
+                fix: FixKind::AddRequirements(vec!["requests".into(), "rich".into()]),
+            },
+        ];
+        let after: Vec<String> = requirements_after_edits(&packages, &findings)
+            .unwrap()
+            .iter()
+            .map(|r| r.to_string())
+            .collect();
+        assert_eq!(
+            after,
+            [
+                "numpy>=2.1",
+                "pyyaml==6.0.3",
+                "requests",
+                "setuptools<81",
+                "rich"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_rebuild_python_is_judged_after_the_requirement_edits() {
+        // E c12b's shape: a pin no release matches is left out of the
+        // range, so the rebuild finding names the newest Python; the
+        // release its fix moves to supports fewer, and `doctor --fix`
+        // rebuilds on what that one supports. The finding must agree.
+        // `demo` 6.0 supports Python 3.8-3.12, its newest release more.
+        let meta = |version: &str, rp: &str| -> crate::pypi::metadata::PackageMetadata {
+            serde_json::from_value(serde_json::json!({
+                "info": { "name": "demo", "version": version, "requires_python": rp },
+                "urls": [{ "filename": format!("demo-{version}-py3-none-any.whl"), "packagetype": "bdist_wheel" }],
+                "releases": { "6.0": [], "7.0": [] }
+            }))
+            .unwrap()
+        };
+        let mut src = crate::pypi::FixtureSource::new();
+        src.insert("demo", meta("7.0", ">=3.8"));
+        src.insert("demo==6.0", meta("6.0", ">=3.8,<3.13"));
+        let expected = PyVersion::py3(12);
+        let project = ProjectDeps {
+            sources: vec!["pyproject.toml".into()],
+            packages: vec![crate::core::project::parse_requirement("demo==99.0").unwrap()],
+            ..Default::default()
+        };
+        let stale = PyVersion::py3(MAX_MINOR_FOR_TEST);
+        assert_ne!(stale, expected, "the fixture must narrow the range");
+        let mut findings = vec![
+            Finding {
+                severity: Severity::Error,
+                title: format!("Python 3.9{UNSUPPORTED_SUFFIX}"),
+                detail: format!(
+                    "pandas 3.0 (supports 3.11–3.15) does not support Python 3.9. Recreate the environment with Python {stale}."
+                ),
+                fix: FixKind::RecreateWithPython(stale),
+            },
+            edit("demo==99.0", "demo==6.0"),
+        ];
+        let t = rebuild_after_edits(&src, &project, None, &findings).await;
+        assert_eq!(t, Some(expected));
+        retarget_rebuild(&mut findings, expected);
+        assert_eq!(findings[0].fix, FixKind::RecreateWithPython(expected));
+        assert!(
+            findings[0].detail.ends_with(&format!(
+                "Recreate the environment with Python {expected}, the newest the dependencies support once the requirement fixes here are made."
+            )),
+            "{}",
+            findings[0].detail
+        );
+        // Without the edit, the finding stands as it is.
+        assert_eq!(
+            rebuild_after_edits(&src, &project, None, &findings[..1]).await,
+            None
+        );
+    }
+
+    const MAX_MINOR_FOR_TEST: u8 = crate::pypi::pyversion::MAX_MINOR;
 
     #[test]
     fn the_unsupported_python_reason_agrees_with_the_number_of_packages() {
