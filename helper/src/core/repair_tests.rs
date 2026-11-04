@@ -161,6 +161,40 @@ fn a_forced_python_is_pinned_unless_uv_would_pick_it_anyway() {
 }
 
 #[test]
+fn a_stop_after_requirement_edits_does_not_claim_nothing_changed() {
+    let st = |name: &str, ok: bool, detail: &str| Step {
+        name: name.into(),
+        ok,
+        detail: detail.into(),
+    };
+    // D 6: line 4 was rewritten, then line 3 stopped the bootstrap.
+    let mut steps = vec![
+        st("edit requirements.txt", true, "`six>=` -> `six`"),
+        st(
+            "check requirements.txt",
+            false,
+            "Fix or remove them and run setup again; nothing was changed, so no half-built environment is left behind.",
+        ),
+    ];
+    own_up_to_edits(&mut steps);
+    assert_eq!(
+        steps[1].detail,
+        "Fix or remove them and run setup again; only the requirement edits above (requirements.txt) were made, so no half-built environment is left behind."
+    );
+    // Without edits, or with the edits rolled back, the sentence is true.
+    let mut alone = vec![st("check requirements.txt", false, "Nothing was changed.")];
+    own_up_to_edits(&mut alone);
+    assert_eq!(alone[0].detail, "Nothing was changed.");
+    let mut rolled = vec![
+        st("edit pyproject.toml", true, "`a` -> `b`"),
+        st(ROLLBACK_STEP, true, "restored pyproject.toml"),
+        st("resolve dependencies", false, "x. Nothing was changed."),
+    ];
+    own_up_to_edits(&mut rolled);
+    assert_eq!(rolled[2].detail, "x. Nothing was changed.");
+}
+
+#[test]
 fn requirement_edits_are_planned_first_and_once() {
     let edit = FixKind::EditRequirement(crate::core::RequirementEdit {
         file: "pyproject.toml".into(),

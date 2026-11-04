@@ -187,6 +187,55 @@ pub async fn run_with_mode<S: MetadataSource>(
     source: &S,
     mode: ResolvedMode,
 ) -> crate::Result<SetupSummary> {
+    let mut summary = run_fixes(workspace, settings, source, mode).await?;
+    own_up_to_edits(&mut summary.steps);
+    Ok(summary)
+}
+
+/// A later step that stopped the run may say "nothing was changed" (a
+/// requirements.txt pip cannot read, D 6; an unresolvable requirement; pixi
+/// missing), which is true of that step but not of the run when requirement
+/// edits ran before it and stayed. Those sentences name the edits instead,
+/// so the summary never hides a file it changed. Rolled-back edits say so
+/// in their own step and are left alone.
+fn own_up_to_edits(steps: &mut [Step]) {
+    if steps.iter().any(|s| s.name == ROLLBACK_STEP) {
+        return;
+    }
+    let mut files: Vec<&str> = Vec::new();
+    for s in steps.iter().filter(|s| s.ok) {
+        if let Some(file) = s.name.strip_prefix("edit ") {
+            if !files.contains(&file) {
+                files.push(file);
+            }
+        }
+    }
+    if files.is_empty() {
+        return;
+    }
+    let made = format!(
+        "the requirement edits above ({}) were made",
+        files.join(", ")
+    );
+    let lower = format!("only {made}");
+    let upper = format!("Only {made}");
+    for s in steps.iter_mut().filter(|s| !s.ok) {
+        s.detail = s
+            .detail
+            .replace("nothing was changed", &lower)
+            .replace("Nothing was changed", &upper);
+    }
+}
+
+/// The step that undoes requirement edits uv cannot resolve.
+const ROLLBACK_STEP: &str = "roll back requirement edits";
+
+async fn run_fixes<S: MetadataSource>(
+    workspace: &Path,
+    settings: &Settings,
+    source: &S,
+    mode: ResolvedMode,
+) -> crate::Result<SetupSummary> {
     let pixi_project = pixi::detect(workspace).is_some();
     let mode = if pixi_project {
         ResolvedMode::Pixi
@@ -277,12 +326,12 @@ pub async fn run_with_mode<S: MetadataSource>(
             let restored = snapshot.restore();
             summary.steps.push(match restored {
                 Ok(files) => Step {
-                    name: "roll back requirement edits".into(),
+                    name: ROLLBACK_STEP.into(),
                     ok: true,
                     detail: format!("restored {}", files.join(", ")),
                 },
                 Err(e) => Step {
-                    name: "roll back requirement edits".into(),
+                    name: ROLLBACK_STEP.into(),
                     ok: false,
                     detail: e.to_string(),
                 },
