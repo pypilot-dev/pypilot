@@ -6,10 +6,10 @@ Three wrappers, one engine. The wrappers decide *which* engine runs; the engine 
 
 | Component | Version | Engine it runs | Python / platform |
 |---|---|---|---|
-| Engine (`pypilot`) | **1.3.0** | n/a | Analyzes CPython 3.7–3.15. Prebuilt for Linux x64, macOS x64/arm64, Windows x64 |
-| Zed extension | **1.3.0** (this repo) | The newest engine release on GitHub, or a `pypilot` on `PATH` | Zed with WASI extensions |
-| VS Code extension | **1.3.0** | `pypilot.helperPath` if set; else the newer of a `pypilot` on `PATH` and its own copy; else downloads the version pinned in `package.json` (`pypilotEngine`, engine 1.3.0), verified by SHA-256. `pypilot.engineUpdates: "latest"` also offers newer releases, verified against their `SHA256SUMS` | VS Code 1.85+ |
-| `pypilot-cli` (PyPI) | **1.3.0** | Pins engine **v1.3.0** and bundles it in its platform wheels (Windows x64, Linux x64 with glibc 2.34+, macOS arm64 and x64); elsewhere, a download verified against `ENGINE_SHA256`. `PYPILOT_ENGINE_VERSION` selects another release, verified against its `SHA256SUMS` | Python 3.8+ |
+| Engine (`pypilot`) | **1.4.0** | n/a | Analyzes CPython 3.7–3.15. Prebuilt for Linux x64, macOS x64/arm64, Windows x64 |
+| Zed extension | **1.4.0** (this repo) | The newest engine release on GitHub, or a `pypilot` on `PATH` | Zed with WASI extensions |
+| VS Code extension | **1.4.0** | `pypilot.helperPath` if set; else the newer of a `pypilot` on `PATH` and its own copy; else downloads the version pinned in `package.json` (`pypilotEngine`, engine 1.4.0), verified by SHA-256. `pypilot.engineUpdates: "latest"` also offers newer releases, verified against their `SHA256SUMS` | VS Code 1.85+ |
+| `pypilot-cli` (PyPI) | **1.4.0** | Pins engine **v1.4.0** and bundles it in its platform wheels (Windows x64, Linux x64 with glibc 2.34+, macOS arm64 and x64); elsewhere, a download verified against `ENGINE_SHA256`. `PYPILOT_ENGINE_VERSION` selects another release, verified against its `SHA256SUMS` | Python 3.8+ |
 
 The features marked <Badge type="tip" text="1.3" /> (`--json`, `--dry-run`, `diagnosticsScope`, …) need engine 1.3.0 or newer, which all three wrappers now run by default. To try something newer than the latest release, build the engine from `main` and put it on `PATH` (Zed, VS Code) or in `pypilot.helperPath` (VS Code); see [Building from source](/engine/building).
 

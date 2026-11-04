@@ -2,6 +2,17 @@
 
 PyPilot answers from package metadata and local checks, with no AI service and no API keys. Ideas that keep that property are the easiest to accept.
 
+## Shipped in 1.4.0
+
+Released on 2026-11-04 for the engine, the VS Code extension and `pypilot-cli`. Marked <Badge type="tip" text="1.4" /> across this site.
+
+**Engine** ([v1.4.0](https://github.com/pypilot-dev/pypilot/releases/tag/v1.4.0))
+- `doctor --fix` runs only the fix each finding calls for: sync, relock, reinstall one package, repair the venv on its own Python, raise `requires-python`, or edit one requirement. A healthy project is left alone, and the Python moves only when a dependency forces it. [Details](/engine/commands)
+- Checks the environment against the lock and the manifest: stale `uv.lock`, missing, drifted or half-installed packages, system site-packages, `requires-python` and `.python-version`.
+- Unsatisfiable pins, typos, versions that do not exist and packages with no build for this OS get a specific edit, checked with uv before anything changes.
+- A refreshable table of known breakages: numpy 2 and old compiled packages, uncapped dependencies that removed an API, shadowing packages, yanked pins, removed stdlib modules, and removed APIs used in the project's code (by file and line).
+- pixi, conda `environment.yml`, Poetry projects, notebooks and `venv/` or `env/` environments are fixed with their own tools.
+
 ## Shipped in 1.3.0
 
 Released on 2026-10-29 for the engine, the VS Code extension and `pypilot-cli`. Marked <Badge type="tip" text="1.3" /> across this site.
