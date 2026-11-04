@@ -532,6 +532,7 @@ async fn unknown_finding<S: MetadataSource>(
     source: &S,
     req: &DeclaredReq,
     confirmed: bool,
+    floor: Option<PyVersion>,
 ) -> Finding {
     let severity = if confirmed {
         Severity::Error
@@ -552,10 +553,26 @@ async fn unknown_finding<S: MetadataSource>(
         let near = suggest::nearest_versions(&spec, &meta.versions);
         let (detail, fix) = match near {
             Some(n) => {
-                let new = req.with_spec(&n.spec);
+                // The nearest release may need a newer Python than the
+                // project allows (C s2b: requests 2.34.2 needs 3.10 under
+                // `>=3.9`): take the newest one at or below it that fits.
+                let (spec_new, fits) = match floor {
+                    Some(py) => fit_pin_to_python(source, &req.name, &n.spec, &meta.versions, py)
+                        .await
+                        .map(|s| (s, Some(py)))
+                        .unwrap_or((n.spec.clone(), None)),
+                    None => (n.spec.clone(), None),
+                };
+                let new = req.with_spec(&spec_new);
+                let why = match fits {
+                    Some(py) if spec_new != n.spec => format!(
+                        " (the newest that supports Python {py}, the oldest the project allows)"
+                    ),
+                    _ => String::new(),
+                };
                 (
                     format!(
-                        "{} has no release matching `{spec}` (asked for in {file}). Nearest releases: {}. Fix: change `{}` to `{new}`.",
+                        "{} has no release matching `{spec}` (asked for in {file}). Nearest releases: {}. Fix: change `{}` to `{new}`{why}.",
                         meta.info.name,
                         n.nearby.join(", "),
                         req.raw
@@ -612,6 +629,40 @@ async fn unknown_finding<S: MetadataSource>(
 }
 
 // --- packages that do not support this OS ------------------------------------
+
+/// For a `==X` replacement: `==X` when release X supports `python`, else
+/// the newest final release below X whose requires_python admits it.
+/// `None` when it cannot tell (not a pin, lookups fail, none fits).
+async fn fit_pin_to_python<S: MetadataSource>(
+    source: &S,
+    name: &str,
+    spec: &str,
+    versions: &[String],
+    python: PyVersion,
+) -> Option<String> {
+    use crate::pypi::version::PackageVersion;
+    const MAX_LOOKUPS: usize = 8;
+    let pinned = PackageVersion::parse(spec.strip_prefix("==")?)?;
+    let supports = |meta: &crate::pypi::metadata::PackageMetadata| {
+        meta.info.requires_python.as_deref().map_or(true, |rp| {
+            crate::pypi::pyversion::parse_requires_python(rp).contains(python)
+        })
+    };
+    let mut older: Vec<(PackageVersion, &String)> = versions
+        .iter()
+        .filter_map(|s| PackageVersion::parse(s).map(|v| (v, s)))
+        .filter(|(v, _)| !v.is_prerelease() && *v <= pinned)
+        .collect();
+    older.sort_by(|a, b| a.0.cmp(&b.0));
+    older.dedup_by(|a, b| a.0 == b.0);
+    for (_, text) in older.iter().rev().take(MAX_LOOKUPS) {
+        let meta = source.fetch_version(name, text).await.ok()?;
+        if supports(&meta) {
+            return Some(format!("=={text}"));
+        }
+    }
+    None
+}
 
 fn os_name(os: Os) -> &'static str {
     match os {
@@ -701,6 +752,9 @@ pub struct Context<'a> {
     pub project_name: Option<String>,
     /// The Python to resolve for.
     pub python: Option<PyVersion>,
+    /// The oldest Python the project's requires-python allows: a pin the
+    /// fix suggests must support it, or `uv lock` fails for it.
+    pub python_floor: Option<PyVersion>,
     /// The Python the fix moves the environment to, when that is another
     /// one (the venv's Python is unsupported): a resolve that fails only
     /// because of `python` is that finding's to fix, not a requirement's.
@@ -738,7 +792,7 @@ pub async fn diagnose<S: MetadataSource, R: Resolver>(
             continue;
         };
         if let Some(i) = reqs.iter().position(|r| r.name == name) {
-            let finding = unknown_finding(source, &reqs[i], false).await;
+            let finding = unknown_finding(source, &reqs[i], false, ctx.python_floor).await;
             let generic = generic_unresolved_title(label);
             match findings.iter_mut().find(|f| f.title == generic) {
                 Some(f) => *f = finding,
@@ -789,7 +843,7 @@ pub async fn diagnose<S: MetadataSource, R: Resolver>(
         // uv agrees these do not exist: the warning becomes an error. Then
         // resolve the rest, which may clash on their own.
         for i in missing {
-            let confirmed = unknown_finding(source, &reqs[i], true).await;
+            let confirmed = unknown_finding(source, &reqs[i], true, ctx.python_floor).await;
             let generic = generic_unresolved_title(&reqs[i].raw);
             let existing = findings
                 .iter_mut()
@@ -829,6 +883,11 @@ pub async fn diagnose_workspace<S: MetadataSource>(
         compat,
         project_name: project_name(workspace),
         python,
+        python_floor: project
+            .declared_requires_python
+            .as_deref()
+            .map(crate::pypi::pyversion::parse_requires_python)
+            .and_then(|s| s.min()),
         target_python,
     };
     let resolver = uv.map(|uv| UvResolver {
@@ -995,6 +1054,7 @@ mod tests {
             compat: None,
             project_name: name.map(String::from),
             python: Some(PyVersion::py3(12)),
+            python_floor: None,
             target_python: None,
         };
         let mut findings = Vec::new();
@@ -1038,6 +1098,7 @@ mod tests {
             compat: None,
             project_name: None,
             python: Some(PyVersion::py3(9)),
+            python_floor: None,
             target_python: Some(PyVersion::py3(12)),
         };
         let source = crate::pypi::FixtureSource::new();
@@ -1200,6 +1261,7 @@ mod tests {
             compat: None,
             project_name: None,
             python: None,
+            python_floor: None,
             target_python: None,
         };
         // uv reports one at a time; both are confirmed, round by round.
@@ -1240,6 +1302,34 @@ mod tests {
         };
         assert_eq!(edit.new, "requests==2.34.2");
         assert!(findings.iter().all(blocks_install));
+
+        // C s2b: with requires-python `>=3.9`, 2.34.2 (Python >=3.10) would
+        // force the floor up; the newest release that supports 3.9 does not.
+        let with_rp = |v: &str, rp: &str| -> crate::pypi::metadata::PackageMetadata {
+            serde_json::from_value(serde_json::json!({
+                "info": {"name": "requests", "version": v, "requires_python": rp},
+                "urls": [],
+                "releases": [v],
+            }))
+            .unwrap()
+        };
+        source.insert("requests==2.34.2", with_rp("2.34.2", ">=3.10"));
+        source.insert("requests==2.32.3", with_rp("2.32.3", ">=3.8"));
+        let ctx = Context {
+            python_floor: Some(PyVersion::py3(9)),
+            ..ctx
+        };
+        let mut findings = Vec::new();
+        diagnose(&ctx, &source, Some(&Seq), &mut findings).await;
+        let FixKind::EditRequirement(edit) = &findings[1].fix else {
+            panic!()
+        };
+        assert_eq!(edit.new, "requests==2.32.3");
+        assert!(
+            findings[1].detail.contains("supports Python 3.9"),
+            "{}",
+            findings[1].detail
+        );
     }
 
     #[tokio::test]
@@ -1262,6 +1352,7 @@ mod tests {
             compat: Some(&compat),
             project_name: None,
             python: None,
+            python_floor: None,
             target_python: None,
         };
         let mut source = crate::pypi::FixtureSource::new();
@@ -1320,6 +1411,7 @@ mod tests {
             compat: Some(&compat),
             project_name: None,
             python: None,
+            python_floor: None,
             target_python: None,
         };
         let mut findings = vec![Finding {
@@ -1394,6 +1486,7 @@ mod tests {
             compat: Some(&compat),
             project_name: None,
             python: None,
+            python_floor: None,
             target_python: None,
         };
         let mut findings = vec![Finding {
@@ -1447,6 +1540,7 @@ mod tests {
             compat: Some(&compat),
             project_name: None,
             python: None,
+            python_floor: None,
             target_python: None,
         };
         let mut findings = Vec::new();
