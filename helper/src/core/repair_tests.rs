@@ -568,3 +568,59 @@ async fn requirement_edits_before_a_setup_are_reported() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn a_fix_lists_the_code_changes_it_leaves() {
+    // E s09 after the fix: pydantic 2 and pydantic-settings installed, the
+    // code still imports BaseSettings from pydantic.
+    let root = project("code-left", ".venv", 12);
+    std::fs::write(
+        root.join("pyproject.toml"),
+        "[project]\nname = \"demo\"\nversion = \"0.1.0\"\nrequires-python = \">=3.9\"\ndependencies = [\"pydantic>=2\", \"pydantic-settings\"]\n",
+    )
+    .unwrap();
+    let site = site(&root, ".venv");
+    for (dist, module) in [
+        ("pydantic-2.8.0", "pydantic"),
+        ("pydantic_settings-2.4.0", "pydantic_settings"),
+    ] {
+        std::fs::create_dir_all(site.join(format!("{dist}.dist-info"))).unwrap();
+        std::fs::create_dir_all(site.join(module)).unwrap();
+    }
+    std::fs::write(
+        root.join("app.py"),
+        "from pydantic import BaseSettings\nprint(BaseSettings)\n",
+    )
+    .unwrap();
+    let mut summary = SetupSummary {
+        package_manager: PackageManager::Auto,
+        resolved_mode: ResolvedMode::UvFull,
+        python: None,
+        venv_path: root.join(".venv"),
+        why: String::new(),
+        steps: Vec::new(),
+        ok: true,
+    };
+    code_changes_left(&root, &mut summary);
+    assert!(summary.ok, "a code change does not fail the run");
+    assert_eq!(summary.steps.len(), 1, "{summary:#?}");
+    let step = &summary.steps[0];
+    assert_eq!(step.name, CODE_CHANGE_STEP);
+    assert!(!step.ok);
+    assert!(
+        step.detail
+            .contains("change app.py:1 to `from pydantic_settings import BaseSettings`"),
+        "{}",
+        step.detail
+    );
+    // Once the code changes, nothing is left.
+    std::fs::write(
+        root.join("app.py"),
+        "from pydantic_settings import BaseSettings\nprint(BaseSettings)\n",
+    )
+    .unwrap();
+    summary.steps.clear();
+    code_changes_left(&root, &mut summary);
+    assert!(summary.steps.is_empty(), "{summary:#?}");
+    let _ = std::fs::remove_dir_all(&root);
+}
