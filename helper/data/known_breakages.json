@@ -217,6 +217,15 @@
   ],
   "python_removals": [
     {
+      "id": "sqlalchemy-2.0-py313-typing",
+      "package": "sqlalchemy",
+      "breaks_from": "2.0.0",
+      "fixed_in": "2.0.31",
+      "python_min": "3.13",
+      "symptom": "TypeError: Can't replace canonical symbol for '__firstlineno__' with new int value (2.0.20 and older: AssertionError: Class ... directly inherits TypingOnly but has additional attributes {'__firstlineno__', '__static_attributes__'})",
+      "source": "https://docs.sqlalchemy.org/en/20/changelog/changelog_20.html#change-2.0.31"
+    },
+    {
       "id": "flake8-py312-entry-points",
       "package": "flake8",
       "fixed_in": "5.0.0",
@@ -473,6 +482,7 @@
     {"module": "lib2to3", "removed_in": "3.13", "migrate": "ast or a maintained fork such as fissix", "source": "https://docs.python.org/3.13/whatsnew/3.13.html#lib2to3"}
   ],
   "symbol_removals": [
+    {"id": "numpy-1.23-asscalar", "module": "numpy", "symbol": "asscalar", "dependency": "numpy", "breaks_from": "1.23", "constraint": "numpy<1.23", "replacement": "the value's own `.item()` method: `x.item()` for `numpy.asscalar(x)`", "source": "https://numpy.org/doc/stable/release/1.23.0-notes.html#expired-deprecations"},
     {"id": "numpy-1.24-bool", "module": "numpy", "symbol": "bool", "dependency": "numpy", "breaks_from": "1.24", "constraint": "numpy<1.24", "replacement": "`bool` (the builtin), or `numpy.bool_` for the NumPy scalar type", "source": "https://numpy.org/doc/stable/release/1.24.0-notes.html#expired-deprecations"},
     {"id": "numpy-1.24-complex", "module": "numpy", "symbol": "complex", "dependency": "numpy", "breaks_from": "1.24", "constraint": "numpy<1.24", "replacement": "`complex` (the builtin), or a sized NumPy type such as `numpy.complex128`", "source": "https://numpy.org/doc/stable/release/1.24.0-notes.html#expired-deprecations"},
     {"id": "numpy-1.24-float", "module": "numpy", "symbol": "float", "dependency": "numpy", "breaks_from": "1.24", "constraint": "numpy<1.24", "replacement": "`float` (the builtin), or a sized NumPy type such as `numpy.float64`", "source": "https://numpy.org/doc/stable/release/1.24.0-notes.html#expired-deprecations"},
@@ -493,6 +503,9 @@
     {"id": "numpy-2-sometrue", "module": "numpy", "symbol": "sometrue", "dependency": "numpy", "breaks_from": "2", "constraint": "numpy<2", "replacement": "`numpy.any`", "source": "https://numpy.org/doc/stable/numpy_2_0_migration_guide.html"},
     {"id": "numpy-2-string", "module": "numpy", "symbol": "string_", "dependency": "numpy", "breaks_from": "2", "constraint": "numpy<2", "replacement": "`numpy.bytes_`", "source": "https://numpy.org/doc/stable/numpy_2_0_migration_guide.html"},
     {"id": "numpy-2-unicode", "module": "numpy", "symbol": "unicode_", "dependency": "numpy", "breaks_from": "2", "constraint": "numpy<2", "replacement": "`numpy.str_`", "source": "https://numpy.org/doc/stable/numpy_2_0_migration_guide.html"},
+    {"id": "pandas-2-append", "module": "pandas", "symbol": "DataFrame.append", "dependency": "pandas", "breaks_from": "2", "constraint": "pandas<2", "calls": ["*.append(ignore_index=", "df.append("], "symptom": "AttributeError: 'DataFrame' object has no attribute 'append' (on a Series: 'Series' object has no attribute 'append')", "replacement": "`pandas.concat([df, other], ignore_index=True)`, with `pandas.DataFrame([row])` as `other` for a dict row", "source": "https://pandas.pydata.org/docs/whatsnew/v2.0.0.html#removal-of-prior-version-deprecations-changes"},
+    {"id": "sqlalchemy-2-engine-execute", "module": "sqlalchemy", "symbol": "Engine.execute", "dependency": "sqlalchemy", "breaks_from": "2", "constraint": "sqlalchemy<2", "calls": ["engine.execute("], "calls_in": ["sqlalchemy", "flask_sqlalchemy", "sqlmodel"], "symptom": "AttributeError: 'Engine' object has no attribute 'execute'", "replacement": "a connection: `with engine.connect() as conn: conn.execute(text(\"...\"))`, with `text` from sqlalchemy", "source": "https://docs.sqlalchemy.org/en/20/changelog/migration_20.html#migration-20-implicit-execution"},
+    {"id": "sqlalchemy-2-execute-string", "module": "sqlalchemy", "symbol": "Connection.execute", "dependency": "sqlalchemy", "breaks_from": "2", "constraint": "sqlalchemy<2", "calls": ["conn.execute(\"", "connection.execute(\"", "session.execute(\""], "calls_in": ["sqlalchemy", "flask_sqlalchemy", "sqlmodel"], "symptom": "sqlalchemy.exc.ObjectNotExecutableError: Not an executable object (a Session raises ArgumentError: Textual SQL expression ... should be explicitly declared as text(...))", "replacement": "the SQL wrapped in `text()`: `conn.execute(text(\"...\"))`, with `text` from sqlalchemy", "source": "https://docs.sqlalchemy.org/en/20/changelog/migration_20.html#execute-method-more-strict-execution-options-are-more-prominent"},
     {"id": "pydantic-2-basesettings", "module": "pydantic", "symbol": "BaseSettings", "dependency": "pydantic", "breaks_from": "2", "constraint": "pydantic<2", "add": "pydantic-settings", "symptom": "PydanticImportError: `BaseSettings` has been moved to the `pydantic-settings` package", "replacement": "`from pydantic_settings import BaseSettings` (from the pydantic-settings package)", "source": "https://docs.pydantic.dev/latest/migration/#basesettings-has-moved-to-pydantic-settings"},
     {"id": "jinja2-3.1-markup", "module": "jinja2", "symbol": "Markup", "dependency": "jinja2", "breaks_from": "3.1", "constraint": "jinja2<3.1", "replacement": "`markupsafe.Markup`", "source": "https://jinja.palletsprojects.com/en/stable/changes/#version-3-1-0"},
     {"id": "jinja2-3.1-contextfilter", "module": "jinja2", "symbol": "contextfilter", "dependency": "jinja2", "breaks_from": "3.1", "constraint": "jinja2<3.1", "replacement": "`jinja2.pass_context`", "source": "https://jinja.palletsprojects.com/en/stable/changes/#version-3-1-0"},
