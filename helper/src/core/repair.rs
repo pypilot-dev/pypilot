@@ -223,8 +223,16 @@ pub async fn run_with_mode<S: MetadataSource>(
         if round.is_empty() {
             break;
         }
-        for fix in &round {
-            match req_edit::apply(workspace, settings, fix).await {
+        // Manifest edits before additions: a typo fixed to `requests`
+        // already declares what an "undeclared import" fix would add (c12b).
+        let mut ordered = round.clone();
+        ordered.sort_by_key(|f| matches!(f, FixKind::AddRequirements(_)));
+        let venv_python = assessment.probes.venv.as_ref().and_then(|v| v.python);
+        for fix in ordered
+            .iter()
+            .flat_map(|f| additions_for(workspace, f, venv_python))
+        {
+            match req_edit::apply(workspace, settings, &fix).await {
                 Ok(steps) => edit_steps.extend(steps),
                 Err(e) => edit_steps.push(Step {
                     name: format!("apply {}", fix.kind()),
@@ -472,6 +480,49 @@ async fn assess_with_imports<S: MetadataSource>(
         a.findings.extend(undeclared::finding(&missing));
     }
     a
+}
+
+/// What to run for `fix` now that earlier edits of the round ran.
+/// [`FixKind::AddRequirements`] drops names the manifests now declare
+/// (nothing is left when all are), and becomes plain additions to
+/// pyproject.toml, installed by the sync after the rebuild, when the venv's
+/// Python is outside requires-python after an edit raised it: `uv add`
+/// would refuse to run on it (c12b). Every other fix is returned as is.
+fn additions_for(workspace: &Path, fix: &FixKind, venv: Option<PyVersion>) -> Vec<FixKind> {
+    let FixKind::AddRequirements(names) = fix else {
+        return vec![fix.clone()];
+    };
+    let declared = req_edit::declared(workspace);
+    let left: Vec<String> = names
+        .iter()
+        .filter(|n| {
+            let key = crate::core::project::normalize_name(n);
+            !declared.reqs.iter().any(|r| r.name == key)
+        })
+        .cloned()
+        .collect();
+    if left.is_empty() {
+        return Vec::new();
+    }
+    let rp = crate::core::project::scan(workspace).declared_requires_python;
+    let off_range = match (venv, rp.as_deref()) {
+        (Some(py), Some(rp)) => !crate::pypi::pyversion::parse_requires_python(rp).contains(py),
+        _ => false,
+    };
+    let pyproject = workspace.join("pyproject.toml");
+    if off_range && exec::exists(&pyproject) {
+        return left
+            .into_iter()
+            .map(|new| {
+                FixKind::EditRequirement(crate::core::RequirementEdit {
+                    file: pyproject.clone(),
+                    old: String::new(),
+                    new,
+                })
+            })
+            .collect();
+    }
+    vec![FixKind::AddRequirements(left)]
 }
 
 /// Rounds of requirement edits [`run_with_mode`] runs, at most.

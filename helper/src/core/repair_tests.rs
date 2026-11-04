@@ -246,6 +246,43 @@ async fn a_snapshot_puts_the_edited_manifests_back() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn additions_skip_declared_names_and_wait_for_the_rebuild() {
+    // c12b: the typo fix already declares `requests`, and requires-python
+    // was raised past the venv's 3.9, where `uv add` refuses to run.
+    let dir = std::env::temp_dir().join(format!("pp-additions-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let pyproject = dir.join("pyproject.toml");
+    std::fs::write(
+        &pyproject,
+        "[project]\nname = \"c12b\"\nversion = \"0.1.0\"\nrequires-python = \">=3.10\"\ndependencies = [\"requests\"]\n",
+    )
+    .unwrap();
+    let add = FixKind::AddRequirements(vec!["requests".into(), "PyYAML".into()]);
+    assert_eq!(
+        additions_for(&dir, &add, Some(PyVersion::py3(9))),
+        [FixKind::EditRequirement(crate::core::RequirementEdit {
+            file: pyproject.clone(),
+            old: String::new(),
+            new: "PyYAML".into(),
+        })]
+    );
+    // On a Python the project allows, `uv add` runs, for what is left.
+    assert_eq!(
+        additions_for(&dir, &add, Some(PyVersion::py3(12))),
+        [FixKind::AddRequirements(vec!["PyYAML".into()])]
+    );
+    let only_requests = FixKind::AddRequirements(vec!["requests".into()]);
+    assert!(additions_for(&dir, &only_requests, Some(PyVersion::py3(12))).is_empty());
+    // Other fixes pass through.
+    assert_eq!(
+        additions_for(&dir, &FixKind::Relock, None),
+        [FixKind::Relock]
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ---- dry runs ----------------------------------------------------------------
 
 fn fixture(name: &str) -> PathBuf {
