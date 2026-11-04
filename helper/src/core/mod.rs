@@ -30,6 +30,7 @@ pub mod platform;
 pub mod probe;
 pub mod project;
 pub mod pyright;
+pub mod repair;
 pub mod rescan;
 pub mod setup;
 pub mod solver;

@@ -44,7 +44,39 @@ impl<'a> StepsReport<'a> {
     }
 }
 
-/// `pypilot setup`, or `doctor --fix` under the name `command`.
+/// What a steps command runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flow {
+    /// `pypilot setup`: the full bootstrap.
+    Setup,
+    /// `pypilot doctor --fix`: the fixes the findings call for
+    /// ([`crate::core::repair`]).
+    Repair,
+}
+
+impl Flow {
+    /// The error line when the run did not finish.
+    fn failure(self) -> &'static str {
+        match self {
+            Flow::Setup => "setup did not complete, see the steps above",
+            Flow::Repair => "the fix did not complete, see the steps above",
+        }
+    }
+
+    async fn run<S: MetadataSource>(
+        self,
+        workspace: &Path,
+        settings: &Settings,
+        source: &S,
+    ) -> crate::Result<setup::SetupSummary> {
+        match self {
+            Flow::Setup => setup::run(workspace, settings, source).await,
+            Flow::Repair => crate::core::repair::run(workspace, settings, source).await,
+        }
+    }
+}
+
+/// `pypilot setup`, or `doctor --fix`, under the name `command`.
 pub async fn run<S: MetadataSource>(
     workspace: &Path,
     settings: &Settings,
@@ -52,24 +84,29 @@ pub async fn run<S: MetadataSource>(
     format: OutputFormat,
     command: &str,
     dry_run: bool,
+    flow: Flow,
 ) -> crate::Result<()> {
     if dry_run {
-        let (summary, steps) = exec::dry_run(setup::run(workspace, settings, source)).await;
+        let (summary, steps) = exec::dry_run(flow.run(workspace, settings, source)).await;
         let plan = Plan::from_summary(&summary?, steps);
         return super::plan::finish(command, workspace, &plan, format);
     }
     if format.is_json() {
-        let summary = setup::run(workspace, settings, source).await?;
+        let summary = flow.run(workspace, settings, source).await?;
         crate::core::rescan::notify(workspace, crate::core::rescan::Kind::Setup);
         StepsReport::new(workspace, &summary).print(command)?;
         if summary.ok {
             return Ok(());
         }
-        anyhow::bail!("setup did not complete, see the steps above");
+        anyhow::bail!("{}", flow.failure());
     }
     println!(
         "{}: {} ({})",
-        "PyPilot setup".bold().cyan(),
+        if flow == Flow::Repair {
+            "PyPilot fix".bold().cyan()
+        } else {
+            "PyPilot setup".bold().cyan()
+        },
         workspace.display(),
         if crate::core::pixi::detect(workspace).is_some() {
             "pixi project".bold()
@@ -78,17 +115,19 @@ pub async fn run<S: MetadataSource>(
         }
     );
 
-    let summary = setup::run(workspace, settings, source).await?;
+    let summary = flow.run(workspace, settings, source).await?;
 
     if !summary.why.is_empty() {
         println!("  {}", summary.why.cyan());
     }
-    println!(
-        "{}",
-        "── Steps ────────────────────────────────────────────────"
-            .bold()
-            .cyan()
-    );
+    if !summary.steps.is_empty() {
+        println!(
+            "{}",
+            "── Steps ────────────────────────────────────────────────"
+                .bold()
+                .cyan()
+        );
+    }
 
     for step in &summary.steps {
         let mark = if step.ok {
@@ -108,7 +147,10 @@ pub async fn run<S: MetadataSource>(
     // from a Zed task), have it re-scan and toast the fresh state.
     crate::core::rescan::notify(workspace, crate::core::rescan::Kind::Setup);
 
-    if summary.ok {
+    if summary.ok && summary.steps.is_empty() {
+        println!("  {} Nothing was changed.", "✓".green().bold());
+        Ok(())
+    } else if summary.ok {
         println!(
             "  {} Environment at {} ({}).",
             "✓ Done.".green().bold(),
@@ -121,7 +163,7 @@ pub async fn run<S: MetadataSource>(
         Ok(())
     } else {
         print_pixi_build_advice(workspace, &summary);
-        anyhow::bail!("setup did not complete, see the steps above");
+        anyhow::bail!("{}", flow.failure());
     }
 }
 

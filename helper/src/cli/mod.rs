@@ -60,7 +60,8 @@ async fn dispatch_mode(mode: &str, args: &[String]) -> crate::Result<()> {
     let dry_run = plan::dry_run(args);
 
     match mode {
-        // `--fix` runs what the editor's "Fix environment" runs: setup.
+        // `--fix` runs what the editor's "Fix environment" runs: the fixes
+        // the findings call for (core::repair), not a full rebuild.
         "doctor" if args.iter().any(|a| a == "--fix") => {
             if !format.is_json() {
                 doctor::run(&workspace, &settings, &source, format).await?;
@@ -73,11 +74,23 @@ async fn dispatch_mode(mode: &str, args: &[String]) -> crate::Result<()> {
                 format,
                 "doctor --fix",
                 dry_run,
+                setup::Flow::Repair,
             )
             .await
         }
         "doctor" => doctor::run(&workspace, &settings, &source, format).await,
-        "setup" => setup::run(&workspace, &settings, &source, format, "setup", dry_run).await,
+        "setup" => {
+            setup::run(
+                &workspace,
+                &settings,
+                &source,
+                format,
+                "setup",
+                dry_run,
+                setup::Flow::Setup,
+            )
+            .await
+        }
 
         "check" => {
             let Some(package) = positional(args) else {
