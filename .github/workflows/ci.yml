@@ -4,6 +4,8 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  # Re-run by hand when a run is lost (a runner outage, a retired image).
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
