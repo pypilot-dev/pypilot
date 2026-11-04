@@ -266,6 +266,8 @@ pub async fn assess<S: MetadataSource>(
         .await,
     );
 
+    drop_explained_conflict(&mut findings, compat.as_ref());
+
     // pixi: PyPI dependencies that exclude the selected environment's
     // Python, named with the `pixi add python=…` that fixes them
     // (core::pixi_compat), plus the other environments and the other
@@ -304,6 +306,60 @@ pub async fn assess<S: MetadataSource>(
 
 /// Title of the finding for dependencies with no common Python.
 const CONFLICT_TITLE: &str = "Dependencies conflict on Python version";
+
+/// The conflict detail when no pair is to blame: name the packages that
+/// support no Python at all here (the `typing` backport, which declares
+/// `<3.5`), so the finding never leaves the reader guessing.
+fn no_python_detail(compat: &CompatReport) -> String {
+    let none: Vec<String> = compat
+        .per_package
+        .iter()
+        .filter(|p| p.supported.is_empty())
+        .map(|p| match &p.requires_python {
+            Some(rp) => format!("{} {} (requires-python `{rp}`)", p.name, p.version),
+            None => format!("{} {}", p.name, p.version),
+        })
+        .collect();
+    if none.is_empty() {
+        "The project's dependencies have no common supported Python version.".to_string()
+    } else {
+        format!(
+            "{} supports no Python 3 release PyPilot knows, so the dependencies have no common Python. Remove or replace it.",
+            none.join(", ")
+        )
+    }
+}
+
+/// Drop the generic "no common Python" finding when the distributions a
+/// known-breakage finding removes are what empties the intersection: the
+/// `typing` backport (C s6c) gets one finding, the one that fixes it.
+fn drop_explained_conflict(findings: &mut Vec<Finding>, compat: Option<&CompatReport>) {
+    let Some(compat) = compat else {
+        return;
+    };
+    let removed: std::collections::HashSet<String> = findings
+        .iter()
+        .filter_map(|f| match &f.fix {
+            FixKind::ReplaceDist(r) => Some(r.uninstall.iter().chain(&r.drop)),
+            _ => None,
+        })
+        .flatten()
+        .map(|n| crate::core::project::normalize_name(n))
+        .collect();
+    if removed.is_empty() || !findings.iter().any(|f| f.title == CONFLICT_TITLE) {
+        return;
+    }
+    let rest = compat
+        .per_package
+        .iter()
+        .filter(|p| !removed.contains(&crate::core::project::normalize_name(&p.name)))
+        .fold(PyVersionSet::universe(), |acc, p| {
+            acc.intersect(&p.supported)
+        });
+    if !rest.is_empty() {
+        findings.retain(|f| f.title != CONFLICT_TITLE);
+    }
+}
 
 /// "Python 3.13[ is not supported by this project]".
 const UNSUPPORTED_SUFFIX: &str = " is not supported by this project";
@@ -554,9 +610,7 @@ pub fn synthesize(
             .conflicts
             .first()
             .map(|c| c.explanation.clone())
-            .unwrap_or_else(|| {
-                "The project's dependencies have no common supported Python version.".to_string()
-            });
+            .unwrap_or_else(|| no_python_detail(compat));
         findings.push(Finding {
             severity: Severity::Error,
             title: CONFLICT_TITLE.to_string(),
@@ -1137,6 +1191,44 @@ mod tests {
             packages: vec![Requirement::any("mediapipe")],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_backport_with_no_python_is_named_and_left_to_its_finding() {
+        // C s6c: `typing` declares `<3.5`, so it supports no Python here.
+        let mut typing = analysis("typing", &[]);
+        typing.version = "3.7.4.3".into();
+        typing.requires_python = Some("<3.5".into());
+        let compat = report(vec![typing, analysis("requests", &[9, 10, 11, 12])]);
+        let detail = no_python_detail(&compat);
+        assert!(
+            detail.contains("typing 3.7.4.3 (requires-python `<3.5`)"),
+            "{detail}"
+        );
+
+        let conflict = Finding {
+            severity: Severity::Error,
+            title: CONFLICT_TITLE.into(),
+            detail,
+            fix: FixKind::Manual,
+        };
+        let backport = Finding {
+            severity: Severity::Warning,
+            title: "typing is an obsolete backport".into(),
+            detail: String::new(),
+            fix: FixKind::ReplaceDist(crate::core::knowledge::Replacement {
+                uninstall: vec!["typing".into()],
+                install: Vec::new(),
+                drop: vec!["typing".into()],
+            }),
+        };
+        let mut findings = vec![conflict.clone(), backport.clone()];
+        drop_explained_conflict(&mut findings, Some(&compat));
+        assert_eq!(findings, std::slice::from_ref(&backport));
+        // Without the finding that removes it, the conflict stays.
+        let mut findings = vec![conflict.clone()];
+        drop_explained_conflict(&mut findings, Some(&compat));
+        assert_eq!(findings.len(), 1);
     }
 
     #[test]
