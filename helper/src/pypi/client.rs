@@ -77,6 +77,13 @@ pub trait MetadataSource {
     async fn classifiers(&self, _name: &str) -> Vec<String> {
         Vec::new()
     }
+
+    /// Why PyPI yanked this release, when it says. Only asked about a release
+    /// already known to be yanked, so the default (no reason) is safe for
+    /// sources that do not know.
+    async fn yanked_reason(&self, _name: &str, _version: &str) -> Option<String> {
+        None
+    }
 }
 
 /// `{"info": {"classifiers": [...]}}`, all [`MetadataSource::classifiers`]
@@ -254,6 +261,26 @@ impl MetadataSource for PyPiClient {
             m.insert(key, list.clone());
         }
         list
+    }
+
+    async fn yanked_reason(&self, name: &str, version: &str) -> Option<String> {
+        // `info.yanked_reason` of the per-release document. Not cached: it is
+        // read once per yanked pin a scan finds, which is rare.
+        #[derive(serde::Deserialize)]
+        struct Doc {
+            info: YankInfo,
+        }
+        #[derive(serde::Deserialize)]
+        struct YankInfo {
+            #[serde(default)]
+            yanked_reason: Option<String>,
+        }
+        let url = format!("{}/{}/{}/json", self.base_url, name, version);
+        let resp = self.http.get(&url).send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        resp.json::<Doc>().await.ok()?.info.yanked_reason
     }
 }
 

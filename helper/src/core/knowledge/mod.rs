@@ -5,13 +5,13 @@
 //! next to numpy 2, a Flask with no Werkzeug cap next to Werkzeug 3, jwt and
 //! PyJWT writing the same `jwt/` directory, an enum34 backport shadowing the
 //! standard library, source importing `imghdr` on Python 3.13, `import
-//! pkg_resources` with setuptools 82.
+//! pkg_resources` with setuptools 82, a pinned release PyPI has yanked.
 //!
 //! The facts live in `data/known_breakages.json` ([`table`]), which installed
 //! engines refresh from `main` like the other tables. [`rules`] turns them and
 //! a [`rules::Context`] (declared, resolved and installed versions, the
 //! project's imports, the Python) into findings that name the culprit and
-//! carry a fix. [`assess`] is the one hook
+//! carry a fix; [`yanked`] asks PyPI about pins. [`assess`] is the one hook
 //! the solver calls.
 //!
 //! # Fixes, for the `doctor --fix` planner
@@ -37,6 +37,7 @@
 pub mod apply;
 pub mod rules;
 pub mod table;
+pub mod yanked;
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
@@ -76,7 +77,7 @@ const MAX_SOURCE_FILES: usize = 400;
 const MAX_SOURCE_ENTRIES: usize = 20_000;
 
 /// Every known-breakage finding for a workspace: the table's rules over the
-/// project, the venv and the source.
+/// project, the venv and the source, plus yanked pins.
 ///
 /// `venv` is the project venv and its Python; `target` is the Python setup
 /// would pick, used when there is no venv. Read-only: file reads and cached
@@ -93,8 +94,9 @@ pub async fn assess<S: MetadataSource>(
         return Vec::new();
     }
     let ctx = context(workspace, project, compat, venv, target);
-    let _ = source;
-    rules::evaluate(table::table(), &ctx)
+    let mut findings = rules::evaluate(table::table(), &ctx);
+    findings.extend(yanked::check(workspace, project, source, ctx.pixi).await);
+    findings
 }
 
 /// Gather the [`rules::Context`] for a workspace.
