@@ -771,12 +771,14 @@ mod tests {
     #[test]
     fn extract_zip_writes_entries_and_skips_escaping_paths() {
         use std::io::Write;
+        // locate_binary looks for the platform's own name.
+        let exe = if cfg!(windows) { "uv.exe" } else { "uv" };
         let mut bytes = Vec::new();
         {
             let mut zip = zip::ZipWriter::new(Cursor::new(&mut bytes));
             let opts = zip::write::SimpleFileOptions::default()
                 .compression_method(zip::CompressionMethod::Deflated);
-            zip.start_file("uv-x86_64-pc-windows-msvc/uv.exe", opts)
+            zip.start_file(format!("uv-x86_64-pc-windows-msvc/{exe}"), opts)
                 .unwrap();
             zip.write_all(b"uv binary").unwrap();
             zip.start_file("../escaped.txt", opts).unwrap();
@@ -790,7 +792,7 @@ mod tests {
 
         extract_zip(&bytes, &dest).unwrap();
 
-        let uv = dest.join("uv-x86_64-pc-windows-msvc").join("uv.exe");
+        let uv = dest.join("uv-x86_64-pc-windows-msvc").join(exe);
         assert_eq!(std::fs::read(&uv).unwrap(), b"uv binary");
         assert!(!root.join("escaped.txt").exists());
         assert_eq!(locate_binary(&dest).as_deref(), Some(uv.as_path()));
