@@ -41,6 +41,7 @@ pub mod suggest;
 pub mod toolchain;
 pub mod torch_gpu;
 pub mod torch_index;
+pub mod undeclared;
 pub mod uv;
 
 use crate::pypi::{CompatReport, PyVersion};
