@@ -274,7 +274,7 @@
       "module": "jwt",
       "other": "pyjwt",
       "keep": "PyJWT",
-      "symptom": "ImportError: cannot import name 'InvalidKeyTypeError' from 'jwt.exceptions'",
+      "symptom": "ImportError or AttributeError on jwt names, depending on which installed last (for example: module 'jwt' has no attribute 'encode')",
       "source": "https://pypi.org/project/jwt/"
     },
     {
@@ -435,7 +435,7 @@
       "module": "pkg_resources",
       "dependency": "setuptools",
       "breaks_from": "82",
-      "constraint": "setuptools<81",
+      "constraint": "setuptools<82",
       "migrate": "importlib.metadata and importlib.resources",
       "symptom": "ModuleNotFoundError: No module named 'pkg_resources'",
       "source": "https://setuptools.pypa.io/en/latest/pkg_resources.html"
