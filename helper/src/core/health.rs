@@ -146,7 +146,7 @@ pub fn check(
 }
 
 /// Whether this package manager setting works from `uv.lock`.
-fn uses_lock(pm: PackageManager) -> bool {
+pub fn uses_lock(pm: PackageManager) -> bool {
     matches!(pm, PackageManager::Auto | PackageManager::Uv)
 }
 

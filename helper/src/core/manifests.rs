@@ -524,7 +524,7 @@ fn lockfile_finding(present: &[&str], poetry_only: bool, settings: &Settings) ->
     let why = match followed {
         Some("poetry.lock") => "PyPilot follows poetry.lock: the dependencies are declared in [tool.poetry], so `poetry install` is what installs them.".to_string(),
         Some(lock) => format!(
-            "PyPilot follows {lock}: this is a uv project, and `uv sync` installs from it."
+            "PyPilot follows {lock}: this is a uv project, `uv sync` installs from it, and the Python is chosen for the releases it locks."
         ),
         None => "PyPilot follows neither: package_manager is set to pip, so it installs requirements.txt.".to_string(),
     };
