@@ -416,6 +416,253 @@ pub fn symbol_uses(source: &str, targets: &[(String, String)]) -> Vec<SymbolUse>
     out
 }
 
+/// A method call on an object that a dependency removed, as a
+/// `symbol_removals` row's `calls` writes it:
+///
+/// - `engine.execute(`: a call whose dotted name ends in `engine.execute`
+///   (`engine.execute(...)`, `db.engine.execute(...)`, but not
+///   `my_engine.execute(...)`);
+/// - `.engine.execute(`: the same, but only as an attribute of something
+///   (`db.engine.execute(...)`, `get_db().engine.execute(...)`);
+/// - `*.append(`: any receiver;
+/// - `conn.execute("`: the first argument is a string literal;
+/// - `*.append(ignore_index=`: the call passes that keyword.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallPattern {
+    /// The dotted names the call ends with, the method last.
+    names: Vec<String>,
+    /// `*.name(`: any receiver, but there must be one.
+    any_receiver: bool,
+    /// `.name.name(`: the chain must be longer than `names`.
+    attribute: bool,
+    /// `("`: the first argument is a string literal.
+    string_arg: bool,
+    /// `(kw=`: the call passes `kw=`.
+    keyword: Option<String>,
+}
+
+impl CallPattern {
+    /// `None` when `text` is not one of the forms above.
+    pub fn parse(text: &str) -> Option<CallPattern> {
+        let (chain, args) = text.trim().split_once('(')?;
+        let (attribute, chain) = match chain.strip_prefix('.') {
+            Some(rest) => (true, rest),
+            None => (false, chain),
+        };
+        let (any_receiver, chain) = match chain.strip_prefix("*.") {
+            Some(rest) => (true, rest),
+            None => (false, chain),
+        };
+        let names: Vec<String> = chain.split('.').map(str::to_string).collect();
+        let ident = |s: &str| {
+            !s.is_empty()
+                && s.chars().all(is_ident_char)
+                && !s.starts_with(|c: char| c.is_ascii_digit())
+        };
+        if !names.iter().all(|n| ident(n)) || (!any_receiver && !attribute && names.len() < 2) {
+            return None;
+        }
+        let args = args.trim();
+        let (string_arg, keyword) = match args {
+            "" => (false, None),
+            "\"" | "'" => (true, None),
+            kw => match kw.strip_suffix('=') {
+                Some(k) if ident(k.trim()) => (false, Some(k.trim().to_string())),
+                _ => return None,
+            },
+        };
+        Some(CallPattern {
+            names,
+            any_receiver,
+            attribute,
+            string_arg,
+            keyword,
+        })
+    }
+}
+
+/// A call [`call_uses`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallUse {
+    /// Index into the patterns given.
+    pub pattern: usize,
+    /// One-based line number.
+    pub line: u32,
+    /// The dotted name as written: `db.engine.execute`.
+    pub written: String,
+}
+
+/// Lines a call's arguments are read across, at most.
+const MAX_CALL_LINES: usize = 20;
+
+/// Find the calls `patterns` describe. Textual, like [`symbol_uses`]:
+/// strings and comments are masked, so a call inside a docstring or after
+/// `#` never counts; what the receiver is bound to is not known, which is
+/// why a row's patterns are only run on files that import its module. One
+/// use per pattern per line.
+pub fn call_uses(source: &str, patterns: &[CallPattern]) -> Vec<CallUse> {
+    if patterns.is_empty() {
+        return Vec::new();
+    }
+    let raw: Vec<Vec<char>> = source.lines().map(|l| l.chars().collect()).collect();
+    let mut masked: Vec<Vec<char>> = Vec::new();
+    let mut open_delim: Option<&'static str> = None;
+    for line in source.lines() {
+        let (code, next) = strip_strings_and_comments(line, open_delim);
+        open_delim = next;
+        masked.push(code.chars().collect());
+    }
+    let mut out: Vec<CallUse> = Vec::new();
+    for (n, chars) in masked.iter().enumerate() {
+        let mut j = 0;
+        while j < chars.len() {
+            let prev = j.checked_sub(1).map(|p| chars[p]);
+            let before_dot = j.checked_sub(2).map(|p| chars[p]);
+            // A chain starts at a name not preceded by a name or a dot, or
+            // right after `).` / `].` (an attribute of a call's result).
+            let after_call = prev == Some('.') && matches!(before_dot, Some(')' | ']'));
+            let starts = is_ident_char(chars[j])
+                && !chars[j].is_ascii_digit()
+                && (prev.map_or(true, |p| !is_ident_char(p) && p != '.') || after_call);
+            if !starts {
+                j += 1;
+                continue;
+            }
+            let mut parts: Vec<String> = Vec::new();
+            let mut k = j;
+            loop {
+                let word: String = chars[k..]
+                    .iter()
+                    .take_while(|c| is_ident_char(**c))
+                    .collect();
+                if word.is_empty() {
+                    break;
+                }
+                k += word.chars().count();
+                parts.push(word);
+                if k < chars.len() && chars[k] == '.' {
+                    k += 1;
+                } else {
+                    break;
+                }
+            }
+            let mut open = k;
+            while open < chars.len() && chars[open] == ' ' {
+                open += 1;
+            }
+            if open < chars.len() && chars[open] == '(' {
+                // The receiver count includes the call result before `).`.
+                let receivers = parts.len() + usize::from(after_call);
+                for (idx, p) in patterns.iter().enumerate() {
+                    if !chain_matches(p, &parts, receivers) {
+                        continue;
+                    }
+                    if p.string_arg && !first_arg_is_string(&raw, n, open + 1) {
+                        continue;
+                    }
+                    if let Some(kw) = &p.keyword {
+                        if !passes_keyword(&masked, n, open, kw) {
+                            continue;
+                        }
+                    }
+                    let line = n as u32 + 1;
+                    if !out.iter().any(|u| u.pattern == idx && u.line == line) {
+                        out.push(CallUse {
+                            pattern: idx,
+                            line,
+                            written: parts.join("."),
+                        });
+                    }
+                }
+            }
+            j = k.max(j + 1);
+        }
+    }
+    out.sort_by_key(|u| (u.line, u.pattern));
+    out
+}
+
+/// Does the dotted call `parts` (with `len` names in all, counting a call
+/// result it is an attribute of) end the way `p` says?
+fn chain_matches(p: &CallPattern, parts: &[String], len: usize) -> bool {
+    if parts.len() < p.names.len() || !parts.ends_with(&p.names) {
+        return false;
+    }
+    if (p.any_receiver || p.attribute) && len <= p.names.len() {
+        return false;
+    }
+    true
+}
+
+/// Is the first argument of the call opened just before `col` on line `n`
+/// a string literal (`"..."`, `'...'`, `r"..."`, `f"""..."""`)? It may
+/// start on the next line.
+fn first_arg_is_string(raw: &[Vec<char>], n: usize, col: usize) -> bool {
+    let mut line = n;
+    let mut col = col;
+    while line < raw.len() && line <= n + 1 {
+        let chars = &raw[line];
+        let mut i = col.min(chars.len());
+        while i < chars.len() && chars[i].is_whitespace() {
+            i += 1;
+        }
+        if i == chars.len() {
+            line += 1;
+            col = 0;
+            continue;
+        }
+        let mut q = i;
+        while q < chars.len() && q - i < 2 && "rRbBuUfF".contains(chars[q]) {
+            q += 1;
+        }
+        return q < chars.len() && (chars[q] == '"' || chars[q] == '\'');
+    }
+    false
+}
+
+/// Does the call whose `(` is at `open` on line `n` pass `kw=`? Reads the
+/// masked top-level arguments up to the closing parenthesis, across a
+/// few lines.
+fn passes_keyword(masked: &[Vec<char>], n: usize, open: usize, kw: &str) -> bool {
+    let mut args: Vec<char> = Vec::new();
+    let mut depth = 0usize;
+    'lines: for (line, chars) in masked.iter().enumerate().skip(n).take(MAX_CALL_LINES) {
+        let start = if line == n { open } else { 0 };
+        for &c in &chars[start.min(chars.len())..] {
+            match c {
+                '(' | '[' | '{' => depth += 1,
+                ')' | ']' | '}' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        break 'lines;
+                    }
+                }
+                _ => {}
+            }
+            // Only the call's own arguments: `items.append(dict(kw=1))`
+            // passes no keyword to `append`.
+            args.push(if depth == 1 { c } else { ' ' });
+        }
+        args.push(' ');
+    }
+    let kw: Vec<char> = kw.chars().collect();
+    let mut i = 0;
+    while i + kw.len() <= args.len() {
+        let boundary = i == 0 || !is_ident_char(args[i - 1]);
+        if boundary && args[i..i + kw.len()] == kw[..] {
+            let mut e = i + kw.len();
+            while e < args.len() && args[e] == ' ' {
+                e += 1;
+            }
+            if e < args.len() && args[e] == '=' && args.get(e + 1) != Some(&'=') {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
 fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
@@ -801,6 +1048,120 @@ mod attr_tests {
 #[cfg(test)]
 mod symbol_tests {
     use super::*;
+
+    fn calls(src: &str, pats: &[&str]) -> Vec<(usize, u32, String)> {
+        let pats: Vec<CallPattern> = pats
+            .iter()
+            .map(|p| CallPattern::parse(p).unwrap())
+            .collect();
+        call_uses(src, &pats)
+            .into_iter()
+            .map(|u| (u.pattern, u.line, u.written))
+            .collect()
+    }
+
+    #[test]
+    fn call_patterns_parse_or_refuse() {
+        assert!(CallPattern::parse("engine.execute(").is_some());
+        assert!(CallPattern::parse(".engine.execute(").is_some());
+        assert!(CallPattern::parse("*.append(ignore_index=").is_some());
+        assert!(CallPattern::parse("conn.execute(\"").is_some());
+        // A bare name is any function call, far too broad; no call at all is
+        // not a call pattern.
+        assert!(CallPattern::parse("execute(").is_none());
+        assert!(CallPattern::parse("engine.execute").is_none());
+        assert!(CallPattern::parse("engine.execute(x").is_none());
+        assert!(CallPattern::parse("1engine.execute(").is_none());
+    }
+
+    #[test]
+    fn method_calls_match_on_the_name_they_end_with() {
+        let src = "from flask_sqlalchemy import SQLAlchemy
+db = SQLAlchemy()
+print(db.engine.execute(\"select 1\").scalar())
+engine.execute(q)
+my_engine.execute(q)
+engine.executemany(q)
+engine.execute
+";
+        assert_eq!(
+            calls(src, &["engine.execute("]),
+            [
+                (0, 3, "db.engine.execute".into()),
+                (0, 4, "engine.execute".into())
+            ]
+        );
+        // `.engine.execute(` wants an attribute: not the bare name.
+        let src = "engine.execute(q)
+db.engine.execute(q)
+get_db().engine.execute(q)
+";
+        assert_eq!(
+            calls(src, &[".engine.execute("]),
+            [
+                (0, 2, "db.engine.execute".into()),
+                (0, 3, "engine.execute".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn comments_and_strings_never_match() {
+        let src = "# db.engine.execute(q)
+s = \"engine.execute(q)\"
+\"\"\"
+engine.execute(q)
+\"\"\"
+x = 1  # engine.execute(q)
+";
+        assert!(calls(src, &["engine.execute("]).is_empty());
+    }
+
+    #[test]
+    fn a_string_first_argument_is_told_from_a_text_clause() {
+        let src = "conn.execute(\"select 1\")
+conn.execute(text(\"select 1\"))
+conn.execute(  r'select 1')
+conn.execute(
+    \"\"\"select 1\"\"\"
+)
+conn.execute(stmt)
+db.session.execute(f\"select {x}\")
+";
+        assert_eq!(
+            calls(src, &["conn.execute(\"", "session.execute(\""]),
+            [
+                (0, 1, "conn.execute".into()),
+                (0, 3, "conn.execute".into()),
+                (0, 4, "conn.execute".into()),
+                (1, 8, "db.session.execute".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn a_keyword_tells_dataframe_append_from_list_append() {
+        let src = "rows.append(1)
+df = df.append(row, ignore_index=True)
+out = out.append(
+    other,
+    ignore_index = True,
+)
+items.append(dict(ignore_index=1))
+x.append(a == ignore_index)
+";
+        assert_eq!(
+            calls(src, &["*.append(ignore_index="]),
+            [(0, 2, "df.append".into()), (0, 3, "out.append".into())]
+        );
+        // `*.` needs a receiver: a function named `append` is not a method.
+        assert!(calls(
+            "append(x, ignore_index=True)
+",
+            &["*.append(ignore_index="]
+        )
+        .is_empty());
+    }
 
     fn targets(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         pairs
