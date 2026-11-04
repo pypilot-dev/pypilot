@@ -11,6 +11,7 @@
 pub mod cache;
 pub mod client;
 pub mod explain;
+pub mod fit;
 pub mod metadata;
 pub mod pyversion;
 pub mod version;
@@ -140,11 +141,13 @@ pub async fn analyze<S: MetadataSource>(
     .await;
 
     let mut per_package = Vec::new();
+    // The requirement behind each `per_package` entry, for `fit::fit_ranges`.
+    let mut fitted_from = Vec::new();
     let mut unresolved = Vec::new();
     let mut unreachable = Vec::new();
     let mut sdist_warnings = Vec::new();
 
-    for (name, res) in results {
+    for (req, (name, res)) in packages.iter().zip(results) {
         match res {
             Ok(meta) => {
                 let analysis = meta.analyze(&platform);
@@ -160,12 +163,25 @@ pub async fn analyze<S: MetadataSource>(
                     None => {}
                 }
                 per_package.push(analysis);
+                fitted_from.push(req.clone());
             }
             Err(e) if crate::pypi::client::is_unreachable(&e) => {
                 unreachable.push((name, format!("{e:#}")))
             }
             Err(e) => unresolved.push((name, e.to_string())),
         }
+    }
+
+    // No shared Python as first read: a range judged by its newest release
+    // may still fit through an older one, as an installer would pick it.
+    let shares_none = per_package
+        .iter()
+        .filter(|p| !p.no_files_for_platform)
+        .map(|p| p.supported.clone())
+        .reduce(|acc, s| acc.intersect(&s))
+        .is_some_and(|s| s.is_empty());
+    if shares_none {
+        fit::fit_ranges(source, platform, &fitted_from, &mut per_package).await;
     }
 
     let intersection = per_package
@@ -443,6 +459,94 @@ mod tests {
         let c = &report.conflicts[0];
         assert!(c.explanation.contains("legacy"));
         assert!(c.explanation.contains("shiny"));
+    }
+
+    /// C s5: `pandas==2.0.3` tops out at 3.11 and the newest numpy needs
+    /// 3.12, but `numpy>=2` also admits 2.2, which runs on 3.11. That is no
+    /// Python conflict; uv installs numpy 2.2 there.
+    #[tokio::test]
+    async fn a_range_is_judged_by_a_release_that_fits() {
+        let mut src = FixtureSource::new();
+        let mut pandas = pkg(
+            "pandas",
+            Some(">=3.8"),
+            vec![
+                wheel("pandas-2.0.3-cp38-cp38-manylinux_2_17_x86_64.whl"),
+                wheel("pandas-2.0.3-cp311-cp311-manylinux_2_17_x86_64.whl"),
+            ],
+        );
+        pandas.info.version = "2.0.3".into();
+        src.insert("pandas==2.0.3", pandas.clone());
+        pandas.info.version = "2.3.0".into();
+        pandas.versions = vec!["2.0.3".into(), "2.3.0".into()];
+        src.insert("pandas", pandas);
+
+        let mut numpy = pkg(
+            "numpy",
+            Some(">=3.12"),
+            vec![wheel("numpy-2.4.0-cp312-cp312-manylinux_2_17_x86_64.whl")],
+        );
+        numpy.info.version = "2.4.0".into();
+        numpy.versions = ["1.26.4", "2.2.6", "2.3.1", "2.4.0"]
+            .map(String::from)
+            .to_vec();
+        src.insert("numpy", numpy);
+        let mut n23 = pkg(
+            "numpy",
+            Some(">=3.12"),
+            vec![wheel("numpy-2.3.1-cp312-cp312-manylinux_2_17_x86_64.whl")],
+        );
+        n23.info.version = "2.3.1".into();
+        src.insert("numpy==2.3.1", n23);
+        let mut n22 = pkg(
+            "numpy",
+            Some(">=3.10"),
+            vec![
+                wheel("numpy-2.2.6-cp310-cp310-manylinux_2_17_x86_64.whl"),
+                wheel("numpy-2.2.6-cp311-cp311-manylinux_2_17_x86_64.whl"),
+            ],
+        );
+        n22.info.version = "2.2.6".into();
+        src.insert("numpy==2.2.6", n22);
+
+        let reqs = [
+            Requirement {
+                name: "pandas".into(),
+                spec: "==2.0.3".into(),
+            },
+            Requirement {
+                name: "numpy".into(),
+                spec: ">=2".into(),
+            },
+        ];
+        let report = analyze(&src, linux(), &reqs).await;
+        assert!(report.conflicts.is_empty(), "{:?}", report.conflicts);
+        assert_eq!(report.intersection.to_range_string(), "3.11");
+        let numpy = report
+            .per_package
+            .iter()
+            .find(|p| p.name == "numpy")
+            .unwrap();
+        assert_eq!(numpy.version, "2.2.6");
+
+        // An exact pin has no other release to fall back on: still a conflict.
+        let pinned = [
+            reqs[0].clone(),
+            Requirement {
+                name: "numpy".into(),
+                spec: "==2.4.0".into(),
+            },
+        ];
+        let mut src = src.clone();
+        let mut n24 = pkg(
+            "numpy",
+            Some(">=3.12"),
+            vec![wheel("numpy-2.4.0-cp312-cp312-manylinux_2_17_x86_64.whl")],
+        );
+        n24.info.version = "2.4.0".into();
+        src.insert("numpy==2.4.0", n24);
+        let report = analyze(&src, linux(), &pinned).await;
+        assert_eq!(report.conflicts.len(), 1);
     }
 
     #[tokio::test]

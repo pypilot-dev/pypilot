@@ -109,6 +109,12 @@ impl PackageVersion {
         self.post.is_some()
     }
 
+    /// The release segments, `[2, 2, 6]` for `2.2.6`, for grouping releases
+    /// into series.
+    pub fn release(&self) -> &[u64] {
+        &self.release
+    }
+
     /// Same epoch and release segments (zero-padded), ignoring every suffix.
     fn same_base(&self, other: &PackageVersion) -> bool {
         self.epoch == other.epoch && cmp_release(&self.release, &other.release).is_eq()
