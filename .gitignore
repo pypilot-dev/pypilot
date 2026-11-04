@@ -20,3 +20,4 @@ Thumbs.db
 
 # PyPilot runtime state that must never be committed
 /helper/.pypilot-cache/
+__pycache__/
