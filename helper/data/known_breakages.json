@@ -1,0 +1,475 @@
+{
+  "schema_version": 1,
+  "about": "Well-known breakages that package metadata does not declare. Read by helper/src/core/knowledge. Versions are PEP 440 strings, Pythons are \"3.N\". Append rows or change values only; never rename, remove or retype a field.",
+  "updated": "2026-11-04",
+  "api_removals": [
+    {
+      "id": "pandas-numpy2-abi",
+      "kind": "abi",
+      "package": "pandas",
+      "fixed_in": "2.2.2",
+      "dependency": "numpy",
+      "breaks_from": "2",
+      "python_min": "3.9",
+      "constraint": "numpy<2",
+      "symptom": "ValueError: numpy.dtype size changed, may indicate binary incompatibility",
+      "source": "https://pandas.pydata.org/docs/whatsnew/v2.2.2.html"
+    },
+    {
+      "id": "scikit-learn-numpy2-abi",
+      "kind": "abi",
+      "package": "scikit-learn",
+      "fixed_in": "1.4.2",
+      "dependency": "numpy",
+      "breaks_from": "2",
+      "python_min": "3.9",
+      "constraint": "numpy<2",
+      "symptom": "A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x",
+      "source": "https://scikit-learn.org/stable/whats_new/v1.4.html"
+    },
+    {
+      "id": "matplotlib-numpy2-abi",
+      "kind": "abi",
+      "package": "matplotlib",
+      "fixed_in": "3.8.4",
+      "dependency": "numpy",
+      "breaks_from": "2",
+      "python_min": "3.9",
+      "constraint": "numpy<2",
+      "symptom": "A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x",
+      "source": "https://github.com/numpy/numpy/issues/26191"
+    },
+    {
+      "id": "pyarrow-numpy2-abi",
+      "kind": "abi",
+      "package": "pyarrow",
+      "fixed_in": "16.0.0",
+      "dependency": "numpy",
+      "breaks_from": "2",
+      "python_min": "3.9",
+      "constraint": "numpy<2",
+      "symptom": "A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x",
+      "source": "https://github.com/numpy/numpy/issues/26191"
+    },
+    {
+      "id": "h5py-numpy2-abi",
+      "kind": "abi",
+      "package": "h5py",
+      "fixed_in": "3.11.0",
+      "dependency": "numpy",
+      "breaks_from": "2",
+      "python_min": "3.9",
+      "constraint": "numpy<2",
+      "symptom": "ValueError: numpy.dtype size changed, may indicate binary incompatibility",
+      "source": "https://github.com/numpy/numpy/issues/26191"
+    },
+    {
+      "id": "shapely-numpy2-abi",
+      "kind": "abi",
+      "package": "shapely",
+      "fixed_in": "2.0.4",
+      "dependency": "numpy",
+      "breaks_from": "2",
+      "python_min": "3.9",
+      "constraint": "numpy<2",
+      "symptom": "A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x",
+      "source": "https://github.com/numpy/numpy/issues/26191"
+    },
+    {
+      "id": "numexpr-numpy2-abi",
+      "kind": "abi",
+      "package": "numexpr",
+      "fixed_in": "2.10.0",
+      "dependency": "numpy",
+      "breaks_from": "2",
+      "python_min": "3.9",
+      "constraint": "numpy<2",
+      "symptom": "A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x",
+      "source": "https://github.com/numpy/numpy/issues/26191"
+    },
+    {
+      "id": "opencv-python-numpy2-abi",
+      "kind": "abi",
+      "package": "opencv-python",
+      "fixed_in": "4.10.0.84",
+      "dependency": "numpy",
+      "breaks_from": "2",
+      "python_min": "3.9",
+      "constraint": "numpy<2",
+      "symptom": "A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x",
+      "source": "https://github.com/opencv/opencv-python/releases/tag/84"
+    },
+    {
+      "id": "opencv-python-headless-numpy2-abi",
+      "kind": "abi",
+      "package": "opencv-python-headless",
+      "fixed_in": "4.10.0.84",
+      "dependency": "numpy",
+      "breaks_from": "2",
+      "python_min": "3.9",
+      "constraint": "numpy<2",
+      "symptom": "A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x",
+      "source": "https://github.com/opencv/opencv-python/releases/tag/84"
+    },
+    {
+      "id": "opencv-contrib-python-numpy2-abi",
+      "kind": "abi",
+      "package": "opencv-contrib-python",
+      "fixed_in": "4.10.0.84",
+      "dependency": "numpy",
+      "breaks_from": "2",
+      "python_min": "3.9",
+      "constraint": "numpy<2",
+      "symptom": "A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x",
+      "source": "https://github.com/opencv/opencv-python/releases/tag/84"
+    },
+    {
+      "id": "torch-numpy2-abi",
+      "kind": "abi",
+      "package": "torch",
+      "fixed_in": "2.4.0",
+      "dependency": "numpy",
+      "breaks_from": "2",
+      "python_min": "3.9",
+      "constraint": "numpy<2",
+      "symptom": "A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x; RuntimeError: Numpy is not available",
+      "source": "https://github.com/pytorch/pytorch/releases/tag/v2.4.0"
+    },
+    {
+      "id": "jinja2-markupsafe-soft-unicode",
+      "kind": "api",
+      "package": "jinja2",
+      "fixed_in": "3.0.0",
+      "dependency": "markupsafe",
+      "breaks_from": "2.1",
+      "constraint": "markupsafe<2.1",
+      "symptom": "ImportError: cannot import name 'soft_unicode' from 'markupsafe'",
+      "source": "https://github.com/pallets/markupsafe/releases/tag/2.1.0"
+    },
+    {
+      "id": "flask-werkzeug3-url-quote",
+      "kind": "api",
+      "package": "flask",
+      "fixed_in": "2.2.4",
+      "dependency": "werkzeug",
+      "breaks_from": "3",
+      "constraint": "werkzeug<3",
+      "symptom": "ImportError: cannot import name 'url_quote' from 'werkzeug.urls'",
+      "source": "https://github.com/pallets/flask/issues/5223"
+    },
+    {
+      "id": "flask-itsdangerous-json",
+      "kind": "api",
+      "package": "flask",
+      "fixed_in": "2.0.0",
+      "dependency": "itsdangerous",
+      "breaks_from": "2.1",
+      "constraint": "itsdangerous<2.1",
+      "symptom": "ImportError: cannot import name 'json' from 'itsdangerous'",
+      "source": "https://stackoverflow.com/questions/71189819"
+    },
+    {
+      "id": "flask-jinja2-escape",
+      "kind": "api",
+      "package": "flask",
+      "fixed_in": "1.1.3",
+      "dependency": "jinja2",
+      "breaks_from": "3.1",
+      "constraint": "jinja2<3.1",
+      "symptom": "ImportError: cannot import name 'escape' from 'jinja2'",
+      "source": "https://jinja.palletsprojects.com/en/stable/changes/#version-3-1-0"
+    },
+    {
+      "id": "requests-toolbelt-urllib3-2-appengine",
+      "kind": "api",
+      "package": "requests-toolbelt",
+      "fixed_in": "1.0.0",
+      "dependency": "urllib3",
+      "breaks_from": "2",
+      "constraint": "urllib3<2",
+      "prefer": "upgrade",
+      "symptom": "ImportError: cannot import name 'appengine' from 'urllib3.contrib'",
+      "source": "https://github.com/requests/toolbelt/issues/361"
+    },
+    {
+      "id": "flask-sqlalchemy-sqlalchemy2",
+      "kind": "api",
+      "package": "flask-sqlalchemy",
+      "fixed_in": "3.0.2",
+      "dependency": "sqlalchemy",
+      "breaks_from": "2",
+      "constraint": "sqlalchemy<2",
+      "symptom": "AttributeError: module 'sqlalchemy' has no attribute '__all__'",
+      "source": "https://stackoverflow.com/questions/75282938"
+    },
+    {
+      "id": "flake8-importlib-metadata5",
+      "kind": "api",
+      "package": "flake8",
+      "fixed_in": "4.0.0",
+      "dependency": "importlib-metadata",
+      "breaks_from": "5",
+      "python_below": "3.8",
+      "constraint": "importlib-metadata<5",
+      "symptom": "AttributeError: 'EntryPoints' object has no attribute 'get'",
+      "source": "https://github.com/PyCQA/flake8/issues/1701"
+    }
+  ],
+  "python_removals": [
+    {
+      "id": "flake8-py312-entry-points",
+      "package": "flake8",
+      "fixed_in": "5.0.0",
+      "python_min": "3.12",
+      "symptom": "AttributeError: 'EntryPoints' object has no attribute 'get'",
+      "source": "https://github.com/PyCQA/flake8/issues/1701"
+    },
+    {
+      "id": "kafka-python-py312-six-moves",
+      "package": "kafka-python",
+      "fixed_in": "2.0.3",
+      "python_min": "3.12",
+      "symptom": "ModuleNotFoundError: No module named 'kafka.vendor.six.moves'",
+      "source": "https://github.com/dpkp/kafka-python/issues/2412"
+    },
+    {
+      "id": "nose-py312-imp",
+      "package": "nose",
+      "python_min": "3.12",
+      "replacement": "pytest",
+      "symptom": "ModuleNotFoundError: No module named 'imp'",
+      "source": "https://docs.python.org/3.12/whatsnew/3.12.html#imp"
+    },
+    {
+      "id": "boto-py312-six-moves",
+      "package": "boto",
+      "python_min": "3.12",
+      "replacement": "boto3",
+      "symptom": "ModuleNotFoundError: No module named 'boto.vendored.six.moves'",
+      "source": "https://pypi.org/project/boto/"
+    },
+    {
+      "id": "aioredis-py311-timeout-error",
+      "package": "aioredis",
+      "python_min": "3.11",
+      "replacement": "redis",
+      "symptom": "TypeError: duplicate base class TimeoutError",
+      "source": "https://github.com/aio-libs/aioredis-py/issues/1273"
+    },
+    {
+      "id": "attrdict-py310-collections",
+      "package": "attrdict",
+      "python_min": "3.10",
+      "replacement": "attrdict3",
+      "drop_in": true,
+      "symptom": "ImportError: cannot import name 'Mapping' from 'collections'",
+      "source": "https://stackoverflow.com/questions/70943244"
+    }
+  ],
+  "shadowing": [
+    {
+      "id": "jwt-pyjwt",
+      "kind": "clash",
+      "dist": "jwt",
+      "module": "jwt",
+      "other": "pyjwt",
+      "keep": "PyJWT",
+      "symptom": "ImportError: cannot import name 'InvalidKeyTypeError' from 'jwt.exceptions'",
+      "source": "https://pypi.org/project/jwt/"
+    },
+    {
+      "id": "bson-pymongo",
+      "kind": "clash",
+      "dist": "bson",
+      "module": "bson",
+      "other": "pymongo",
+      "keep": "pymongo",
+      "symptom": "ImportError: cannot import name 'SON' from 'bson'",
+      "source": "https://pymongo.readthedocs.io/en/stable/installation.html"
+    },
+    {
+      "id": "pycrypto-pycryptodome",
+      "kind": "clash",
+      "dist": "pycrypto",
+      "module": "Crypto",
+      "other": "pycryptodome",
+      "keep": "pycryptodome",
+      "symptom": "AttributeError or ImportError from a mix of Crypto/ files",
+      "source": "https://www.pycryptodome.org/src/installation"
+    },
+    {
+      "id": "serial-pyserial",
+      "kind": "clash",
+      "dist": "serial",
+      "module": "serial",
+      "other": "pyserial",
+      "keep": "pyserial",
+      "symptom": "AttributeError: module 'serial' has no attribute 'Serial'",
+      "source": "https://pypi.org/project/pyserial/"
+    },
+    {
+      "id": "opencv-python-headless-opencv-python",
+      "kind": "clash",
+      "dist": "opencv-python-headless",
+      "module": "cv2",
+      "other": "opencv-python",
+      "keep": "opencv-python",
+      "symptom": "cv2 functions missing or ImportError after one of the two is upgraded or removed",
+      "source": "https://github.com/opencv/opencv-python#installation-and-usage"
+    },
+    {
+      "id": "opencv-contrib-python-opencv-python",
+      "kind": "clash",
+      "dist": "opencv-python",
+      "module": "cv2",
+      "other": "opencv-contrib-python",
+      "keep": "opencv-contrib-python",
+      "symptom": "cv2 contrib modules missing (AttributeError: module 'cv2' has no attribute 'xfeatures2d')",
+      "source": "https://github.com/opencv/opencv-python#installation-and-usage"
+    },
+    {
+      "id": "enum34-backport",
+      "kind": "backport",
+      "dist": "enum34",
+      "module": "enum",
+      "stdlib_since": "3.4",
+      "symptom": "AttributeError: module 'enum' has no attribute 'IntFlag' (or 'global_enum')",
+      "source": "https://pypi.org/project/enum34/"
+    },
+    {
+      "id": "typing-backport",
+      "kind": "backport",
+      "dist": "typing",
+      "module": "typing",
+      "stdlib_since": "3.5",
+      "symptom": "AttributeError: type object 'Callable' has no attribute '_abc_registry'",
+      "source": "https://pypi.org/project/typing/"
+    },
+    {
+      "id": "dataclasses-backport",
+      "kind": "backport",
+      "dist": "dataclasses",
+      "module": "dataclasses",
+      "stdlib_since": "3.7",
+      "symptom": "AttributeError: module 'typing' has no attribute '_ClassVar'",
+      "source": "https://pypi.org/project/dataclasses/"
+    },
+    {
+      "id": "futures-backport",
+      "kind": "backport",
+      "dist": "futures",
+      "module": "concurrent",
+      "stdlib_since": "3.2",
+      "symptom": "SyntaxError in concurrent/futures/_base.py",
+      "source": "https://pypi.org/project/futures/"
+    },
+    {
+      "id": "configparser-backport",
+      "kind": "backport",
+      "dist": "configparser",
+      "module": "configparser",
+      "stdlib_since": "3.2",
+      "severity": "info",
+      "symptom": "an obsolete copy of configparser may be imported instead of the standard library one",
+      "source": "https://pypi.org/project/configparser/"
+    },
+    {
+      "id": "pathlib-backport",
+      "kind": "backport",
+      "dist": "pathlib",
+      "module": "pathlib",
+      "stdlib_since": "3.4",
+      "symptom": "The 'pathlib' package is an obsolete backport of a standard library package and is incompatible with PyInstaller",
+      "source": "https://pypi.org/project/pathlib/"
+    },
+    {
+      "id": "asyncio-backport",
+      "kind": "backport",
+      "dist": "asyncio",
+      "module": "asyncio",
+      "stdlib_since": "3.4",
+      "symptom": "SyntaxError: invalid syntax (async is a keyword) from site-packages/asyncio",
+      "source": "https://pypi.org/project/asyncio/"
+    },
+    {
+      "id": "argparse-backport",
+      "kind": "backport",
+      "dist": "argparse",
+      "module": "argparse",
+      "stdlib_since": "3.2",
+      "severity": "info",
+      "symptom": "an obsolete copy of argparse may be imported instead of the standard library one",
+      "source": "https://pypi.org/project/argparse/"
+    },
+    {
+      "id": "sklearn-stub",
+      "kind": "deprecated",
+      "dist": "sklearn",
+      "module": "sklearn",
+      "keep": "scikit-learn",
+      "symptom": "The 'sklearn' PyPI package is deprecated, use 'scikit-learn' rather than 'sklearn' for pip commands.",
+      "source": "https://github.com/scikit-learn/sklearn-pypi-package"
+    },
+    {
+      "id": "docx-python2",
+      "kind": "deprecated",
+      "dist": "docx",
+      "module": "docx",
+      "keep": "python-docx",
+      "symptom": "ModuleNotFoundError: No module named 'exceptions'",
+      "source": "https://pypi.org/project/python-docx/"
+    },
+    {
+      "id": "pycrypto-dead",
+      "kind": "deprecated",
+      "dist": "pycrypto",
+      "module": "Crypto",
+      "keep": "pycryptodome",
+      "symptom": "pycrypto is unmaintained since 2013 and fails to build on current Python",
+      "source": "https://www.pycryptodome.org/src/installation"
+    }
+  ],
+  "module_removals": [
+    {
+      "id": "setuptools-pkg-resources",
+      "module": "pkg_resources",
+      "dependency": "setuptools",
+      "breaks_from": "82",
+      "constraint": "setuptools<81",
+      "migrate": "importlib.metadata and importlib.resources",
+      "symptom": "ModuleNotFoundError: No module named 'pkg_resources'",
+      "source": "https://setuptools.pypa.io/en/latest/pkg_resources.html"
+    }
+  ],
+  "stdlib_removals": [
+    {"module": "formatter", "removed_in": "3.10", "source": "https://docs.python.org/3.10/whatsnew/3.10.html#removed"},
+    {"module": "parser", "removed_in": "3.10", "migrate": "ast", "source": "https://docs.python.org/3.10/whatsnew/3.10.html#removed"},
+    {"module": "symbol", "removed_in": "3.10", "migrate": "ast", "source": "https://docs.python.org/3.10/whatsnew/3.10.html#removed"},
+    {"module": "binhex", "removed_in": "3.11", "source": "https://docs.python.org/3.11/whatsnew/3.11.html#removed"},
+    {"module": "distutils", "removed_in": "3.12", "replacement": "setuptools", "migrate": "setuptools or packaging", "source": "https://peps.python.org/pep-0632/"},
+    {"module": "imp", "removed_in": "3.12", "replacement": "zombie-imp", "migrate": "importlib", "source": "https://docs.python.org/3.12/whatsnew/3.12.html#imp"},
+    {"module": "asynchat", "removed_in": "3.12", "replacement": "pyasynchat", "migrate": "asyncio", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "asyncore", "removed_in": "3.12", "replacement": "pyasyncore", "migrate": "asyncio", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "smtpd", "removed_in": "3.12", "replacement": "standard-smtpd", "migrate": "aiosmtpd", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "aifc", "removed_in": "3.13", "replacement": "standard-aifc", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "audioop", "removed_in": "3.13", "replacement": "audioop-lts", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "cgi", "removed_in": "3.13", "replacement": "standard-cgi", "migrate": "email.message or urllib.parse", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "cgitb", "removed_in": "3.13", "replacement": "standard-cgitb", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "chunk", "removed_in": "3.13", "replacement": "standard-chunk", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "crypt", "removed_in": "3.13", "replacement": "standard-crypt", "migrate": "hashlib or passlib", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "imghdr", "removed_in": "3.13", "replacement": "standard-imghdr", "migrate": "filetype or pillow", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "mailcap", "removed_in": "3.13", "replacement": "standard-mailcap", "migrate": "mimetypes", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "msilib", "removed_in": "3.13", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "nis", "removed_in": "3.13", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "nntplib", "removed_in": "3.13", "replacement": "standard-nntplib", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "ossaudiodev", "removed_in": "3.13", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "pipes", "removed_in": "3.13", "replacement": "standard-pipes", "migrate": "subprocess and shlex", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "sndhdr", "removed_in": "3.13", "replacement": "standard-sndhdr", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "spwd", "removed_in": "3.13", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "sunau", "removed_in": "3.13", "replacement": "standard-sunau", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "telnetlib", "removed_in": "3.13", "replacement": "standard-telnetlib", "migrate": "telnetlib3", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "uu", "removed_in": "3.13", "replacement": "standard-uu", "migrate": "base64", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "xdrlib", "removed_in": "3.13", "replacement": "standard-xdrlib", "source": "https://peps.python.org/pep-0594/"},
+    {"module": "lib2to3", "removed_in": "3.13", "migrate": "ast or a maintained fork such as fissix", "source": "https://docs.python.org/3.13/whatsnew/3.13.html#lib2to3"}
+  ]
+}
