@@ -397,6 +397,10 @@ pub async fn recreate_with_python(
             }
 
             // create_venv passes --clear, so an existing environment is replaced.
+            if let Some(why) = crate::core::setup::venv_in_use(&venv_path) {
+                push(&mut summary, "uv venv", false, &why);
+                return Ok(summary);
+            }
             match uv::create_venv(&uv_info, version, &venv_path, workspace).await {
                 Ok(out) if out.success() => push(
                     &mut summary,
@@ -404,8 +408,18 @@ pub async fn recreate_with_python(
                     true,
                     &venv_path.display().to_string(),
                 ),
-                Ok(out) => push(&mut summary, "uv venv", false, out.stderr.trim()),
-                Err(e) => push(&mut summary, "uv venv", false, &e.to_string()),
+                Ok(out) => push(
+                    &mut summary,
+                    "uv venv",
+                    false,
+                    &crate::core::setup::explain_locked_venv(out.stderr.trim()),
+                ),
+                Err(e) => push(
+                    &mut summary,
+                    "uv venv",
+                    false,
+                    &crate::core::setup::explain_locked_venv(&e.to_string()),
+                ),
             }
             if !summary.ok {
                 return Ok(summary);
@@ -486,6 +500,10 @@ pub async fn recreate_with_python(
                 return Ok(summary);
             }
 
+            if let Some(why) = crate::core::setup::venv_in_use(&venv_path) {
+                push(&mut summary, "uv venv", false, &why);
+                return Ok(summary);
+            }
             match uv::create_venv(&uv_info, version, &venv_path, workspace).await {
                 Ok(out) if out.success() => push(
                     &mut summary,
@@ -493,8 +511,18 @@ pub async fn recreate_with_python(
                     true,
                     &venv_path.display().to_string(),
                 ),
-                Ok(out) => push(&mut summary, "uv venv", false, out.stderr.trim()),
-                Err(e) => push(&mut summary, "uv venv", false, &e.to_string()),
+                Ok(out) => push(
+                    &mut summary,
+                    "uv venv",
+                    false,
+                    &crate::core::setup::explain_locked_venv(out.stderr.trim()),
+                ),
+                Err(e) => push(
+                    &mut summary,
+                    "uv venv",
+                    false,
+                    &crate::core::setup::explain_locked_venv(&e.to_string()),
+                ),
             }
             if !summary.ok {
                 return Ok(summary);

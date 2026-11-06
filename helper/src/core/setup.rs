@@ -448,6 +448,109 @@ fn broken_venv<'a>(
         .filter(|v| v.path == venv_path && v.broken.is_some())
 }
 
+/// Is the probed venv at `venv_path` one setup can keep as it is? It must be
+/// a venv (its `pyvenv.cfg` is there), its interpreter must still exist, it
+/// must already run `py`, and it must not leak the base Python's packages.
+/// Rebuilding such a venv changes nothing, and on Windows it fails outright
+/// while anything runs the venv's Python (an editor's language server, a
+/// notebook kernel): those files cannot be deleted.
+fn reusable_venv(assessment: &crate::core::Assessment, venv_path: &Path, py: PyVersion) -> bool {
+    assessment.probes.venv.as_ref().is_some_and(|v| {
+        v.path == venv_path
+            && !v.kind.is_pixi()
+            && v.broken.is_none()
+            && v.python == Some(py)
+            && exec::exists(&venv_path.join("pyvenv.cfg"))
+            && !crate::core::health::system_site_packages(venv_path)
+    })
+}
+
+/// Make the venv at `venv_path` run `py`: keep it when it already does
+/// ([`reusable_venv`]), otherwise `uv venv --clear`. Records the step.
+async fn create_or_keep_venv(
+    uv_info: &uv::UvInfo,
+    assessment: &crate::core::Assessment,
+    py: PyVersion,
+    venv_path: &Path,
+    workspace: &Path,
+    summary: &mut SetupSummary,
+) {
+    if reusable_venv(assessment, venv_path, py) {
+        step_ok(
+            summary,
+            "uv venv",
+            &format!("kept {}: it already runs Python {py}", venv_path.display()),
+        );
+        return;
+    }
+    if let Some(why) = venv_in_use(venv_path) {
+        fail(summary, "uv venv", &why);
+        return;
+    }
+    match uv::create_venv(uv_info, py, venv_path, workspace).await {
+        Ok(out) if out.success() => step_ok(summary, "uv venv", &venv_path.display().to_string()),
+        Ok(out) => fail(summary, "uv venv", &explain_locked_venv(out.stderr.trim())),
+        Err(e) => fail(summary, "uv venv", &explain_locked_venv(&e.to_string())),
+    }
+}
+
+/// What to do when Windows refuses to replace a venv a program is using.
+const LOCKED_VENV_HINT: &str = "Close what runs it (a language server, a notebook kernel, or a terminal where it is active; in Zed, `editor: restart language server`) and try again.";
+
+/// Before a venv is replaced: is a program running from it? `uv venv --clear`
+/// deletes `Lib` (every installed package) before it reaches the locked
+/// `Scripts`, so finding out afterwards leaves a broken environment. Every
+/// Python started from a venv on Windows runs `Scripts\python.exe`, and
+/// Windows refuses to open a running executable for writing, so each `.exe`
+/// in `Scripts` is opened for writing (nothing is written; renaming would not
+/// do, as Windows lets a running program's directory be renamed). `Some(reason)`
+/// when one is running; always `None` elsewhere, in a dry run, and when there
+/// is no `Scripts` yet.
+pub fn venv_in_use(venv: &Path) -> Option<String> {
+    if !cfg!(windows) || exec::is_dry_run() {
+        return None;
+    }
+    let entries = std::fs::read_dir(venv.join("Scripts")).ok()?;
+    let busy = entries.flatten().map(|e| e.path()).find(|path| {
+        path.extension()
+            .is_some_and(|x| x.eq_ignore_ascii_case("exe"))
+            && std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .is_err_and(|e| is_lock_error(&e.to_string()))
+    })?;
+    let name = busy.file_name().map(|n| n.to_string_lossy().into_owned());
+    let dir = venv.file_name().map(|n| n.to_string_lossy().into_owned());
+    Some(format!(
+        "{} in {} is running, so PyPilot left the environment as it is: Windows cannot replace files a running program has open. {LOCKED_VENV_HINT}",
+        name.unwrap_or_default(),
+        dir.unwrap_or_else(|| venv.display().to_string())
+    ))
+}
+
+fn is_lock_error(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("os error 5")
+        || lower.contains("access is denied")
+        || lower.contains("os error 32")
+        || lower.contains("being used by another process")
+}
+
+/// Add the likely cause to an error from deleting or replacing a venv when
+/// Windows refused because a running program holds one of its files. The
+/// advice comes first: the CLI shortens long step details.
+pub fn explain_locked_venv(error: &str) -> String {
+    if !is_lock_error(error) {
+        return error.to_string();
+    }
+    let cause = error
+        .lines()
+        .map(str::trim)
+        .rfind(|l| !l.is_empty())
+        .unwrap_or(error);
+    format!("A program is running this environment's Python, and Windows cannot replace files a running program has open. {LOCKED_VENV_HINT} ({cause})")
+}
+
 /// The Python version a venv was created with, from its `pyvenv.cfg`.
 fn venv_python(venv: &Path) -> Option<PyVersion> {
     let text = std::fs::read_to_string(venv.join("pyvenv.cfg")).ok()?;
@@ -537,13 +640,7 @@ async fn run_uv_full(
             return;
         }
 
-        match uv::create_venv(&uv_info, py, venv_path, workspace).await {
-            Ok(out) if out.success() => {
-                step_ok(summary, "uv venv", &venv_path.display().to_string())
-            }
-            Ok(out) => fail(summary, "uv venv", out.stderr.trim()),
-            Err(e) => fail(summary, "uv venv", &e.to_string()),
-        }
+        create_or_keep_venv(&uv_info, assessment, py, venv_path, workspace, summary).await;
         if summary.failed() {
             return;
         }
@@ -704,13 +801,7 @@ async fn run_uv_pip_compat(
             return;
         }
 
-        match uv::create_venv(&uv_info, py, venv_path, workspace).await {
-            Ok(out) if out.success() => {
-                step_ok(summary, "uv venv", &venv_path.display().to_string())
-            }
-            Ok(out) => fail(summary, "uv venv", out.stderr.trim()),
-            Err(e) => fail(summary, "uv venv", &e.to_string()),
-        }
+        create_or_keep_venv(&uv_info, assessment, py, venv_path, workspace, summary).await;
         if summary.failed() {
             return;
         }
@@ -1277,5 +1368,114 @@ mod tests {
         assert!(broken_venv(&a, &path).is_none());
 
         assert!(broken_venv(&assessment(None), &path).is_none());
+    }
+
+    #[test]
+    fn setup_keeps_a_venv_already_on_the_chosen_python() {
+        // The Windows report: `.venv` already ran 3.14, setup chose 3.14, and
+        // `uv venv --clear` failed on `.venv\Scripts` (Access is denied)
+        // because Zed was running the venv's Python.
+        let root = std::env::temp_dir().join(format!("pypilot-keep-venv-{}", std::process::id()));
+        let dir = root.join(".venv");
+        std::fs::create_dir_all(&dir).unwrap();
+        let cfg = |extra: &str| {
+            std::fs::write(
+                dir.join("pyvenv.cfg"),
+                format!("home = /usr/bin\nversion_info = 3.14.8\n{extra}"),
+            )
+            .unwrap()
+        };
+        cfg("include-system-site-packages = false\n");
+        let venv = |python: PyVersion, broken: Option<&str>| VenvInfo {
+            path: dir.clone(),
+            python: Some(python),
+            broken: broken.map(PathBuf::from),
+            kind: Default::default(),
+        };
+        let py = PyVersion::py3(14);
+
+        assert!(reusable_venv(&assessment(Some(venv(py, None))), &dir, py));
+        // Another Python, or one whose interpreter is gone: rebuild.
+        assert!(!reusable_venv(
+            &assessment(Some(venv(PyVersion::py3(12), None))),
+            &dir,
+            py
+        ));
+        assert!(!reusable_venv(
+            &assessment(Some(venv(py, Some("/gone/python")))),
+            &dir,
+            py
+        ));
+        // A venv elsewhere, or none at all.
+        assert!(!reusable_venv(
+            &assessment(Some(venv(py, None))),
+            &root.join("env"),
+            py
+        ));
+        assert!(!reusable_venv(&assessment(None), &dir, py));
+        // Leaking the base Python's packages is a reason to rebuild.
+        cfg("include-system-site-packages = true\n");
+        assert!(!reusable_venv(&assessment(Some(venv(py, None))), &dir, py));
+        // No pyvenv.cfg: not a venv any more.
+        std::fs::remove_file(dir.join("pyvenv.cfg")).unwrap();
+        assert!(!reusable_venv(&assessment(Some(venv(py, None))), &dir, py));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A program running from `Scripts` is seen before anything is deleted,
+    /// and the check leaves the venv exactly as it was.
+    #[cfg(windows)]
+    #[test]
+    fn a_venv_with_a_running_program_is_left_alone() {
+        let root = std::env::temp_dir().join(format!("pypilot-in-use-{}", std::process::id()));
+        let scripts = root.join(".venv").join("Scripts");
+        std::fs::create_dir_all(&scripts).unwrap();
+        let exe = scripts.join("ping.exe");
+        let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        std::fs::copy(PathBuf::from(system).join(r"System32\PING.EXE"), &exe).unwrap();
+        let venv = root.join(".venv");
+
+        assert_eq!(venv_in_use(&venv), None, "nothing is running yet");
+        assert!(
+            scripts.join("ping.exe").is_file(),
+            "the check put Scripts back"
+        );
+
+        let mut child = std::process::Command::new(&exe)
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let why = venv_in_use(&venv).expect("a running ping.exe holds Scripts");
+        assert!(
+            why.starts_with(
+                "ping.exe in .venv is running, so PyPilot left the environment as it is"
+            ),
+            "{why}"
+        );
+        assert!(exe.is_file(), "the check changed nothing");
+        child.kill().ok();
+        child.wait().ok();
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_locked_venv_error_says_what_holds_it() {
+        let uv = "error: Failed to create virtual environment\n  Caused by: failed to remove directory `\\\\?\\C:\\p\\.venv\\Scripts`: Access is denied. (os error 5)";
+        let why = explain_locked_venv(uv);
+        // The advice first (the CLI shortens long details), then uv's cause.
+        assert!(
+            why.starts_with("A program is running this environment's Python"),
+            "{why}"
+        );
+        assert!(why.ends_with("Access is denied. (os error 5))"), "{why}");
+        assert!(explain_locked_venv("The process cannot access the file because it is being used by another process. (os error 32)")
+            .contains("restart language server"));
+        // Anything else is passed through unchanged.
+        assert_eq!(
+            explain_locked_venv("No interpreter found"),
+            "No interpreter found"
+        );
     }
 }

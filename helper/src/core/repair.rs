@@ -754,6 +754,9 @@ async fn rebuild_env(
                 Ok(out) => return step(summary, &name, false, out.stderr.trim()),
                 Err(e) => return step(summary, &name, false, &e.to_string()),
             }
+            if let Some(why) = crate::core::setup::venv_in_use(&env.dir) {
+                return step(summary, "uv venv", false, &why);
+            }
             match uv::create_venv(uv_info, py, &env.dir, workspace).await {
                 Ok(out) if out.success() => step(
                     summary,
@@ -761,8 +764,14 @@ async fn rebuild_env(
                     true,
                     &format!("{} on Python {py} ({})", env.dir.display(), rebuild.reason),
                 ),
-                Ok(out) => return step(summary, "uv venv", false, out.stderr.trim()),
-                Err(e) => return step(summary, "uv venv", false, &e.to_string()),
+                Ok(out) => {
+                    let why = crate::core::setup::explain_locked_venv(out.stderr.trim());
+                    return step(summary, "uv venv", false, &why);
+                }
+                Err(e) => {
+                    let why = crate::core::setup::explain_locked_venv(&e.to_string());
+                    return step(summary, "uv venv", false, &why);
+                }
             }
             // Keep the next plain `uv sync` on this Python (A s4, E s04):
             // see `pin_change`.
