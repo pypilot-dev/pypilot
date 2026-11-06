@@ -134,8 +134,9 @@ name, and some have no PyPI equivalent at all.
 ## Commands (via Zed tasks, `task: spawn`)
 
 Zed doesn't let extensions add command palette entries, so every action
-ships as a task. Copy `tasks/pypilot.json` into `.zed/tasks.json` or your
-global Zed `tasks.json` first.
+ships as a task. Copy `tasks/windows.json` or `tasks/macos-linux.json` into
+`.zed/tasks.json` or your global Zed `tasks.json` first. The tasks run the
+`pypilot` on `PATH`, or else the copy the Zed extension downloaded.
 
 | Task | Does |
 |---|---|

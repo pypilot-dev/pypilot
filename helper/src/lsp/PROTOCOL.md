@@ -225,7 +225,7 @@ An explicit rescan with nothing wrong shows an Info `showMessage`
 
 ## CLI rescan requests (Zed tasks)
 
-Zed extensions cannot add palette commands, so `tasks/pypilot.json` runs
+Zed extensions cannot add palette commands, so the task templates in `tasks/` run
 `pypilot setup` / `pypilot doctor` in a terminal. Those (and `pypilot fix`,
 `install`, `migrate-conda`, `migrate-to-pixi`) write a request file:
 

@@ -17,7 +17,7 @@ The shim uses a `pypilot` on your `PATH` when its version is new enough; otherwi
 
 ## Commands as tasks
 
-Zed extensions cannot add command-palette entries, so PyPilot's commands ship as tasks. Copy [`tasks/pypilot.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/pypilot.json) into your project's `.zed/tasks.json`, or into your global tasks file (`~/.config/zed/tasks.json`; on Windows `%APPDATA%\Zed\tasks.json`). Run them with `task: spawn`. <Badge type="tip" text="1.4" /> The fix environment task runs `pypilot doctor --fix`, which applies only the fixes doctor found (see [What doctor --fix fixes](/guide/fixing)); the set up task runs the full `pypilot setup`.
+Zed extensions cannot add command-palette entries, so PyPilot's commands ship as tasks. Copy [`tasks/windows.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/windows.json) on Windows or [`tasks/macos-linux.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/macos-linux.json) on macOS and Linux into your project's `.zed/tasks.json`, or into your global tasks file (`~/.config/zed/tasks.json`; on Windows `%APPDATA%\Zed\tasks.json`). Run them with `task: spawn`. Each task runs the `pypilot` on your `PATH` if there is one, and otherwise the copy the extension downloaded for its language server, so the tasks work on a fresh machine without installing the CLI. Open a Python file once first, so the extension has downloaded it. <Badge type="tip" text="1.4" /> The fix environment task runs `pypilot doctor --fix`, which applies only the fixes doctor found (see [What doctor --fix fixes](/guide/fixing)); the set up task runs the full `pypilot setup`.
 
 | Task | Runs |
 |---|---|
@@ -27,6 +27,7 @@ Zed extensions cannot add command-palette entries, so PyPilot's commands ship as
 | `pypilot: explain python range (what blocks each version)` <Badge type="tip" text="1.3" /> | `pypilot explain` |
 | `pypilot: fix python version` | `pypilot fix python` |
 | `pypilot: fix cuda (re-pin torch/tensorflow to the driver)` | `pypilot fix cuda` |
+| `pypilot: fix requirements (apply doctor's requirement edits)` <Badge type="tip" text="1.4" /> | `pypilot fix requirements` |
 | `pypilot: update data (refresh bundled tables)` | `pypilot update-data` |
 | `pypilot: migrate conda to pyproject.toml` | `pypilot migrate-conda` |
 | `pypilot: preview migration to pixi (pixi.toml)` <Badge type="tip" text="1.3" /> | `pypilot migrate-to-pixi` |

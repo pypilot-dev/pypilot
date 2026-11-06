@@ -170,7 +170,7 @@ pypilot/
 
 ## Commands
 
-Zed extensions execute external actions through tasks. To use PyPilot commands inside Zed, copy `tasks/pypilot.json` into `.zed/tasks.json` within your workspace or into your global Zed tasks configuration. You can then trigger them using `task: spawn`.
+Zed extensions execute external actions through tasks. To use PyPilot commands inside Zed, copy `tasks/windows.json` (Windows) or `tasks/macos-linux.json` (macOS, Linux) into `.zed/tasks.json` within your workspace or into your global Zed tasks configuration, then run them with `task: spawn`. The tasks use a `pypilot` on your `PATH` when there is one, and otherwise the copy the extension downloaded, so they work without installing anything else.
 
 The helper binary also runs directly in any shell:
 

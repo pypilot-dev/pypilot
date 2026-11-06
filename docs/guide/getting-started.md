@@ -8,7 +8,7 @@ Pick the place you work. Every option runs the same engine, so you can mix them:
 2. Open a Python folder. The extension downloads the engine for your platform and starts it as a language server.
 3. If something needs attention you get one notification with **Fix environment**, **Show details**, **Ignore** and **Never for this project**.
 
-Zed extensions cannot add command-palette entries, so the commands ship as tasks: copy [`tasks/pypilot.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/pypilot.json) into `.zed/tasks.json` (or your global tasks) and run them with `task: spawn`. More in [Zed](/zed/).
+Zed extensions cannot add command-palette entries, so the commands ship as tasks: copy [`tasks/windows.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/windows.json) or [`tasks/macos-linux.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/macos-linux.json) into `.zed/tasks.json` (or your global tasks) and run them with `task: spawn`. More in [Zed](/zed/).
 
 ## VS Code
 
