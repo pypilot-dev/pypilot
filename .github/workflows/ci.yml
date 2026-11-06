@@ -76,6 +76,12 @@ jobs:
         run: |
           uv run --no-project --python 3.8 python scripts/bump_engine_pins.py --self-test
           uv run --no-project --python 3.15 python scripts/bump_engine_pins.py --self-test
+      - name: Zed task templates
+        # The committed templates match the generator, and the sh lookup finds
+        # the extension's copy with pypilot off PATH (ubuntu has pwsh too).
+        run: |
+          uv run --no-project --python 3.12 python scripts/gen_zed_tasks.py --check
+          uv run --no-project --python 3.12 python scripts/gen_zed_tasks.py --self-test
       - name: Self-test check_data.py
         # Offline: the conda-forge platform rule and the schema comparison.
         run: |
