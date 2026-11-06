@@ -3,6 +3,19 @@
 All notable changes to PyPilot's engine and Zed extension. Releases and their
 full notes are on the [Releases page](https://github.com/pypilot-dev/pypilot/releases).
 
+## [Unreleased]
+
+- `pypilot setup` keeps a venv that already runs the Python it chose, and only syncs
+  its packages. Before, it always rebuilt the venv, which on Windows failed with
+  "Access is denied (os error 5)" whenever the editor was running the venv's Python.
+- Before replacing a venv on Windows, PyPilot checks whether a program is running from
+  it. If one is, it leaves the venv as it is and says what to close. Before,
+  `uv venv --clear` deleted every installed package and then failed on the locked
+  `Scripts` folder, leaving a broken environment.
+- The Zed task templates are now `tasks/windows.json` and `tasks/macos-linux.json`,
+  and they use the copy of `pypilot` the Zed extension downloaded when none is on
+  `PATH`.
+
 ## [1.4.0]
 
 `doctor --fix` now fixes what is actually wrong, instead of rebuilding the environment
