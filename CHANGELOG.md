@@ -3,7 +3,7 @@
 All notable changes to PyPilot's engine and Zed extension. Releases and their
 full notes are on the [Releases page](https://github.com/pypilot-dev/pypilot/releases).
 
-## [Unreleased]
+## [1.4.1]
 
 - `pypilot setup` keeps a venv that already runs the Python it chose, and only syncs
   its packages. Before, it always rebuilt the venv, which on Windows failed with
