@@ -183,7 +183,7 @@ To run one, open the command palette again, choose `task: spawn` (or press `alt-
 
 <img src="assets/zed-task-spawn.png" width="622" alt="The command palette with task: spawn selected" />
 
-<img src="assets/zed-task-pick.png" width="543" alt="The task picker with the pypilot tasks highlighted" />
+<img src="assets/zed-task-pick.png" width="548" alt="The task picker with the pypilot tasks highlighted" />
 
 If you already have tasks, paste only PyPilot's entries into your existing list. For a single project, use `zed: open project tasks` (`.zed/tasks.json`) instead. The tasks use a `pypilot` on your `PATH` when there is one, and otherwise the copy the extension downloaded, so they work without installing anything else.
 
