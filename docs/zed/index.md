@@ -34,7 +34,7 @@ That's it. To run a task:
 
 2. Pick any of the `pypilot:` entries and press Enter. It runs in Zed's terminal.
 
-   ![The task picker with the pypilot tasks highlighted](/zed-task-pick.png)
+   ![The task picker with the pypilot tasks highlighted](/zed-task-list.png)
 
 If you already have tasks of your own, keep them and paste only the entries between PyPilot's `[` and `]` into your list. To add the tasks to one project only, use `zed: open project tasks` instead, which opens `.zed/tasks.json`.
 
