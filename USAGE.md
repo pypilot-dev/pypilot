@@ -138,7 +138,8 @@ ships as a task. To add them, run `zed: open tasks` from the command
 palette, delete (or comment out) the default content Zed put in that file,
 paste `tasks/windows.json` (Windows) or `tasks/macos-linux.json` (macOS,
 Linux) and save. See [the Zed docs page](https://pypilot-dev.github.io/pypilot/zed/#commands-as-tasks)
-for a screenshot. The tasks run the `pypilot` on `PATH`, or else the copy the
+for screenshots. To run one, choose `task: spawn` in the command palette
+(`alt-shift-t`) and pick a `pypilot:` entry. The tasks run the `pypilot` on `PATH`, or else the copy the
 Zed extension downloaded.
 
 | Task | Does |

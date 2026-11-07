@@ -26,7 +26,17 @@ Zed extensions cannot add command-palette entries, so PyPilot's commands ship as
 2. A new file holds Zed's default comments and an example task. Delete all of it (`ctrl-a`, then Delete), or comment it out.
 3. Paste the template for your OS: [`tasks/windows.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/windows.json) on Windows, [`tasks/macos-linux.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/macos-linux.json) on macOS and Linux. Open the link, click **Raw**, copy everything and save the file.
 
-That's it. Run a task with `task: spawn` (`alt-shift-t`) and pick one of the `pypilot:` entries. If you already have tasks of your own, keep them and paste only the entries between PyPilot's `[` and `]` into your list. To add the tasks to one project only, use `zed: open project tasks` instead, which opens `.zed/tasks.json`.
+That's it. To run a task:
+
+1. Open the command palette again and choose `task: spawn` (or press `alt-shift-t`).
+
+   ![The command palette with "task: spawn" selected](/zed-task-spawn.png)
+
+2. Pick any of the `pypilot:` entries and press Enter. It runs in Zed's terminal.
+
+   ![The task picker with the pypilot tasks highlighted](/zed-task-pick.png)
+
+If you already have tasks of your own, keep them and paste only the entries between PyPilot's `[` and `]` into your list. To add the tasks to one project only, use `zed: open project tasks` instead, which opens `.zed/tasks.json`.
 
 Each task runs the `pypilot` on your `PATH` if there is one, and otherwise the copy the extension downloaded for its language server, so the tasks work on a fresh machine without installing the CLI. Open a Python file once first, so the extension has downloaded it. <Badge type="tip" text="1.4" /> The fix environment task runs `pypilot doctor --fix`, which applies only the fixes doctor found (see [What doctor --fix fixes](/guide/fixing)); the set up task runs the full `pypilot setup`.
 

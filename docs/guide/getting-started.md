@@ -12,7 +12,11 @@ Zed extensions cannot add command-palette entries, so the commands ship as tasks
 
 ![The command palette with "zed: open tasks" selected](/zed-open-tasks.png)
 
-Delete (or comment out) the default content Zed put in that file, paste [`tasks/windows.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/windows.json) on Windows or [`tasks/macos-linux.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/macos-linux.json) on macOS and Linux, and save. Run the tasks with `task: spawn`. More in [Zed](/zed/#commands-as-tasks).
+Delete (or comment out) the default content Zed put in that file, paste [`tasks/windows.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/windows.json) on Windows or [`tasks/macos-linux.json`](https://github.com/pypilot-dev/pypilot/blob/main/tasks/macos-linux.json) on macOS and Linux, and save. To run one, choose `task: spawn` in the command palette (or press `alt-shift-t`) and pick any `pypilot:` entry:
+
+![The task picker with the pypilot tasks highlighted](/zed-task-pick.png)
+
+More in [Zed](/zed/#commands-as-tasks).
 
 ## VS Code
 

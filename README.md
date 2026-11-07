@@ -179,7 +179,13 @@ Zed extensions execute external actions through tasks. To add PyPilot's commands
 2. The file that opens holds Zed's default comments and an example task. Delete all of it, or comment it out.
 3. Paste [`tasks/windows.json`](tasks/windows.json) on Windows or [`tasks/macos-linux.json`](tasks/macos-linux.json) on macOS and Linux, and save.
 
-Run them with `task: spawn`. If you already have tasks, paste only PyPilot's entries into your existing list. For a single project, use `zed: open project tasks` (`.zed/tasks.json`) instead. The tasks use a `pypilot` on your `PATH` when there is one, and otherwise the copy the extension downloaded, so they work without installing anything else.
+To run one, open the command palette again, choose `task: spawn` (or press `alt-shift-t`), then pick any `pypilot:` entry:
+
+<img src="assets/zed-task-spawn.png" width="622" alt="The command palette with task: spawn selected" />
+
+<img src="assets/zed-task-pick.png" width="543" alt="The task picker with the pypilot tasks highlighted" />
+
+If you already have tasks, paste only PyPilot's entries into your existing list. For a single project, use `zed: open project tasks` (`.zed/tasks.json`) instead. The tasks use a `pypilot` on your `PATH` when there is one, and otherwise the copy the extension downloaded, so they work without installing anything else.
 
 The helper binary also runs directly in any shell:
 
