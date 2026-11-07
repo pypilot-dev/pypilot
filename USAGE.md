@@ -134,14 +134,20 @@ name, and some have no PyPI equivalent at all.
 ## Commands (via Zed tasks, `task: spawn`)
 
 Zed doesn't let extensions add command palette entries, so every action
-ships as a task. Copy `tasks/windows.json` or `tasks/macos-linux.json` into
-`.zed/tasks.json` or your global Zed `tasks.json` first. The tasks run the
-`pypilot` on `PATH`, or else the copy the Zed extension downloaded.
+ships as a task. To add them, run `zed: open tasks` from the command
+palette, delete (or comment out) the default content Zed put in that file,
+paste `tasks/windows.json` (Windows) or `tasks/macos-linux.json` (macOS,
+Linux) and save. See [the Zed docs page](https://pypilot-dev.github.io/pypilot/zed/#commands-as-tasks)
+for a screenshot. The tasks run the `pypilot` on `PATH`, or else the copy the
+Zed extension downloaded.
 
 | Task | Does |
 |---|---|
-| `pypilot: fix environment (set up environment)` | Build/rebuild the environment on the recommended Python |
+| `pypilot: fix environment (only what doctor found)` | `pypilot doctor --fix`: applies only the fixes the findings call for |
+| `pypilot: set up environment (full bootstrap)` | Build/rebuild the environment on the recommended Python |
 | `pypilot: show details (doctor report)` | Read-only report, changes nothing |
+| `pypilot: explain python range (what blocks each version)` | Shows which packages block each Python version |
+| `pypilot: fix requirements (apply doctor's requirement edits)` | Applies the requirement edits doctor suggested |
 | `pypilot: fix python version` | Rebuild the environment on the right version specifically |
 | `pypilot: fix cuda (re-pin torch/tensorflow to the driver)` | Reinstall those two packages against the matched CUDA build |
 | `pypilot: update data (refresh bundled tables)` | Force-refresh driver/framework/import tables from this repo |
