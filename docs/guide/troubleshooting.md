@@ -88,6 +88,20 @@ Set `notifications = "off"` (VS Code: `pypilot.notifications`). Note that `off` 
 
 See the tip on the [Zed page](/zed/#commands-as-tasks).
 
+### Windows: Smart App Control blocks pypilot.exe {#smart-app-control}
+
+On Windows 11 with Smart App Control turned on, Windows can refuse to run `pypilot.exe`. You get a "Part of this app has been blocked" notification, the editor reports that the language server failed to start, or a terminal prints `An Application Control policy has blocked this file. (os error 4551)`.
+
+Smart App Control only runs a program that Microsoft's cloud service already knows, or one signed with a certificate Windows trusts. `pypilot.exe` is not code signed yet, and each release is a new file the service has not seen. There is no way to allow a single app: downloading it again, `Unblock-File` and starting it from another program do not help.
+
+To check, open **Windows Security**, then **App & browser control**, then **Smart App Control settings**. It blocks only when it is set to **On**.
+
+To run PyPilot, set it to **Off** on that page. Microsoft Defender Antivirus and SmartScreen keep running. On current Windows 11 builds you can turn Smart App Control back on from the same page later; older builds only allowed that after resetting Windows. If your organization manages the device, ask your IT team instead.
+
+Smart App Control also blocks the Python builds that uv downloads, because they are unsigned too. With it on, a uv-managed environment fails even when `pypilot.exe` itself is allowed.
+
+The Windows binary will be signed once a code signing program accepts the project. Until then, turning Smart App Control off is the only fix.
+
 ## FAQ
 
 **Does PyPilot send my code anywhere?** No. It queries PyPI for package metadata, GitHub for engine releases and data tables, and (for the pixi migration) prefix.dev's public name mapping. No telemetry, no AI service, no account.

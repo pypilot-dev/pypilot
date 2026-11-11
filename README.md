@@ -4,6 +4,14 @@
 
 # PyPilot for Zed
 
+<p align="center">
+  <a href="https://zed.dev/extensions?query=pypilot"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.zed.dev%2Fextensions%3Ffilter%3Dpypilot-language-server%26max_schema_version%3D1&query=%24.data%5B0%5D.download_count&label=zed%20downloads&color=084CCF" alt="Zed downloads" /></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=AbdullahMasood-005.pypilot-vscode"><img src="https://vsmarketplacebadges.dev/installs-short/AbdullahMasood-005.pypilot-vscode.svg?label=vs%20code%20installs&color=0078d4" alt="VS Code Marketplace installs" /></a>
+  <a href="https://open-vsx.org/extension/AbdullahMasood-005/pypilot-vscode"><img src="https://img.shields.io/open-vsx/dt/AbdullahMasood-005/pypilot-vscode?label=open%20vsx%20downloads&color=a60ee5" alt="Open VSX downloads" /></a>
+  <a href="https://pypi.org/project/pypilot-cli/"><img src="https://img.shields.io/pepy/dt/pypilot-cli?label=pypi%20downloads&color=blue" alt="PyPI downloads" /></a>
+  <a href="https://github.com/pypilot-dev/pypilot/releases"><img src="https://img.shields.io/github/downloads/pypilot-dev/pypilot/total?label=engine%20downloads&color=2ea44f" alt="Engine downloads from GitHub releases" /></a>
+</p>
+
 When you clone a Python repository and run an install, it often fails because a dependency lacks a prebuilt wheel for your interpreter. PyPilot calculates which Python versions the project's dependencies actually support, configures a virtual environment on that version, and identifies the specific package causing any constraint conflict.
 
 Every resolution relies on PyPI package metadata and local lookup tables. The tool runs locally without API keys or external services.
@@ -133,6 +141,10 @@ Next: pypilot migrate-to-pixi --write
 ## Installation
 
 Install PyPilot from Zed's extension panel. When you open a Python folder, the extension automatically inspects the environment and opens a notification if action is required.
+
+### Windows: Smart App Control
+
+On Windows 11 with Smart App Control on, Windows can block `pypilot.exe` ("Part of this app has been blocked", or `os error 4551` in a terminal). The binary is not code signed yet, and Smart App Control has no per-app exception, so the fix is to turn it off: **Windows Security > App & browser control > Smart App Control settings > Off**. Defender and SmartScreen keep running, and current Windows 11 builds let you turn it back on later from the same page. Details in [Troubleshooting](https://pypilot-dev.github.io/pypilot/guide/troubleshooting#smart-app-control).
 
 ### Local development build
 To test the extension locally:

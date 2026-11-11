@@ -24,6 +24,11 @@ pypilot check mediapipe==0.10.14
 
 The exit status is the engine's. `Ctrl+C` exits with 130.
 
+
+::: warning Windows 11: Smart App Control
+If Smart App Control is on, Windows can block `pypilot.exe` because it is not code signed yet. See [Smart App Control blocks pypilot.exe](/guide/troubleshooting#smart-app-control) for how to turn it off.
+:::
+
 ## Wheels with the engine inside <Badge type="tip" text="1.3" /> {#wheels}
 
 Since 1.3.0, `pypilot-cli` publishes platform wheels that carry the engine, so `pip install` is all it takes and nothing is downloaded at run time (it also works where GitHub is blocked). pip picks the right one:

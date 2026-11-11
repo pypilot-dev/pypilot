@@ -8,6 +8,10 @@ Open the extensions panel (`zed: extensions`), search for **PyPilot**, install. 
 
 The shim uses a `pypilot` on your `PATH` when its version is new enough; otherwise it downloads the newest release asset for your platform from `github.com/pypilot-dev/pypilot` and caches it per version. If GitHub cannot be reached it falls back to a copy it downloaded earlier. Its only declared capability is downloading from that repository's releases.
 
+::: warning Windows 11: Smart App Control
+If Smart App Control is on, Windows can block `pypilot.exe` because it is not code signed yet. See [Smart App Control blocks pypilot.exe](/guide/troubleshooting#smart-app-control) for how to turn it off.
+:::
+
 ## What you see
 
 - **One notification on open** when something needs attention, with **Fix environment**, **Show details**, **Ignore** and **Never for this project**. A correct environment stays silent. <Badge type="tip" text="1.3" /> When pixi would help, an **Initialize pixi project** button is added; the engine runs a dry run, shows one message with what `pixi.toml` would contain, and offers **Write and install**, **Write pixi.toml** or **Cancel**; nothing is written before you choose (see [From the editor](/pixi/migrate#from-the-editor)).
