@@ -18,6 +18,14 @@ Every resolution relies on PyPI package metadata and local lookup tables. The to
 
 Documentation: **<https://pypilot-dev.github.io/pypilot/>**, with the [guide](https://pypilot-dev.github.io/pypilot/guide/what-is-pypilot), the [engine CLI](https://pypilot-dev.github.io/pypilot/engine/), [VS Code](https://pypilot-dev.github.io/pypilot/vscode/), [Zed](https://pypilot-dev.github.io/pypilot/zed/), the [Python package](https://pypilot-dev.github.io/pypilot/python/), [pixi](https://pypilot-dev.github.io/pypilot/pixi/) and the [reference](https://pypilot-dev.github.io/pypilot/reference/configuration).
 
+> [!CAUTION]
+> **Windows and macOS may block the PyPilot engine, because it is not code signed yet.**
+> - **Windows 11 Smart App Control** blocks `pypilot.exe` ("Part of this app has been blocked", or `os error 4551`) and has no per-app exception. Turn it off in **Windows Security > App & browser control > Smart App Control settings > Off**. Defender keeps running, and current Windows 11 builds let you turn it back on later.
+> - **Microsoft Defender SmartScreen** can show "Windows protected your PC" for a `pypilot.exe` you downloaded yourself: click **More info**, then **Run anyway**. If Defender antivirus removes it, restore it from **Windows Security > Virus & threat protection > Protection history**.
+> - **macOS** can say Apple could not verify `pypilot` for a copy downloaded in a browser: click **Open Anyway** in **System Settings > Privacy & Security**, or run `xattr -d com.apple.quarantine /path/to/pypilot`.
+>
+> Details: [Smart App Control](https://pypilot-dev.github.io/pypilot/guide/troubleshooting#smart-app-control), [SmartScreen and Defender](https://pypilot-dev.github.io/pypilot/guide/troubleshooting#defender), [macOS](https://pypilot-dev.github.io/pypilot/guide/troubleshooting#macos-gatekeeper).
+
 > Features marked *(since 1.3.0)* need engine 1.3.0 or newer.
 
 ## The problem it solves
@@ -142,9 +150,6 @@ Next: pypilot migrate-to-pixi --write
 
 Install PyPilot from Zed's extension panel. When you open a Python folder, the extension automatically inspects the environment and opens a notification if action is required.
 
-### Windows: Smart App Control
-
-On Windows 11 with Smart App Control on, Windows can block `pypilot.exe` ("Part of this app has been blocked", or `os error 4551` in a terminal). The binary is not code signed yet, and Smart App Control has no per-app exception, so the fix is to turn it off: **Windows Security > App & browser control > Smart App Control settings > Off**. Defender and SmartScreen keep running, and current Windows 11 builds let you turn it back on later from the same page. Details in [Troubleshooting](https://pypilot-dev.github.io/pypilot/guide/troubleshooting#smart-app-control).
 
 ### Local development build
 To test the extension locally:

@@ -102,6 +102,19 @@ Smart App Control also blocks the Python builds that uv downloads, because they 
 
 The Windows binary will be signed once a code signing program accepts the project. Until then, turning Smart App Control off is the only fix.
 
+### Windows: SmartScreen or Defender warns about pypilot.exe {#defender}
+
+The editor extensions and `pypilot-cli` download the engine themselves, so SmartScreen does not check it. If you download `pypilot-windows-x64.zip` in a browser and run the `pypilot.exe` inside it, SmartScreen can show **Windows protected your PC** because the file is unsigned and new. Click **More info**, then **Run anyway**. You can compare the file with the release's `SHA256SUMS` first (see [Security & release integrity](/guide/security)).
+
+If Microsoft Defender antivirus reports and removes `pypilot.exe`, it is a false positive on an unsigned file. Open **Windows Security > Virus & threat protection > Protection history**, select the item and choose **Allow** or **Restore**. Please also [open an issue](https://github.com/pypilot-dev/pypilot/issues) with the detection name, and report it to Microsoft at <https://www.microsoft.com/wdsi/filesubmission>.
+
+### macOS: "Apple could not verify pypilot" {#macos-gatekeeper}
+
+The macOS engine is not notarized by Apple. Gatekeeper checks files that carry the quarantine flag, which browsers add to downloads; a copy downloaded in a browser can then fail with **"pypilot" Not Opened** or **Apple could not verify "pypilot" is free of malware**. Either:
+
+- open **System Settings > Privacy & Security**, scroll to Security and click **Open Anyway** next to the message about `pypilot`, then run it again; or
+- remove the flag in a terminal: `xattr -d com.apple.quarantine /path/to/pypilot`.
+
 ## FAQ
 
 **Does PyPilot send my code anywhere?** No. It queries PyPI for package metadata, GitHub for engine releases and data tables, and (for the pixi migration) prefix.dev's public name mapping. No telemetry, no AI service, no account.

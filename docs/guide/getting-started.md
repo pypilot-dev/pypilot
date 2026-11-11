@@ -2,6 +2,10 @@
 
 Pick the place you work. Every option runs the same engine, so you can mix them: the VS Code extension and the Zed extension both prefer a `pypilot` already on your `PATH`.
 
+::: danger Windows and macOS may block the engine
+The engine is not code signed yet. **Windows 11 Smart App Control** blocks `pypilot.exe` with no per-app exception: turn it off in Windows Security > App & browser control > Smart App Control settings. **Microsoft Defender SmartScreen** or **macOS Gatekeeper** can also warn about a copy you downloaded yourself. See [Smart App Control](/guide/troubleshooting#smart-app-control), [SmartScreen and Defender](/guide/troubleshooting#defender) and [macOS](/guide/troubleshooting#macos-gatekeeper).
+:::
+
 ## Zed
 
 1. Open the extensions panel (`zed: extensions`) and install **PyPilot**.

@@ -3,10 +3,10 @@
 The VS Code extension runs the same engine as Zed and the CLI, and adds VS Code surfaces: the command palette, a status bar item, progress notifications, a report panel, tasks, and automatic interpreter and kernel selection.
 
 - [Marketplace](https://marketplace.visualstudio.com/items?itemName=AbdullahMasood-005.pypilot-vscode) · [Open VSX](https://open-vsx.org/extension/AbdullahMasood-005/pypilot-vscode) · [Source](https://github.com/pypilot-dev/pypilot-vscode)
-- Requires VS Code 1.85 or later. Current release: **1.3.0**, which pins engine 1.3.0. Items marked <Badge type="tip" text="1.3" /> are new in 1.3.0.
+- Requires VS Code 1.85 or later. Current release: **1.4.1**, which pins engine 1.4.1. Items marked <Badge type="tip" text="1.3" /> are new in 1.3.0.
 
-::: warning Windows 11: Smart App Control
-If Smart App Control is on, Windows can block `pypilot.exe` because it is not code signed yet. See [Smart App Control blocks pypilot.exe](/guide/troubleshooting#smart-app-control) for how to turn it off.
+::: danger Windows and macOS may block the engine
+The engine is not code signed yet. **Windows 11 Smart App Control** blocks `pypilot.exe` with no per-app exception: turn it off in Windows Security > App & browser control > Smart App Control settings. **Microsoft Defender SmartScreen** or **macOS Gatekeeper** can also warn about a copy you downloaded yourself. See [Smart App Control](/guide/troubleshooting#smart-app-control), [SmartScreen and Defender](/guide/troubleshooting#defender) and [macOS](/guide/troubleshooting#macos-gatekeeper).
 :::
 
 ## What happens when you open a folder

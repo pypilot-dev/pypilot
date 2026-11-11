@@ -8,8 +8,8 @@ Open the extensions panel (`zed: extensions`), search for **PyPilot**, install. 
 
 The shim uses a `pypilot` on your `PATH` when its version is new enough; otherwise it downloads the newest release asset for your platform from `github.com/pypilot-dev/pypilot` and caches it per version. If GitHub cannot be reached it falls back to a copy it downloaded earlier. Its only declared capability is downloading from that repository's releases.
 
-::: warning Windows 11: Smart App Control
-If Smart App Control is on, Windows can block `pypilot.exe` because it is not code signed yet. See [Smart App Control blocks pypilot.exe](/guide/troubleshooting#smart-app-control) for how to turn it off.
+::: danger Windows and macOS may block the engine
+The engine is not code signed yet. **Windows 11 Smart App Control** blocks `pypilot.exe` with no per-app exception: turn it off in Windows Security > App & browser control > Smart App Control settings. **Microsoft Defender SmartScreen** or **macOS Gatekeeper** can also warn about a copy you downloaded yourself. See [Smart App Control](/guide/troubleshooting#smart-app-control), [SmartScreen and Defender](/guide/troubleshooting#defender) and [macOS](/guide/troubleshooting#macos-gatekeeper).
 :::
 
 ## What you see
