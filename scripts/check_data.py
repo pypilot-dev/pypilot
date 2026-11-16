@@ -131,8 +131,16 @@ def final_releases(pypi: Dict) -> List[str]:
     return sorted(out, key=vkey)
 
 
-def wheel_platforms(files: List[Dict]) -> List[str]:
-    """Map wheel platform tags to the table's `os-arch` keys."""
+# Every `os-arch` key wheel_platforms() can produce (the engine's platform_key).
+ALL_WHEEL_PLATFORMS = ["linux-x86_64", "linux-aarch64", "windows-x86_64",
+                       "windows-aarch64", "macos-x86_64", "macos-aarch64"]
+
+
+def wheel_platforms(files: List[Dict], requires_cuda: bool = False) -> List[str]:
+    """Map wheel platform tags to the table's `os-arch` keys. A pure `any`
+    wheel installs everywhere without compiling, so it counts as every key,
+    except macOS for a CUDA package: macOS has no CUDA, and the engine keeps
+    treating such a package as blocking there."""
     keys = set()
     for f in files:
         name = f.get("filename", "")
@@ -141,6 +149,8 @@ def wheel_platforms(files: List[Dict]) -> List[str]:
         plat = name[:-4].split("-")[-1]
         for tag in plat.split("."):
             if tag == "any":
+                keys.update(p for p in ALL_WHEEL_PLATFORMS
+                            if not (requires_cuda and p.startswith("macos")))
                 continue
             if tag.startswith(("manylinux", "musllinux", "linux")):
                 if tag.endswith("x86_64"):
@@ -385,7 +395,8 @@ def check_extensions(ext_table: Dict) -> List[Dict]:
         for r in rows:
             if vkey(r["version"]) <= vkey(latest):
                 row = r
-        platforms = wheel_platforms(data.get("releases", {}).get(latest, []))
+        platforms = wheel_platforms(data.get("releases", {}).get(latest, []),
+                                    bool(pkg.get("requires_cuda")))
         problems = []
         if row is None:
             problems.append("no row covers it")
@@ -969,6 +980,13 @@ def self_test() -> int:
     assert len(breakage_problems(ranged)) == 2, breakage_problems(ranged)
     assert "numpy" in breakage_names(bundled) and "2.2.2" in breakage_names(bundled)["pandas"]
     assert "pydantic-settings" in breakage_names(bundled)
+    whl = lambda n: {"filename": n, "yanked": False}
+    anywhl = [whl("p-1-py3-none-any.whl"), whl("p-1.tar.gz")]
+    assert wheel_platforms(anywhl) == sorted(ALL_WHEEL_PLATFORMS)
+    assert wheel_platforms(anywhl, requires_cuda=True) == [
+        p for p in sorted(ALL_WHEEL_PLATFORMS) if not p.startswith("macos")]
+    assert wheel_platforms([whl("p-1.tar.gz")]) == []
+    assert wheel_platforms([whl("p-1-py39-none-win_amd64.whl")]) == ["windows-x86_64"]
     print("self-test passed")
     return 0
 
